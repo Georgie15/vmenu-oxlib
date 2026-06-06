@@ -57,8 +57,6 @@ namespace vMenuClient.menus
         public float VehicleTorqueMultiplierAmount { get; private set; } = 2f;
         public float VehiclePowerMultiplierAmount { get; private set; } = 2f;
 
-        public bool VehicleCloseAllDoorsCooldown { get; private set; } = false;
-
         private readonly Dictionary<MenuItem, int> vehicleExtras = new();
         #endregion
 
@@ -1416,7 +1414,7 @@ namespace vMenuClient.menus
             };
 
             // Handle button presses.
-            VehicleDoorsMenu.OnItemSelect += async (sender, item, index) =>
+            VehicleDoorsMenu.OnItemSelect += (sender, item, index) =>
             {
                 // Get the vehicle.
                 var veh = GetVehicle();
@@ -1443,6 +1441,11 @@ namespace vMenuClient.menus
                     // If the index >= 8, and the button is "openAll": open all doors.
                     else if (item == openAll)
                     {
+                        if (!TryStartVehicleAllDoorsCooldown())
+                        {
+                            return;
+                        }
+
                         // Loop through all doors and open them.
                         for (var door = 0; door < 8; door++)
                         {
@@ -1456,21 +1459,17 @@ namespace vMenuClient.menus
                     // If the index >= 8, and the button is "closeAll": close all doors.
                     else if (item == closeAll)
                     {
-                        // Close all doors.
-                        if(VehicleCloseAllDoorsCooldown)
+                        if (!TryStartVehicleAllDoorsCooldown())
                         {
-                            Notify.Error("You must wait a few seconds before closing all doors again.");
                             return;
                         }
+
+                        // Close all doors.
                         SetVehicleDoorsShut(veh.Handle, false);
                         if (veh.HasBombBay)
                         {
                             veh.CloseBombBay();
                         }
-                        VehicleCloseAllDoorsCooldown = true;
-                        await Delay(2000);
-                        VehicleCloseAllDoorsCooldown = false;
-
                     }
                     // If bomb bay doors button is pressed and the vehicle has bomb bay doors.
                     else if (item == BB && veh.HasBombBay)

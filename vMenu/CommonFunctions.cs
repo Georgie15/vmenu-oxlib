@@ -62,9 +62,33 @@ namespace vMenuClient
             ? vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown)
             : 1000;
 
+        private static long _vehicleAllDoorsCooldownUntil;
+        private static bool _vehicleAllDoorsCooldownNotificationShown;
+
+        private const int VehicleAllDoorsCooldownMilliseconds = 2000;
+
         internal static bool DriveToWpTaskActive = false;
         internal static bool DriveWanderTaskActive = false;
         #endregion
+
+        public static bool TryStartVehicleAllDoorsCooldown()
+        {
+            var now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now < _vehicleAllDoorsCooldownUntil)
+            {
+                if (!_vehicleAllDoorsCooldownNotificationShown)
+                {
+                    Notify.Error("You must wait a few seconds before opening or closing all doors again.");
+                    _vehicleAllDoorsCooldownNotificationShown = true;
+                }
+
+                return false;
+            }
+
+            _vehicleAllDoorsCooldownUntil = now + (System.Diagnostics.Stopwatch.Frequency * VehicleAllDoorsCooldownMilliseconds / 1000);
+            _vehicleAllDoorsCooldownNotificationShown = false;
+            return true;
+        }
 
         #region some misc functions copied from base script
         /// <summary>

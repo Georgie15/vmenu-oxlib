@@ -41,7 +41,7 @@ _Say goodbye to huge spreadsheets with different numbers and say hello to simple
 - New Permissions
   - Bulletproof Tires `vMenu.VehicleOptions.BulletproofTires` (default: denied)
 - Fixed getting disarmed (weapon taken away) when locking/unlocking personal vehicles
-- Implemented cooldown between usage of close all doors to patch exploit to make cars float/fly
+- Implemented a shared cooldown between open all/close all door actions to patch the exploit that makes cars float/fly
 - Configurable cooldown when spawning vehicles to prevent players from spam spawning vehicles
   - `setr vmenu_vehicle_spawner_cooldown 1000`
 

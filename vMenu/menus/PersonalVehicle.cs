@@ -414,6 +414,11 @@ namespace vMenuClient.menus
                     }
                     else if (item == openAll)
                     {
+                        if (!TryStartVehicleAllDoorsCooldown())
+                        {
+                            return;
+                        }
+
                         PressKeyFob(veh);
                         for (var door = 0; door < 8; door++)
                         {
@@ -422,6 +427,11 @@ namespace vMenuClient.menus
                     }
                     else if (item == closeAll)
                     {
+                        if (!TryStartVehicleAllDoorsCooldown())
+                        {
+                            return;
+                        }
+
                         PressKeyFob(veh);
                         for (var door = 0; door < 8; door++)
                         {
