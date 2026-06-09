@@ -62,7 +62,8 @@ namespace vMenuClient
             ? vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown)
             : 1000;
 
-        private static long _vehicleAllDoorsCooldownUntil;
+        private static uint _vehicleAllDoorsCooldownStartedAt;
+        private static bool _vehicleAllDoorsCooldownStarted;
         private static bool _vehicleAllDoorsCooldownNotificationShown;
 
         private const int VehicleAllDoorsCooldownMilliseconds = 2000;
@@ -73,8 +74,9 @@ namespace vMenuClient
 
         public static bool TryStartVehicleAllDoorsCooldown()
         {
-            var now = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (now < _vehicleAllDoorsCooldownUntil)
+            var now = unchecked((uint)GetGameTimer());
+            var elapsed = unchecked(now - _vehicleAllDoorsCooldownStartedAt);
+            if (_vehicleAllDoorsCooldownStarted && elapsed < VehicleAllDoorsCooldownMilliseconds)
             {
                 if (!_vehicleAllDoorsCooldownNotificationShown)
                 {
@@ -85,7 +87,8 @@ namespace vMenuClient
                 return false;
             }
 
-            _vehicleAllDoorsCooldownUntil = now + (System.Diagnostics.Stopwatch.Frequency * VehicleAllDoorsCooldownMilliseconds / 1000);
+            _vehicleAllDoorsCooldownStartedAt = now;
+            _vehicleAllDoorsCooldownStarted = true;
             _vehicleAllDoorsCooldownNotificationShown = false;
             return true;
         }
