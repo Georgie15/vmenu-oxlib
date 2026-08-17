@@ -17,6 +17,8 @@ namespace vMenuClient.menus
 {
     public class VehicleOptions
     {
+        private const string EngineDestroyedStateBag = "vmenu_engine_destroyed";
+
         #region Variables
         // Menu variable, will be defined in CreateMenu()
         private Menu menu;
@@ -561,7 +563,15 @@ namespace vMenuClient.menus
                         // Destroy vehicle engine
                         else if (item == destroyEngine)
                         {
+                            if (HasDestroyedEngine(vehicle))
+                            {
+                                Notify.Error("This vehicle's engine has already been destroyed.");
+                                return;
+                            }
+
+                            vehicle.State.Set(EngineDestroyedStateBag, true, true);
                             SetVehicleEngineHealth(vehicle.Handle, -4000);
+                            destroyEngine.Enabled = false;
                         }
                     }
 
@@ -1844,6 +1854,9 @@ namespace vMenuClient.menus
             #region Handle menu-opening refreshing license plate
             menu.OnMenuOpen += (sender) =>
             {
+                var currentVehicle = GetVehicle(true);
+                destroyEngine.Enabled = currentVehicle == null || !currentVehicle.Exists() || !HasDestroyedEngine(currentVehicle);
+
                 menu.GetMenuItems().ForEach((item) =>
                 {
                     var veh = GetVehicle(true);
@@ -2434,5 +2447,10 @@ namespace vMenuClient.menus
             return 0;
         }
         #endregion
+
+        private static bool HasDestroyedEngine(Vehicle vehicle)
+        {
+            return vehicle.State[EngineDestroyedStateBag] is bool destroyed && destroyed;
+        }
     }
 }
