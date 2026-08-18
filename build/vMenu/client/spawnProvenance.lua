@@ -4,6 +4,13 @@
 
 local spawnGeneration = 0
 local pending = {}
+local lastBeginAt
+
+local function elapsed(nowMs, thenMs)
+    local value = nowMs - thenMs
+    if value < 0 then value = value + 0x100000000 end
+    return value
+end
 
 local function vehicleSnapshot()
     local seen = {}
@@ -26,15 +33,21 @@ local function localSpawnCandidate(vehicle, seen, playerCoords)
 end
 
 local function beginVehicleSpawnTelemetry()
+    local nowMs = GetGameTimer()
+    -- SpawnVehicle(string) delegates to SpawnVehicle(uint), and both call
+    -- canDoInteraction in the compiled client. Coalesce only that same-frame
+    -- wrapper pair; genuinely separate spawns still receive separate tickets.
+    if lastBeginAt and elapsed(nowMs, lastBeginAt) <= 100 then return end
+    lastBeginAt = nowMs
     spawnGeneration = spawnGeneration + 1
     local generation = spawnGeneration
     local request = ('VM-%08x-%04x'):format(
-        GetGameTimer() % 0x100000000,
+        nowMs % 0x100000000,
         (generation * 7919 + math.random(0, 0xffff)) % 0x10000)
     pending[request] = {
         generation = generation,
         seen = vehicleSnapshot(),
-        expires = GetGameTimer() + 4000,
+        expires = nowMs + 4000,
     }
     CreateThread(function()
         Wait(4100)
