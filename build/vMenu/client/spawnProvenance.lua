@@ -2,8 +2,10 @@
 -- The server issues the source-bound nonce before CommonFunctions.CreateVehicle
 -- runs; this watcher can only claim that nonce for a new, nearby local entity.
 
-local spawnGeneration = 0
+local INTEGRATION_VERSION = 2
+local requestSequence = 0
 local pending = {}
+local reservedVehicles = {}
 local lastBeginAt
 
 local function elapsed(nowMs, thenMs)
@@ -15,10 +17,19 @@ end
 local function vehicleSnapshot()
     local seen = {}
     for _, vehicle in ipairs(GetGamePool('CVehicle')) do seen[vehicle] = true end
+    local nowMs = GetGameTimer()
+    for vehicle, reservedAt in pairs(reservedVehicles) do
+        if elapsed(nowMs, reservedAt) > 5000 then reservedVehicles[vehicle] = nil end
+    end
     return seen
 end
 
 local function localSpawnCandidate(vehicle, seen, playerCoords)
+    local reservedAt = reservedVehicles[vehicle]
+    if reservedAt then
+        if elapsed(GetGameTimer(), reservedAt) <= 5000 then return nil end
+        reservedVehicles[vehicle] = nil
+    end
     if seen[vehicle] or not DoesEntityExist(vehicle)
             or not NetworkGetEntityIsNetworked(vehicle)
             or NetworkGetEntityOwner(vehicle) ~= PlayerId() then
@@ -39,15 +50,15 @@ local function beginVehicleSpawnTelemetry()
     -- wrapper pair; genuinely separate spawns still receive separate tickets.
     if lastBeginAt and elapsed(nowMs, lastBeginAt) <= 100 then return end
     lastBeginAt = nowMs
-    spawnGeneration = spawnGeneration + 1
-    local generation = spawnGeneration
+    requestSequence = requestSequence + 1
+    local generation = requestSequence
     local request = ('VM-%08x-%04x'):format(
         nowMs % 0x100000000,
         (generation * 7919 + math.random(0, 0xffff)) % 0x10000)
     pending[request] = {
         generation = generation,
         seen = vehicleSnapshot(),
-        expires = nowMs + 4000,
+        createdAt = nowMs,
     }
     CreateThread(function()
         Wait(4100)
@@ -65,13 +76,12 @@ AddEventHandler('vMenu:telemetry:queueVehicleSpawn', beginVehicleSpawnTelemetry)
 RegisterNetEvent('vMenu:telemetry:vehicleSpawnTicket', function(request, ticket)
     local context = pending[request]
     pending[request] = nil
-    if not context or context.generation ~= spawnGeneration
-            or GetGameTimer() > context.expires
+    if not context or elapsed(GetGameTimer(), context.createdAt) > 4000
             or type(ticket) ~= 'string' or ticket == '' then return end
 
     CreateThread(function()
-        local deadline = GetGameTimer() + 3000
-        while context.generation == spawnGeneration and GetGameTimer() <= deadline do
+        local scanStartedAt = GetGameTimer()
+        while elapsed(GetGameTimer(), scanStartedAt) <= 3000 do
             local ped = PlayerPedId()
             local playerCoords = GetEntityCoords(ped)
             local best
@@ -87,6 +97,10 @@ RegisterNetEvent('vMenu:telemetry:vehicleSpawnTicket', function(request, ticket)
             if best then
                 local netId = NetworkGetNetworkIdFromEntity(best.vehicle)
                 if netId and netId > 0 then
+                    -- Separate overlapping spawn requests cannot consume the
+                    -- same new entity. The short reservation expires naturally
+                    -- so an eventual handle reuse is not permanently hidden.
+                    reservedVehicles[best.vehicle] = GetGameTimer()
                     TriggerServerEvent('psrp_telemetry:sv:claimVehicleSpawn',
                         ticket, netId)
                     return
@@ -95,4 +109,9 @@ RegisterNetEvent('vMenu:telemetry:vehicleSpawnTicket', function(request, ticket)
             Wait(0)
         end
     end)
+end)
+
+CreateThread(function()
+    Wait(1000)
+    TriggerServerEvent('vMenu:telemetry:spawnProvenanceReady', INTEGRATION_VERSION)
 end)
