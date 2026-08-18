@@ -148,7 +148,7 @@ end)
 ---@return boolean Returns true if the player can do the interaction, false otherwise
 exports("canDoInteraction", function(action)
     if action == "spawnvehicle" then
-
+        TriggerEvent("vMenu:telemetry:queueVehicleSpawn")
     elseif action == "refillammo" then
 
     elseif action == "spawnweapon" then
