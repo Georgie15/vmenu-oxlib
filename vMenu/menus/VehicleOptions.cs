@@ -507,6 +507,12 @@ namespace vMenuClient.menus
                         if (item == fixVehicle)
                         {
                             vehicle.Repair();
+                            var actionData = new Dictionary<string, object>
+                            {
+                                ["vehicle"] = vehicle.Handle,
+                                ["networkId"] = NetworkGetNetworkIdFromEntity(vehicle.Handle)
+                            };
+                            TriggerEvent("vMenu:Integrations:Action", "vehiclerepair", actionData);
                         }
                         // Clean vehicle.
                         else if (item == cleanVehicle)
