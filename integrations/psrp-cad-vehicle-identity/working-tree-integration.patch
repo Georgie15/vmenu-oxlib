@@ -1,0 +1,168 @@
+--- a/vMenu/CommonFunctions.cs
++++ b/vMenu/CommonFunctions.cs
+@@ -53,16 +53,36 @@
+         {
+             return await Exports["vMenu"].getUserConfirmation(windowTitle, description);
+         }
++        public async Task<string> BeginVehicleIdentity(uint model, string token)
++        {
++            try { return await Exports["PSRP_cad"].BeginVehicleIdentitySpawn(model, token); }
++            catch { return ""; }
++        }
++        public async Task<bool> ClaimVehicleIdentity(string ticket, int veh, string token)
++        {
++            try { return await Exports["PSRP_cad"].ClaimVehicleIdentity(ticket, veh, token); }
++            catch { return false; }
++        }
++        public string VehicleSaveToken(int veh)
++        {
++            try { return Exports["PSRP_cad"].VehicleSaveToken(veh); }
++            catch { return ""; }
++        }
++        public async Task RememberVehicleSave(int veh, string token)
++        {
++            try { await Exports["PSRP_cad"].RememberVehicleSave(veh, token); }
++            catch { }
++        }
+         // PSRP_cad bridge: returns true when the player's active CAD character
+-        // already has this (plate, model) saved. Used to grey out the
++        // already has this exact saved vehicle linked. Used to grey out the
+         // "Save to CAD" item in the saved-vehicle menu. Fails open (false) if
+         // PSRP_cad is missing or down so the menu doesn't get permanently
+         // locked out.
+-        public async Task<bool> IsVehicleInPsrpCad(string plate, string model)
++        public async Task<bool> IsVehicleInPsrpCad(string plate, string model, string saveToken = null)
+         {
+             try
+             {
+-                return await Exports["PSRP_cad"].IsVehicleInCad(plate, model);
++                return await Exports["PSRP_cad"].IsVehicleInCad(plate, model, saveToken);
+             }
+             catch
+             {
+@@ -74,6 +94,7 @@
+         public static class CommonFunctions
+         {
+         #region Variables
++        private static readonly ExternalFunctions IdentityBridge = new ExternalFunctions();
+         private static string _currentScenario = "";
+         private static Vehicle _previousVehicle;
+         private static bool _respawnDebuffActive = false;
+@@ -1522,6 +1543,8 @@
+                 pos = GetOffsetFromEntityInWorldCoords(Game.PlayerPed.Handle, 0, 8f, 0.1f) + new Vector3(0f, 0f, 1f);
+             }
+ 
++            // Identity ticket is scoped to this character, model and a newly created entity.
++            var identityTicket = await IdentityBridge.BeginVehicleIdentity(vehicleHash, vehicleInfo.cadSaveToken);
+             // Create the new vehicle and remove the need to hotwire the car.
+             var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
+             {
+@@ -1560,8 +1583,10 @@
+             if (saveName != null)
+             {
+                 ApplyVehicleModsDelayed(vehicle, vehicleInfo, 500);
+-            }
+-
++                await BaseScript.Delay(650);
++            }
++
++            await IdentityBridge.ClaimVehicleIdentity(identityTicket, vehicle.Handle, vehicleInfo.cadSaveToken);
+             // Set the previous vehicle to the new vehicle.
+             _previousVehicle = vehicle;
+             //vehicle.Speed = speed; // retarded feature that randomly breaks for no fucking reason
+@@ -1742,6 +1767,7 @@
+             public bool neonLeft;
+             public bool neonRight;
+             public string plateText;
++            public string cadSaveToken;
+             public int plateStyle;
+             public bool turbo;
+             public bool tyreSmoke;
+@@ -1863,6 +1889,7 @@
+                         neonLeft = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Left),
+                         neonRight = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Right),
+                         plateText = veh.Mods.LicensePlate,
++                        cadSaveToken = IdentityBridge.VehicleSaveToken(veh.Handle),
+                         plateStyle = (int)veh.Mods.LicensePlateStyle,
+                         turbo = IsToggleModOn(veh.Handle, 18),
+                         tyreSmoke = IsToggleModOn(veh.Handle, 20),
+@@ -1877,6 +1904,10 @@
+                     };
+ 
+                     #endregion
++
++                    // Re-saving the same live vehicle retains its token; a new vehicle gets a new token.
++                    if (string.IsNullOrEmpty(vi.cadSaveToken)) vi.cadSaveToken = Guid.NewGuid().ToString("N");
++                    await IdentityBridge.RememberVehicleSave(veh.Handle, vi.cadSaveToken);
+ 
+                     if (updateExistingSavedVehicleName == null)
+                     {
+@@ -2098,10 +2129,10 @@
+             var ExternalFunctions = new ExternalFunctions();
+             return await ExternalFunctions.GetUserConfirmation(windowTitle, description);
+         }
+-        public static async Task<bool> IsVehicleInPsrpCad(string plate, string model)
++        public static async Task<bool> IsVehicleInPsrpCad(string plate, string model, string saveToken = null)
+         {
+             var ExternalFunctions = new ExternalFunctions();
+-            return await ExternalFunctions.IsVehicleInPsrpCad(plate, model);
++            return await ExternalFunctions.IsVehicleInPsrpCad(plate, model, saveToken);
+         }
+         #endregion
+ 
+--- a/vMenu/StorageManager.cs
++++ b/vMenu/StorageManager.cs
+@@ -136,6 +136,7 @@
+                 if (!string.IsNullOrEmpty(saveName) && saveName.Length > 4)
+                 {
+                     // convert
++                    if (string.IsNullOrEmpty(vehicleInfo.cadSaveToken)) vehicleInfo.cadSaveToken = System.Guid.NewGuid().ToString("N");
+                     var json = JsonConvert.SerializeObject(vehicleInfo);
+ 
+                     // log
+@@ -160,7 +161,13 @@
+         public static VehicleInfo GetSavedVehicleInfo(string saveName)
+         {
+             var json = GetResourceKvpString(saveName);
+-            return JsonConvert.DeserializeObject<VehicleInfo>(json);
++            var info = JsonConvert.DeserializeObject<VehicleInfo>(json);
++            if (string.IsNullOrEmpty(info.cadSaveToken))
++            {
++                info.cadSaveToken = System.Guid.NewGuid().ToString("N");
++                SaveVehicleInfo(saveName, info, true);
++            }
++            return info;
+             //var vi = new VehicleInfo() { };
+             //dynamic data = JsonConvert.DeserializeObject(json);
+             //if (data.ContainsKey("version"))
+--- a/vMenu/menus/SavedVehicles.cs
++++ b/vMenu/menus/SavedVehicles.cs
+@@ -675,6 +675,8 @@
+                     {
+                         ["name"]            = saveName,
+                         ["plate"]           = v.plateText ?? "",
++                        ["save_token"]      = v.cadSaveToken,
++                        ["model_hash"]      = v.model,
+                         // Server stores `model_display` in the CAD `model` column.
+                         // We send the player-chosen save name (e.g. "My Cool Truck"),
+                         // not the GTA model code (e.g. "sultan"), per the user's preference.
+@@ -972,7 +974,7 @@
+         {
+             try
+             {
+-                bool imported = await IsVehicleInPsrpCad(plate, model);
++                bool imported = await IsVehicleInPsrpCad(plate, model, currentlySelectedVehicle.Value.cadSaveToken);
+                 if (!imported) return;
+                 if (currentlySelectedVehicle.Key != snapshotKey) return;
+                 item.Enabled = false;
+--- a/vMenuServer/vMenuServer.csproj
++++ b/vMenuServer/vMenuServer.csproj
+@@ -65,4 +65,8 @@
+       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+     </None>
+   </ItemGroup>
++  <ItemGroup>
++    <None Update="server\vehicleIdentity.lua"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
++    <None Update="config\vehicleIdentityModels.json"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
++  </ItemGroup>
+ </Project>

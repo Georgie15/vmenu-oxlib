@@ -1,0 +1,26 @@
+{
+  "baseline_head": "cd866b8",
+  "hash_format": "UTF-8, no BOM, LF line endings",
+  "source": {
+    "vMenu/CommonFunctions.cs": {
+      "before_sha256_normalized_utf8": "794574c7639d2ce2d413279b47c72c32f2536dc8553df850392f94ece230572c",
+      "after_sha256_normalized_utf8": "525e3a63e54268d7fdcce8731ade184644070f57b011d7212c04976c37b22086"
+    },
+    "vMenu/StorageManager.cs": {
+      "before_sha256_normalized_utf8": "678eb5360738a74da803762c44fd8f7b4e7e7f539e2fd47aef86c4b0afeebf93",
+      "after_sha256_normalized_utf8": "bc009dee5ea2d11a9f1278934872d3a239f6c1980c77a45b725800351cd88fe6"
+    },
+    "vMenu/menus/SavedVehicles.cs": {
+      "before_sha256_normalized_utf8": "5faf58cd18a89548bca97146142d7e55069cded03ca19628ddc3182af009cc25",
+      "after_sha256_normalized_utf8": "aa4f22de02ca02d48674f89037ca20e18070c149ccab7e3edf7cfd42de736915"
+    },
+    "vMenuServer/vMenuServer.csproj": {
+      "before_sha256_normalized_utf8": "05d52f3b56a23f53fca301a7121c3a08c747d012b96fbf3f5d89c15e27323173",
+      "after_sha256_normalized_utf8": "5ca5b55e96e3df08750a0d6e2dad9244822950db35d3ebe4c3ea03f53e56a9fd"
+    }
+  },
+  "local_release_builds": {
+    "build\\vMenu\\vMenuClient.net.dll": "d176bdb0b46d852da896d81e491bd95b7c924afb490151babde05f2c2abf96df",
+    "build\\vMenu\\vMenuServer.net.dll": "24840dde1c422f3c2129bff09d44df18efa7ba01678572b870fd12af667800b8"
+  }
+}
