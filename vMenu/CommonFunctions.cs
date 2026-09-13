@@ -57,7 +57,8 @@ namespace vMenuClient
         private static string _currentScenario = "";
         private static Vehicle _previousVehicle;
 
-        public static bool VehicleSpawnerCooldownEnabled = false;
+        private static readonly VehicleSpawnGate SpawnGate = new VehicleSpawnGate(() => unchecked((uint)GetGameTimer()));
+        public static bool VehicleSpawnerCooldownEnabled => SpawnGate.IsBlocked;
         public static int VehicleSpawnerCooldown = vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown) != -1
             ? vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown)
             : 1000;
@@ -279,15 +280,6 @@ namespace vMenuClient
         /// <param name="vehicle">Entity/vehicle.</param>
         /// <returns>Returns the (uint) model hash from a (vehicle) entity.</returns>
         public static uint GetVehicleModel(int vehicle) => (uint)GetHashKey(GetEntityModel(vehicle).ToString());
-        #endregion
-
-        #region Cooldown function to block any more vehicle spawns.
-        private static async Task StartVehicleCooldown()
-        {
-            VehicleSpawnerCooldownEnabled = true;
-            await Delay(VehicleSpawnerCooldown);
-            VehicleSpawnerCooldownEnabled = false;
-        }
         #endregion
 
         #region Is ped pointing
@@ -1285,10 +1277,6 @@ namespace vMenuClient
                     var vehicleHandle = await SpawnVehicle(vehicleHash: model, spawnInside: spawnInside, replacePrevious: replacePrevious, skipLoad: false, vehicleInfo: new VehicleInfo(),
                          saveName: null);
 
-                    if (vehicleHandle != 0)
-                    {
-                        _ = StartVehicleCooldown();
-                    }
                     return vehicleHandle;
                 }
                 else
@@ -1301,7 +1289,6 @@ namespace vMenuClient
             var handle = await SpawnVehicle(vehicleHash: (uint)GetHashKey(vehicleName), spawnInside: spawnInside, replacePrevious: replacePrevious, skipLoad: false,
                      vehicleInfo: new VehicleInfo(), saveName: null);
 
-            _ = StartVehicleCooldown();
             return handle;
         }
         #endregion
@@ -1317,6 +1304,14 @@ namespace vMenuClient
         /// <param name="vehicleInfo">All information needed for a saved vehicle to re-apply all mods.</param>
         /// <param name="saveName">Used to get/set info about the saved vehicle data.</param>
         public static async Task<int> SpawnVehicle(uint vehicleHash, bool spawnInside, bool replacePrevious, bool skipLoad, VehicleInfo vehicleInfo, string saveName = null, float x = 0f, float y = 0f, float z = 0f, float heading = -1f)
+        {
+            return await SpawnGate.TrySpawnAsync(
+                () => SpawnVehicleCore(vehicleHash, spawnInside, replacePrevious, skipLoad, vehicleInfo, saveName, x, y, z, heading),
+                VehicleSpawnerCooldown,
+                () => Notify.Error("Vehicle spawner is on cooldown."));
+        }
+
+        private static async Task<int> SpawnVehicleCore(uint vehicleHash, bool spawnInside, bool replacePrevious, bool skipLoad, VehicleInfo vehicleInfo, string saveName, float x, float y, float z, float heading)
         {
 
             if (!CanDoInteraction("spawnvehicle"))
@@ -1349,12 +1344,6 @@ namespace vMenuClient
                     Notify.Error(CommonErrors.InvalidModel);
                     return 0;
                 }
-            }
-
-            if (VehicleSpawnerCooldownEnabled)
-            {
-                Notify.Error("Vehicle spawner is on cooldown.");
-                return 0;
             }
 
             Log("Spawning of vehicle is NOT cancelled, if this model is invalid then there's something wrong.");
@@ -1483,8 +1472,6 @@ namespace vMenuClient
 
             // Discard the model.
             SetModelAsNoLongerNeeded(vehicleHash);
-
-            _ = StartVehicleCooldown();
 
             return vehicle.Handle;
         }
