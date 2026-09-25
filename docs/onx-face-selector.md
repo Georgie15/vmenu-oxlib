@@ -10,7 +10,8 @@ independently. You no longer need to choose parents or adjust inheritance to use
 a face. The optional Blend Face A/B and Blend Skin A/B controls allow mixing;
 the direct selector displays **Custom blend (keep current)** when appropriate.
 Face feature adjustments, hair, overlays, clothing, and the normal Save Character
-flow remain available. Face IDs are zero-based and match ONX's documentation.
+flow remain available. Addon entries are labeled **Custom #46** through **Custom #97**.
+Face IDs are zero-based and match ONX's documentation.
 
 Install the licensed `cfx_onx_mp_faces` resource in the server resources folder
 without renaming it, and start it before vMenu:
@@ -95,9 +96,9 @@ PSRP changes; do not overwrite the PSRP deployment with that branch's DLL.
 
 The ready local combined client is:
 `C:/Users/Georgie/source/repos/vMenu-ox/build/vMenu/vMenuClient.net.dll`.
-SHA-256: `e8131dd14d3fc73288574b82dee1371d883138c8ba26b92375205340423c114e`.
+SHA-256: `eabdd412ef5aebb7d29538ec61e0cb9a8fe37cf8198bb5bf987c9df4d5ef964f`.
 The isolated branch client SHA-256 is
-`53e468349bfd5528b5ba469cda4d3dc78e75a502b4bf0b43276186f5bf7dfc85`.
+`6000b4765e9dd5a54f656fc2205d9ffc25976a28ede3c029f0bfb620e9685d8a`.
 Its full source still includes the pre-existing unpublished edits. The corresponding
 task-only delta against the pre-task local customization source is preserved in
 `integrations/onx-face-selector/local-customization.patch`. It is already applied

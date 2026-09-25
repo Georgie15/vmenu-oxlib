@@ -29,7 +29,7 @@ static class Program
         API.ResourceState = "started";
         editor.Refresh();
         Check(menu.List("Face").ListItems.Count == 99, "All 98 faces available when ONX runs.");
-        Check(menu.List("Face").ListItems[47] == "ONX Face #46", "First addon face has exact ID.");
+        Check(menu.List("Face").ListItems[47] == "Custom #46", "First addon face has exact ID.");
         menu.Change("Face", 98);
         Check(API.Data.FirstFaceShape == 97 && API.Data.SecondFaceShape == 97 && API.Data.ThirdFaceShape == 97,
             "Last ONX face applies to every shape input.");

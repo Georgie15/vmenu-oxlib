@@ -55,7 +55,7 @@ namespace vMenuClient.menus
                 var skinIds = Enumerable.Range(0, 46).ToList();
                 face = AddList("Face", faceIds, DirectId(data.FirstFaceShape, data.SecondFaceShape,
                     data.ThirdFaceShape, data.ParentFaceShapePercent, data.ParentThirdUnkPercent), true, true,
-                    "Pick a complete face with left/right. Skin tone stays the same. ONX faces appear when the ONX face pack is running.");
+                    "Pick a complete face with left/right. Skin tone stays the same. Custom faces appear when the face pack is running.");
                 skin = AddList("Skin Tone", skinIds, DirectId(data.FirstSkinTone, data.SecondSkinTone,
                     data.ThirdSkinTone, data.ParentSkinTonePercent, data.ParentThirdUnkPercent), true, false,
                     "Pick a skin tone with left/right. Your selected face shape stays the same.");
@@ -103,7 +103,7 @@ namespace vMenuClient.menus
             }
             var labels = values.Select(id => id == -1 ? "Custom blend (keep current)" :
                 !available.Contains(id) ? $"Saved #{id} (unavailable)" :
-                shapes && id >= 46 ? $"ONX Face #{id}" : shapes ? $"GTA Face #{id}" : $"Skin #{id}").ToList();
+                shapes && id >= 46 ? $"Custom #{id}" : shapes ? $"GTA Face #{id}" : $"Skin #{id}").ToList();
             var item = new MenuListItem(title, labels, Math.Max(0, values.IndexOf(selected)), description);
             ids.Add(item, values);
             menu.AddMenuItem(item);
