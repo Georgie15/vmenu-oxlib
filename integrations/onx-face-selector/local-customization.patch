@@ -1,0 +1,299 @@
+--- a/vMenu/menus/MpPedCustomization.cs
++++ b/vMenu/menus/MpPedCustomization.cs
+@@ -25,7 +25,8 @@
+         public Menu createCharacterMenu = new("Create Character", "Create A New Character");
+         public Menu savedCharactersMenu = new("vMenu", "Manage Saved Characters");
+         public Menu savedCharactersCategoryMenu = new("Category", "I get updated at runtime!");
+-        public Menu inheritanceMenu = new("vMenu", "Character Inheritance Options");
++        public Menu inheritanceMenu = new("vMenu", "Face & Skin");
++        private FaceSelectionMenu faceSelection;
+         public Menu appearanceMenu = new("vMenu", "Character Appearance Options");
+         public Menu faceShapeMenu = new("vMenu", "Character Face Shape Options");
+         public Menu tattoosMenu = new("vMenu", "Character Tattoo Options");
+@@ -51,8 +52,6 @@
+         public static bool OutfitCodesEnabled = GetSettingsBool(Setting.vmenu_outfitcodes);
+         private const string LastMpCharacterSnapshotKey = "vmenu_last_mp_character_snapshot";
+ 
+-        private readonly List<string> parents = [];
+-        private readonly List<float> mixValues = [0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f];
+         private readonly List<float> faceFeaturesValuesList =
+         [
+             -1.0f,    // 0
+@@ -119,10 +118,6 @@
+ 
+ 
+         private readonly Random _random = new Random();
+-        private int _dadSelection;
+-        private int _mumSelection;
+-        private float _shapeMixValue;
+-        private float _skinMixValue;
+         private readonly Dictionary<int, int> shapeFaceValues = [];
+         // TODO: Chris: Replace with enums or something more sane - updating with index/magic numbers is nuts
+         private readonly Dictionary<int, Tuple<int, int, float>> appearanceValues = [];
+@@ -154,34 +149,12 @@
+                 currentCharacter.Version = 1;
+                 currentCharacter.ModelHash = male ? (uint)GetHashKey("mp_m_freemode_01") : (uint)GetHashKey("mp_f_freemode_01");
+                 currentCharacter.IsMale = male;
+-
+-                // Places the sliders in the middle by default
+-                _shapeMixValue = 0.5f;
+-                _skinMixValue = 0.5f;
++                faceSelection.Reset(male);
++                currentCharacter.PedHeadBlendData = Game.PlayerPed.GetHeadBlendData();
+ 
+                 SetPlayerClothing();
+             }
+-            else
+-            {
+-                PedHeadBlendData headBlendData = currentCharacter.PedHeadBlendData;
+-
+-                _dadSelection = headBlendData.FirstFaceShape;
+-                _mumSelection = headBlendData.SecondFaceShape;
+-                _shapeMixValue = headBlendData.ParentFaceShapePercent;
+-                _skinMixValue = headBlendData.ParentSkinTonePercent;
+-
+-                if (_shapeMixValue > 1f)
+-                {
+-                    Log("Shape mix value was incorrectly saved with a value higher than the possible maximum. Resetting to max value");
+-                    _shapeMixValue = 1f;
+-                }
+-
+-                if (_skinMixValue > 1f)
+-                {
+-                    Log("Skin mix value was incorrectly saved with a value higher than the possible maximum. Resetting to max value");
+-                    _skinMixValue = 1f;
+-                }
+-            }
++
+ 
+             currentCharacter.DrawableVariations.clothes ??= new Dictionary<int, KeyValuePair<int, int>>();
+             currentCharacter.PropVariations.props ??= new Dictionary<int, KeyValuePair<int, int>>();
+@@ -847,11 +820,6 @@
+         /// </summary>
+         private void CreateMenu()
+         {
+-            for (int i = 0; i < 46; i++)
+-            {
+-                parents.Add($"#{i}");
+-            }
+-
+             for (int i = 0; i < GetNumHairColors(); i++)
+             {
+                 overlayColorsList.Add($"Color #{i + 1}");
+@@ -980,7 +948,7 @@
+ 
+ 
+             var randomizeButton = new MenuItem("Randomize Character", "Randomize character appearance.");
+-            var inheritanceButton = new MenuItem("Character Inheritance", "Character inheritance options.");
++            var inheritanceButton = new MenuItem("Face & Skin", "Pick a face and skin tone directly, or make an optional custom blend.");
+             var appearanceButton = new MenuItem("Character Appearance", "Character appearance options.");
+             var faceButton = new MenuItem("Character Face Shape Options", "Character face shape options.");
+             var tattoosButton = new MenuItem("Character Tattoo Options", "Character tattoo options.");
+@@ -1032,142 +1000,7 @@
+             MenuController.BindMenuItem(createCharacterMenu, clothesMenu, clothesButton);
+             MenuController.BindMenuItem(createCharacterMenu, propsMenu, propsButton);
+ 
+-            #region inheritance
+-            var dads = new Dictionary<string, int>();
+-            var moms = new Dictionary<string, int>();
+-
+-            void AddInheritance(Dictionary<string, int> dict, int listId, string textPrefix)
+-            {
+-                var baseIdx = dict.Count;
+-                var basePed = GetPedHeadBlendFirstIndex(listId);
+-
+-                // list 0/2 are male, list 1/3 are female
+-                var suffix = $" ({(listId % 2 == 0 ? "Male" : "Female")})";
+-
+-                for (var i = 0; i < GetNumParentPedsOfType(listId); i++)
+-                {
+-                    // get the actual parent name, or the index if none
+-                    var label = GetLabelText($"{textPrefix}{i}");
+-                    if (string.IsNullOrWhiteSpace(label) || label == "NULL")
+-                    {
+-                        label = $"{baseIdx + i}";
+-                    }
+-
+-                    // append the gender of the list
+-                    label += suffix;
+-                    dict[label] = basePed + i;
+-                }
+-            }
+-
+-            int GetInheritance(Dictionary<string, int> list, MenuListItem listItem)
+-            {
+-                if (listItem.ListIndex < listItem.ListItems.Count)
+-                {
+-                    if (list.TryGetValue(listItem.ListItems[listItem.ListIndex], out var idx))
+-                    {
+-                        return idx;
+-                    }
+-                }
+-
+-                return 0;
+-            }
+-
+-            var listIdx = 0;
+-            foreach (var list in new[] { dads, moms })
+-            {
+-                void AddDads()
+-                {
+-                    AddInheritance(list, 0, "Male_");
+-                    AddInheritance(list, 2, "Special_Male_");
+-                }
+-
+-                void AddMoms()
+-                {
+-                    AddInheritance(list, 1, "Female_");
+-                    AddInheritance(list, 3, "Special_Female_");
+-                }
+-
+-                if (listIdx == 0)
+-                {
+-                    AddDads();
+-                    AddMoms();
+-                }
+-                else
+-                {
+-                    AddMoms();
+-                    AddDads();
+-                }
+-
+-                listIdx++;
+-            }
+-
+-            var inheritanceDads = new MenuListItem("Father", dads.Keys.ToList(), 0, "Select a father.");
+-            var inheritanceMoms = new MenuListItem("Mother", moms.Keys.ToList(), 0, "Select a mother.");
+-            var inheritanceShapeMix = new MenuSliderItem("Head Shape Mix", "Select how much of your head shape should be inherited from your father or mother. All the way on the left is your dad, all the way on the right is your mom.", 0, 10, 5, true) { SliderLeftIcon = MenuItem.Icon.MALE, SliderRightIcon = MenuItem.Icon.FEMALE, ItemData = "shape_mix" };
+-            var inheritanceSkinMix = new MenuSliderItem("Body Skin Mix", "Select how much of your body skin tone should be inherited from your father or mother. All the way on the left is your dad, all the way on the right is your mom.", 0, 10, 5, true) { SliderLeftIcon = MenuItem.Icon.MALE, SliderRightIcon = MenuItem.Icon.FEMALE, ItemData = "skin_mix" };
+-
+-            inheritanceMenu.AddMenuItem(inheritanceDads);
+-            inheritanceMenu.AddMenuItem(inheritanceMoms);
+-            inheritanceMenu.AddMenuItem(inheritanceShapeMix);
+-            inheritanceMenu.AddMenuItem(inheritanceSkinMix);
+-
+-            // formula from maintransition.#sc
+-            float GetMinimum()
+-            {
+-                return currentCharacter.IsMale ? 0.05f : 0.3f;
+-            }
+-
+-            float GetMaximum()
+-            {
+-                return currentCharacter.IsMale ? 0.7f : 0.95f;
+-            }
+-
+-            float ClampMix(int value)
+-            {
+-                var sliderFraction = mixValues[value];
+-                var min = GetMinimum();
+-                var max = GetMaximum();
+-
+-                return min + (sliderFraction * (max - min));
+-            }
+-
+-            int UnclampMix(float value)
+-            {
+-                var min = GetMinimum();
+-                var max = GetMaximum();
+-
+-                var origFraction = (value - min) / (max - min);
+-                return Math.Max(Math.Min((int)(origFraction * 10), 10), 0);
+-            }
+-
+-            inheritanceMenu.OnListIndexChange += (_menu, listItem, oldSelectionIndex, newSelectionIndex, itemIndex) =>
+-            {
+-                _dadSelection = inheritanceDads.ListIndex;
+-                _mumSelection = inheritanceMoms.ListIndex;
+-
+-                SetHeadBlend();
+-            };
+-
+-            inheritanceMenu.OnSliderPositionChange += (sender, item, oldPosition, newPosition, itemIndex) =>
+-            {
+-                // Chris: We can't call `.Position` on the slider items here because it returns the value *prior* to the change
+-                switch (item.ItemData)
+-                {
+-                    case "shape_mix":
+-                        _shapeMixValue = newPosition / 10f;
+-                        break;
+-
+-                    case "skin_mix":
+-                        _skinMixValue = newPosition / 10f;
+-                        break;
+-
+-                    default:
+-                        break;
+-                }
+-
+-                SetHeadBlend();
+-            };
+-            #endregion
++            faceSelection = new FaceSelectionMenu(inheritanceMenu);
+ 
+             #region appearance
+             // manage the list changes for appearance items.
+@@ -1870,12 +1703,7 @@
+             {
+                 if (item == randomizeButton)
+                 {
+-                    _dadSelection = _random.Next(parents.Count);
+-                    _mumSelection = _random.Next(parents.Count);
+-                    _skinMixValue = (float)_random.NextDouble();
+-                    _shapeMixValue = (float)_random.NextDouble();
+-
+-                    SetHeadBlend();
++                    faceSelection.Randomize(_random);
+ 
+                     if (currentCharacter.FaceShapeFeatures.features == null)
+                     {
+@@ -2106,11 +1934,7 @@
+                 }
+                 else if (item == inheritanceButton) // update the inheritance menu anytime it's opened to prevent some weird glitch where old data is used.
+                 {
+-                    inheritanceDads.ListIndex = _dadSelection;
+-                    inheritanceMoms.ListIndex = _mumSelection;
+-                    inheritanceShapeMix.Position = (int)(_shapeMixValue * 10f);
+-                    inheritanceSkinMix.Position = (int)(_skinMixValue * 10f);
+-                    inheritanceMenu.RefreshIndex();
++                    faceSelection.Refresh();
+                 }
+                 else if (item == faceButton)
+                 {
+@@ -2180,7 +2004,6 @@
+ 
+                     appearanceMenu.RefreshIndex();
+ 
+-                    SetHeadBlend();
+                 }
+             };
+ 
+@@ -3488,10 +3311,6 @@
+             return model == (uint)GetHashKey("mp_m_freemode_01") || model == (uint)GetHashKey("mp_f_freemode_01");
+         }
+ 
+-        internal void SetHeadBlend()
+-        {
+-            SetPedHeadBlendData(Game.PlayerPed.Handle, _dadSelection, _mumSelection, 0, _dadSelection, _mumSelection, 0, _shapeMixValue, _skinMixValue, 0f, false);
+-        }
+ 
+         internal void ChangePlayerHair(int newHairIndex)
+         {
+@@ -3592,7 +3411,7 @@
+         /// </summary>
+         internal void DefaultPlayerColors()
+         {
+-            SetHeadBlend();
++            faceSelection.Reset(IsPedMale(Game.PlayerPed.Handle));
+ 
+             for (int i = 0; i < 12; i++)
+             {
+@@ -3647,7 +3466,7 @@
+         {
+             #region headblend
+             PedHeadBlendData data = character.PedHeadBlendData;
+-            SetPedHeadBlendData(pedHandle, data.FirstFaceShape, data.SecondFaceShape, data.ThirdFaceShape, data.FirstSkinTone, data.SecondSkinTone, data.ThirdSkinTone, data.ParentFaceShapePercent, data.ParentSkinTonePercent, 0f, data.IsParentInheritance);
++            SetPedHeadBlendData(pedHandle, data.FirstFaceShape, data.SecondFaceShape, data.ThirdFaceShape, data.FirstSkinTone, data.SecondSkinTone, data.ThirdSkinTone, data.ParentFaceShapePercent, data.ParentSkinTonePercent, data.ParentThirdUnkPercent, data.IsParentInheritance);
+ 
+             while (!HasPedHeadBlendFinished(pedHandle))
+             {
