@@ -19,7 +19,7 @@
          private readonly List<float> faceFeaturesValuesList =
          [
              -1.0f,    // 0
-@@ -119,10 +118,6 @@
+@@ -119,11 +118,6 @@
  
  
          private readonly Random _random = new Random();
@@ -27,10 +27,11 @@
 -        private int _mumSelection;
 -        private float _shapeMixValue;
 -        private float _skinMixValue;
-         private readonly Dictionary<int, int> shapeFaceValues = [];
+-        private readonly Dictionary<int, int> shapeFaceValues = [];
          // TODO: Chris: Replace with enums or something more sane - updating with index/magic numbers is nuts
          private readonly Dictionary<int, Tuple<int, int, float>> appearanceValues = [];
-@@ -154,34 +149,12 @@
+         private int _hairSelection;
+@@ -154,34 +148,12 @@
                  currentCharacter.Version = 1;
                  currentCharacter.ModelHash = male ? (uint)GetHashKey("mp_m_freemode_01") : (uint)GetHashKey("mp_f_freemode_01");
                  currentCharacter.IsMale = male;
@@ -68,7 +69,46 @@
  
              currentCharacter.DrawableVariations.clothes ??= new Dictionary<int, KeyValuePair<int, int>>();
              currentCharacter.PropVariations.props ??= new Dictionary<int, KeyValuePair<int, int>>();
-@@ -847,11 +820,6 @@
+@@ -614,33 +586,11 @@
+             #endregion
+ 
+             #region face features menu
+-            foreach (MenuSliderItem item in faceShapeMenu.GetMenuItems())
+-            {
+-                if (editPed)
+-                {
+-                    if (currentCharacter.FaceShapeFeatures.features == null)
+-                    {
+-                        currentCharacter.FaceShapeFeatures.features = new Dictionary<int, float>();
+-                    }
+-                    else
+-                    {
+-                        if (currentCharacter.FaceShapeFeatures.features.ContainsKey(item.Index))
+-                        {
+-                            item.Position = (int)(currentCharacter.FaceShapeFeatures.features[item.Index] * 10f) + 10;
+-                            SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, currentCharacter.FaceShapeFeatures.features[item.Index]);
+-                        }
+-                        else
+-                        {
+-                            item.Position = 10;
+-                            SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, 0f);
+-                        }
+-                    }
+-                }
+-                else
+-                {
+-                    item.Position = 10;
+-                    SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, 0f);
+-                }
++            foreach (var item in faceShapeMenu.GetMenuItems().OfType<MenuSliderItem>())
++            {
++                var features = editPed ? currentCharacter.FaceShapeFeatures.features : null;
++                item.Position = FaceFeatureValues.GetSliderPosition(features, item.Index);
++                SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, FaceFeatureValues.GetValue(features, item.Index));
+             }
+             #endregion
+ 
+@@ -847,11 +797,6 @@
          /// </summary>
          private void CreateMenu()
          {
@@ -80,7 +120,7 @@
              for (int i = 0; i < GetNumHairColors(); i++)
              {
                  overlayColorsList.Add($"Color #{i + 1}");
-@@ -980,7 +948,7 @@
+@@ -980,7 +925,7 @@
  
  
              var randomizeButton = new MenuItem("Randomize Character", "Randomize character appearance.");
@@ -89,7 +129,7 @@
              var appearanceButton = new MenuItem("Character Appearance", "Character appearance options.");
              var faceButton = new MenuItem("Character Face Shape Options", "Character face shape options.");
              var tattoosButton = new MenuItem("Character Tattoo Options", "Character tattoo options.");
-@@ -1032,142 +1000,7 @@
+@@ -1032,142 +977,7 @@
              MenuController.BindMenuItem(createCharacterMenu, clothesMenu, clothesButton);
              MenuController.BindMenuItem(createCharacterMenu, propsMenu, propsButton);
  
@@ -233,7 +273,7 @@
  
              #region appearance
              // manage the list changes for appearance items.
-@@ -1870,12 +1703,7 @@
+@@ -1870,12 +1680,7 @@
              {
                  if (item == randomizeButton)
                  {
@@ -247,7 +287,29 @@
  
                      if (currentCharacter.FaceShapeFeatures.features == null)
                      {
-@@ -2106,11 +1934,7 @@
+@@ -1884,9 +1689,9 @@
+ 
+                     for (int i = 0; i < 20; i++)
+                     {
+-                        shapeFaceValues[i] = _random.Next(5, 15);
+-                        SetPedFaceFeature(Game.PlayerPed.Handle, i, faceFeaturesValuesList[shapeFaceValues[i]]);
+-                        currentCharacter.FaceShapeFeatures.features[i] = faceFeaturesValuesList[shapeFaceValues[i]];
++                        var value = faceFeaturesValuesList[_random.Next(5, 15)];
++                        SetPedFaceFeature(Game.PlayerPed.Handle, i, value);
++                        currentCharacter.FaceShapeFeatures.features[i] = value;
+                     }
+ 
+                     int bodyHair = _random.Next(31);
+@@ -2012,7 +1817,7 @@
+ 
+                     currentCharacter.FacialExpression = facial_expressions[_facialExpressionSelection];
+ 
+-                    ((MenuListItem)createCharacterMenu.GetMenuItems()[7]).ListIndex = _facialExpressionSelection;
++                    faceExpressionList.ListIndex = _facialExpressionSelection;
+ 
+                     SetPlayerClothing();
+                 }
+@@ -2106,24 +1911,14 @@
                  }
                  else if (item == inheritanceButton) // update the inheritance menu anytime it's opened to prevent some weird glitch where old data is used.
                  {
@@ -260,7 +322,24 @@
                  }
                  else if (item == faceButton)
                  {
-@@ -2180,7 +2004,6 @@
+-                    List<MenuItem> items = faceShapeMenu.GetMenuItems();
+-
+-                    for (int i = 0; i < 20; i++)
+-                    {
+-                        if (items[i] is MenuSliderItem sliderItem)
+-                        {
+-                            sliderItem.Position = shapeFaceValues[i];
+-                        }
+-                    }
+-
++                    foreach (var slider in faceShapeMenu.GetMenuItems().OfType<MenuSliderItem>())
++                    {
++                        slider.Position = FaceFeatureValues.GetSliderPosition(currentCharacter.FaceShapeFeatures.features, slider.Index);
++                    }
+                     faceShapeMenu.RefreshIndex();
+                 }
+                 else if (item == appearanceButton)
+@@ -2180,7 +1975,6 @@
  
                      appearanceMenu.RefreshIndex();
  
@@ -268,7 +347,7 @@
                  }
              };
  
-@@ -3488,10 +3311,6 @@
+@@ -3488,10 +3282,6 @@
              return model == (uint)GetHashKey("mp_m_freemode_01") || model == (uint)GetHashKey("mp_f_freemode_01");
          }
  
@@ -279,7 +358,7 @@
  
          internal void ChangePlayerHair(int newHairIndex)
          {
-@@ -3592,7 +3411,7 @@
+@@ -3592,7 +3382,7 @@
          /// </summary>
          internal void DefaultPlayerColors()
          {
@@ -288,7 +367,7 @@
  
              for (int i = 0; i < 12; i++)
              {
-@@ -3647,7 +3466,7 @@
+@@ -3647,7 +3437,7 @@
          {
              #region headblend
              PedHeadBlendData data = character.PedHeadBlendData;

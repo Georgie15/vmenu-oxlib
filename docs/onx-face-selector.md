@@ -65,6 +65,7 @@ new event value and leaves the active slider's increment to MenuAPI.
 
 ```powershell
 dotnet run --project tests/face-selection/FaceSelection.Tests.csproj -c Release
+python tests/face-selection/test_editor_errors.py
 dotnet build vMenu/vMenuClient.csproj -c Release --nologo
 ```
 
@@ -75,6 +76,31 @@ head data, missing-resource preservation, third blends, male/female defaults,
 and randomization. It is not an in-game render or full FiveM save integration test.
 Both the isolated committed-source build and the combined local PSRP build pass
 with zero warnings/errors.
+
+### Runtime error follow-up
+
+The reported KeyNotFoundException at local MpPedCustomization.cs:1947 came from
+refreshing face feature sliders using `shapeFaceValues`, a cache populated only
+by randomization. It was also stale after manual changes. This cache has been
+removed: sliders now read the character's actual feature dictionary, with neutral
+defaults for absent values and bounded positions. Initialization uses the same
+conversion, including for legacy saves with no feature dictionary.
+
+The InvalidCastException at local line 1843 came from randomization casting menu
+slot 7 to MenuListItem even though it is the Load Shared Outfit button. It now
+updates the existing `faceExpressionList` reference directly. Both failing patterns
+were present in the pre-ONX local source backup. The published clean baseline has
+no randomizer; its matching local fix is included in local-customization.patch.
+
+The new Python regression harness extracts the actual refresh and randomizer UI
+statements from the source and runs them with controlled menu state. The pre-fix
+source reproduced KeyNotFoundException; the fixed local source passes opening
+new/legacy/sparse saves, reopening edited sliders, malformed values, switching
+characters, and expression updates with a button at slot 7. The isolated source
+runs the shared feature cases. Builds remain successful. Install the newly rebuilt
+combined local client DLL and repeat both actions in-game; runtime retesting is
+still required. Pre-follow-up source/DLL backups are in
+`C:/Users/Georgie/.codex/backups/onx-editor-errors-20260925`.
 
 Remaining FiveM smoke checks: for male and female characters, choose ONX 46 and
 97, change skin, save, respawn/reconnect, edit again, then open Character Appearance
@@ -96,14 +122,15 @@ PSRP changes; do not overwrite the PSRP deployment with that branch's DLL.
 
 The ready local combined client is:
 `C:/Users/Georgie/source/repos/vMenu-ox/build/vMenu/vMenuClient.net.dll`.
-SHA-256: `eabdd412ef5aebb7d29538ec61e0cb9a8fe37cf8198bb5bf987c9df4d5ef964f`.
+SHA-256: `cacfbdbec147b5c70269dda5a9c121c643a7416f2a85a8a4f0af61f9428ba600`.
 The isolated branch client SHA-256 is
-`6000b4765e9dd5a54f656fc2205d9ffc25976a28ede3c029f0bfb620e9685d8a`.
+`6f81e664a2a550d071c5b336ba54f88b47493a44454f54bde2466ef23b3165b2`.
 Its full source still includes the pre-existing unpublished edits. The corresponding
 task-only delta against the pre-task local customization source is preserved in
 `integrations/onx-face-selector/local-customization.patch`. It is already applied
 locally. For another matching PSRP checkout, first use `git apply --check`, then
-apply that patch and copy the new FaceSelectionMenu.cs from the published branch.
+apply that patch and copy FaceSelectionMenu.cs and FaceFeatureValues.cs from the
+published branch.
 Do not apply this local patch to the older clean baseline or apply it twice.
 
 Pre-task source/client backups and the pre-existing tracked diff are under

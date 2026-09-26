@@ -550,33 +550,11 @@ namespace vMenuClient.menus
             #endregion
 
             #region face features menu
-            foreach (MenuSliderItem item in faceShapeMenu.GetMenuItems())
+            foreach (var item in faceShapeMenu.GetMenuItems().OfType<MenuSliderItem>())
             {
-                if (editPed)
-                {
-                    if (currentCharacter.FaceShapeFeatures.features == null)
-                    {
-                        currentCharacter.FaceShapeFeatures.features = new Dictionary<int, float>();
-                    }
-                    else
-                    {
-                        if (currentCharacter.FaceShapeFeatures.features.ContainsKey(item.Index))
-                        {
-                            item.Position = (int)(currentCharacter.FaceShapeFeatures.features[item.Index] * 10f) + 10;
-                            SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, currentCharacter.FaceShapeFeatures.features[item.Index]);
-                        }
-                        else
-                        {
-                            item.Position = 10;
-                            SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, 0f);
-                        }
-                    }
-                }
-                else
-                {
-                    item.Position = 10;
-                    SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, 0f);
-                }
+                var features = editPed ? currentCharacter.FaceShapeFeatures.features : null;
+                item.Position = FaceFeatureValues.GetSliderPosition(features, item.Index);
+                SetPedFaceFeature(Game.PlayerPed.Handle, item.Index, FaceFeatureValues.GetValue(features, item.Index));
             }
             #endregion
 
@@ -1742,6 +1720,14 @@ namespace vMenuClient.menus
                 else if (item == inheritanceButton) // update the inheritance menu anytime it's opened to prevent some weird glitch where old data is used.
                 {
                     faceSelection.Refresh();
+                }
+                else if (item == faceButton)
+                {
+                    foreach (var slider in faceShapeMenu.GetMenuItems().OfType<MenuSliderItem>())
+                    {
+                        slider.Position = FaceFeatureValues.GetSliderPosition(currentCharacter.FaceShapeFeatures.features, slider.Index);
+                    }
+                    faceShapeMenu.RefreshIndex();
                 }
             };
 
