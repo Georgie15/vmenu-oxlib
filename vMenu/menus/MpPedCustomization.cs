@@ -3189,6 +3189,10 @@ namespace vMenuClient.menus
                 character.DrawableVariations.clothes = new Dictionary<int, KeyValuePair<int, int>>();
             }
 
+            // Head and hair are appearance data, not clothing.
+            character.DrawableVariations.clothes.Remove(0);
+            character.DrawableVariations.clothes.Remove(2);
+
             if (character.PropVariations.props == null)
             {
                 character.PropVariations.props = new Dictionary<int, KeyValuePair<int, int>>();
@@ -3197,6 +3201,11 @@ namespace vMenuClient.menus
             // Drawables
             for (int i = 0; i < 12; i++)
             {
+                if (i is 0 or 2)
+                {
+                    continue;
+                }
+
                 int drawable = GetPedDrawableVariation(handle, i);
                 int texture = GetPedTextureVariation(handle, i);
                 character.DrawableVariations.clothes[i] = new KeyValuePair<int, int>(drawable, texture);
@@ -3287,6 +3296,7 @@ namespace vMenuClient.menus
         {
             ClearPedFacialDecorations(Game.PlayerPed.Handle);
             currentCharacter.PedAppearance.HairOverlay = new KeyValuePair<string, string>("", "");
+            currentCharacter.DrawableVariations.clothes?.Remove(2);
 
             if (newHairIndex >= GetNumberOfPedDrawableVariations(Game.PlayerPed.Handle, 2))
             {
@@ -3513,6 +3523,11 @@ namespace vMenuClient.menus
             {
                 foreach (var cd in character.DrawableVariations.clothes)
                 {
+                    if (cd.Key is 0 or 2)
+                    {
+                        continue;
+                    }
+
                     SetPedComponentVariation(pedHandle, cd.Key, cd.Value.Key, cd.Value.Value, 0);
                 }
             }

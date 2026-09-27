@@ -59,13 +59,20 @@ exports("loadSharedOutfit", function(name)
 
     local Data = json.decode(Existing)
     for k, v in pairs(Valid.Clothes) do
-        if Data.DrawableVariations.clothes[k] then
-            Data.DrawableVariations.clothes[k].Key = v.Item
-            Data.DrawableVariations.clothes[k].Value = v.Texture
-        else
-            Data.DrawableVariations.clothes[k] = { Key = v.Item, Value = v.Texture }
+        local component = tonumber(k)
+        if component ~= 0 and component ~= 2 then
+            if Data.DrawableVariations.clothes[k] then
+                Data.DrawableVariations.clothes[k].Key = v.Item
+                Data.DrawableVariations.clothes[k].Value = v.Texture
+            else
+                Data.DrawableVariations.clothes[k] = { Key = v.Item, Value = v.Texture }
+            end
         end
     end
+
+    -- Head and hair are appearance data, including in older saved characters.
+    Data.DrawableVariations.clothes["0"] = nil
+    Data.DrawableVariations.clothes["2"] = nil
 
     for k, v in pairs(Valid.Props) do
         if Data.PropVariations.props[k] then
@@ -104,7 +111,9 @@ exports("loadOutfitFromCode", function(outfitCode)
     local validData = json.decode(Valid)
 
     for i = 0, 11 do
-        SetPedComponentVariation(PlayerPedId(), i, 0, 0, 0)
+        if i ~= 0 and i ~= 2 then
+            SetPedComponentVariation(PlayerPedId(), i, 0, 0, 0)
+        end
     end
 
     for i = 0, 12 do
@@ -112,7 +121,10 @@ exports("loadOutfitFromCode", function(outfitCode)
     end
 
     for k, v in pairs(validData.Clothes) do
-        SetPedComponentVariation(PlayerPedId(), tonumber(k), v.Item, v.Texture, 0)
+        local component = tonumber(k)
+        if component ~= 0 and component ~= 2 then
+            SetPedComponentVariation(PlayerPedId(), component, v.Item, v.Texture, 0)
+        end
     end
 
     for k, v in pairs(validData.Props) do
@@ -161,7 +173,10 @@ AddEventHandler("vMenu:Outfits:GenerateCode", function(name)
         Props = {}
     }
     for k, v in pairs(Data.DrawableVariations.clothes) do
-        ToSave.Clothes[k] = { Item = v.Key, Texture = v.Value }
+        local component = tonumber(k)
+        if component ~= 0 and component ~= 2 then
+            ToSave.Clothes[k] = { Item = v.Key, Texture = v.Value }
+        end
     end
 
     for k, v in pairs(Data.PropVariations.props) do
