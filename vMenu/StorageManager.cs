@@ -136,6 +136,7 @@ namespace vMenuClient
                 if (!string.IsNullOrEmpty(saveName) && saveName.Length > 4)
                 {
                     // convert
+                    if (string.IsNullOrEmpty(vehicleInfo.cadSaveToken)) vehicleInfo.cadSaveToken = System.Guid.NewGuid().ToString("N");
                     var json = JsonConvert.SerializeObject(vehicleInfo);
 
                     // log
@@ -160,7 +161,13 @@ namespace vMenuClient
         public static VehicleInfo GetSavedVehicleInfo(string saveName)
         {
             var json = GetResourceKvpString(saveName);
-            return JsonConvert.DeserializeObject<VehicleInfo>(json);
+            var info = JsonConvert.DeserializeObject<VehicleInfo>(json);
+            if (string.IsNullOrEmpty(info.cadSaveToken))
+            {
+                info.cadSaveToken = System.Guid.NewGuid().ToString("N");
+                SaveVehicleInfo(saveName, info, true);
+            }
+            return info;
             //var vi = new VehicleInfo() { };
             //dynamic data = JsonConvert.DeserializeObject(json);
             //if (data.ContainsKey("version"))
@@ -333,7 +340,8 @@ namespace vMenuClient
             {
                 return output;
             }
-            var jsonString = GetResourceKvpString(name.StartsWith("mp_ped_") ? name : "mp_ped_" + name);
+            var kvpKey = name.StartsWith("mp_ped_") ? name : "mp_ped_" + name;
+            var jsonString = GetResourceKvpString(kvpKey);
             if (string.IsNullOrEmpty(jsonString))
             {
                 return output;
@@ -341,6 +349,10 @@ namespace vMenuClient
             try
             {
                 output = JsonConvert.DeserializeObject<MpPedDataManager.MultiplayerPedData>(jsonString);
+                // The embedded SaveName can be stale when the save was created by
+                // copying another character's json (e.g. outfit code loading);
+                // the kvp key is the authoritative save name.
+                output.SaveName = kvpKey;
             }
             catch (JsonException e)
             {

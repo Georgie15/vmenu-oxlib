@@ -17,6 +17,7 @@ namespace vMenuClient.menus
         private Menu menu;
         public MenuCheckboxItem dynamicWeatherEnabled;
         public MenuCheckboxItem blackout;
+        public MenuCheckboxItem vehicleBlackout;
         public MenuCheckboxItem snowEnabled;
         public static readonly List<string> weatherTypes = new()
         {
@@ -40,10 +41,11 @@ namespace vMenuClient.menus
         private void CreateMenu()
         {
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Weather Options");
+            menu = new Menu(" ", "Weather Options");
 
             dynamicWeatherEnabled = new MenuCheckboxItem("Toggle Dynamic Weather", "Enable or disable dynamic weather changes.", EventManager.DynamicWeatherEnabled);
             blackout = new MenuCheckboxItem("Toggle Blackout", "This disables or enables all lights across the map.", EventManager.IsBlackoutEnabled);
+            vehicleBlackout = new MenuCheckboxItem("Toggle Vehicle Lights Blackout", "This disables or enables all vehicle lights across the map.", !EventManager.IsVehicleLightsEnabled);
             snowEnabled = new MenuCheckboxItem("Enable Snow Effects", "This will force snow to appear on the ground and enable snow particle effects for peds and vehicles. Combine with X-MAS or Light Snow weather for best results.", ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_enable_snow));
             var extrasunny = new MenuItem("Extra Sunny", "Set the weather to ~y~extra sunny~s~!") { ItemData = "EXTRASUNNY" };
             var clear = new MenuItem("Clear", "Set the weather to ~y~clear~s~!") { ItemData = "CLEAR" };
@@ -70,6 +72,10 @@ namespace vMenuClient.menus
             if (IsAllowed(Permission.WOBlackout))
             {
                 menu.AddMenuItem(blackout);
+            }
+            if (IsAllowed(Permission.WOVehBlackout))
+            {
+                menu.AddMenuItem(vehicleBlackout);
             }
             if (IsAllowed(Permission.WOSetWeather))
             {
@@ -116,7 +122,7 @@ namespace vMenuClient.menus
                     if (confirmed)
                     {
                         Notify.Custom($"The weather will be changed to ~y~{item.Text}~s~. This will take {EventManager.WeatherChangeTime} seconds.");
-                        UpdateServerWeather(weatherType, EventManager.IsBlackoutEnabled, EventManager.DynamicWeatherEnabled, EventManager.IsSnowEnabled);
+                        UpdateServerWeather(weatherType, EventManager.DynamicWeatherEnabled, EventManager.IsSnowEnabled);
                     }
                 }
             };
@@ -126,7 +132,7 @@ namespace vMenuClient.menus
                 if (item == dynamicWeatherEnabled)
                 {
                     Notify.Custom($"Dynamic weather changes are now {(_checked ? "~g~enabled" : "~r~disabled")}~s~.");
-                    UpdateServerWeather(EventManager.GetServerWeather, EventManager.IsBlackoutEnabled, _checked, EventManager.IsSnowEnabled);
+                    UpdateServerWeather(EventManager.GetServerWeather, _checked, EventManager.IsSnowEnabled);
                 }
                 else if (item == blackout)
                 {
@@ -135,7 +141,21 @@ namespace vMenuClient.menus
                     if (confirmed)
                     {
                         Notify.Custom($"Blackout mode is now {(_checked ? "~g~enabled" : "~r~disabled")}~s~.");
-                        UpdateServerWeather(EventManager.GetServerWeather, _checked, EventManager.DynamicWeatherEnabled, EventManager.IsSnowEnabled);
+                        UpdateServerBlackout(_checked);
+                    }
+                    else
+                    {
+                        item.Checked = !item.Checked;
+                    }
+                }
+                else if (item == vehicleBlackout)
+                {
+                    string action = _checked ? "Enable" : "Disable";
+                    bool confirmed = await GetUserConfirmation($"{action} Vehicle Lights Blackout", $"Please confirm that you want to {action} vehicle lights blackout mode. This will disable or enable all vehicle lights across the map.");
+                    if (confirmed)
+                    {
+                        Notify.Custom($"Vehicle light blackout mode is now {(_checked ? "~g~enabled" : "~r~disabled")}~s~.");
+                        UpdateServerVehicleBlackout(!_checked);
                     }
                     else
                     {
@@ -149,7 +169,7 @@ namespace vMenuClient.menus
                     if (confirmed)
                     {
                         Notify.Custom($"Snow effects will now be forced {(_checked ? "~g~enabled" : "~r~disabled")}~s~.");
-                        UpdateServerWeather(EventManager.GetServerWeather, EventManager.IsBlackoutEnabled, EventManager.DynamicWeatherEnabled, _checked);
+                        UpdateServerWeather(EventManager.GetServerWeather, EventManager.DynamicWeatherEnabled, _checked);
                     }
                     else
                     {

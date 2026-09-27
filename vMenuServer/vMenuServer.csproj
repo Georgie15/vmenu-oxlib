@@ -35,6 +35,9 @@
     <None Update="config\addons.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="config\pedpack.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="config\locations.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
@@ -57,4 +60,13 @@
     <None Include="D:\tomgr\Documents\GitHub-Repos\vMenu\vMenu\vMenuServer\.editorconfig" />
   </ItemGroup>
 
+  <ItemGroup Label="PSRPStaminaBridge">
+    <None Update="server\staminaTelemetry.lua">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="server\vehicleIdentity.lua"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
+    <None Update="config\vehicleIdentityModels.json"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
+  </ItemGroup>
 </Project>

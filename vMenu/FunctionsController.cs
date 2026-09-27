@@ -153,6 +153,10 @@ namespace vMenuClient
             {
                 Tick += SnowballPickupHelpMessageTask;
             }
+            if (IsAllowed(Permission.PVMenu))
+            {
+                Tick += AutoPVBlipOnExitTick;
+            }
             if (IsAllowed(Permission.PVLockDoors))
             {
                 Tick += PersonalVehicleOptions;
@@ -203,6 +207,11 @@ namespace vMenuClient
                     // Set the last vehicle to the new vehicle entity.
                     LastVehicle = tmpVehicle.Handle;
                     SwitchedVehicle = true;
+
+                    if (IsAllowed(Permission.PVMenu) && MainMenu.PermissionsSetupComplete && MainMenu.PersonalVehicleMenu != null && Game.PlayerPed == tmpVehicle.Driver)
+                    {
+                        MainMenu.PersonalVehicleMenu.SetCurrentPersonalVehicle(tmpVehicle);
+                    }
                 }
             }
             // this can wait 1 ms
@@ -265,6 +274,18 @@ namespace vMenuClient
                 if (GetMaxWantedLevel() > 0)
                 {
                     SetMaxWantedLevel(0);
+                }
+            }
+
+            if (DriveToWpTaskActive || DriveWanderTaskActive)
+            {
+                var activeOrg = Game.Player.State["activeOrg"];
+                if (activeOrg is string dutyOrg && !string.IsNullOrWhiteSpace(dutyOrg))
+                {
+                    ClearPedTasks(Game.PlayerPed.Handle);
+                    DriveToWpTaskActive = false;
+                    DriveWanderTaskActive = false;
+                    Notify.Error("Auto pilot cancelled because you went on duty.");
                 }
             }
 
@@ -343,7 +364,7 @@ namespace vMenuClient
                         RemoveDecalsFromVehicle(veh.Handle);
                     }
 
-                    if (autoRepairGod && IsVehicleDamaged(veh.Handle))
+                    if (autoRepairGod && IsVehicleDamaged(veh.Handle) && GetEntitySpeed(veh.Handle) <= 8.9408f)
                     {
                         veh.Repair();
                     }
@@ -1190,11 +1211,11 @@ namespace vMenuClient
                 {
                     if (dropReason == null)
                     {
-                        Notify.Custom($"~g~<C>{GetSafePlayerName(playerName)}</C>~s~ joined the server.");
+                        Notify.Custom($"~g~{GetSafePlayerName(playerName)}~s~ joined the server.");
                     }
                     else
                     {
-                        Notify.Custom($"~r~<C>{GetSafePlayerName(playerName)}</C>~s~ left the server. ~c~({GetSafePlayerName(dropReason)})");
+                        Notify.Custom($"~r~{GetSafePlayerName(playerName)}~s~ left the server. ~c~({GetSafePlayerName(dropReason)})");
                     }
                 }
             }
@@ -1233,14 +1254,14 @@ namespace vMenuClient
                                         {
                                             if (playerKiller.Character.Handle == killer.Handle)
                                             {
-                                                Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered by ~y~<C>{GetSafePlayerName(playerKiller.Name)}</C>~s~.");
+                                                Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered by ~y~{GetSafePlayerName(playerKiller.Name)}~s~.");
                                                 found = true;
                                                 break;
                                             }
                                         }
                                         if (!found)
                                         {
-                                            Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered.");
+                                            Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered.");
                                         }
                                     }
                                     else if (killer.Model.IsVehicle)
@@ -1252,7 +1273,7 @@ namespace vMenuClient
                                             {
                                                 if (playerKiller.Character.CurrentVehicle.Handle == killer.Handle)
                                                 {
-                                                    Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered by ~y~<C>{GetSafePlayerName(playerKiller.Name)}</C>~s~.");
+                                                    Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered by ~y~{GetSafePlayerName(playerKiller.Name)}~s~.");
                                                     found = true;
                                                     break;
                                                 }
@@ -1260,27 +1281,27 @@ namespace vMenuClient
                                         }
                                         if (!found)
                                         {
-                                            Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered.");
+                                            Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered.");
                                         }
                                     }
                                     else
                                     {
-                                        Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered.");
+                                        Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered.");
                                     }
                                 }
                                 else
                                 {
-                                    Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~has been murdered.");
+                                    Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~has been murdered.");
                                 }
                             }
                             else
                             {
-                                Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~committed suicide.");
+                                Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~committed suicide.");
                             }
                         }
                         else
                         {
-                            Notify.Custom($"~o~<C>{GetSafePlayerName(p.Name)}</C> ~s~died.");
+                            Notify.Custom($"~o~{GetSafePlayerName(p.Name)} ~s~died.");
                         }
                         deadPlayers.Add(p.Handle);
                     }
@@ -1981,23 +2002,19 @@ namespace vMenuClient
         {
             if (MainMenu.MiscSettingsMenu != null && Game.PlayerPed.IsDead)
             {
-                var restoreDefault = false;
-                if (MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter)
-                {
-                    if (!string.IsNullOrEmpty(GetResourceKvpString("vmenu_default_character")))
-                    {
-                        restoreDefault = true;
-                    }
-                    else
-                    {
-                        Notify.Error("You did not set a saved character to restore to. Do so in the ~g~MP Ped Customization~s~ > ~g~Saved Characters~s~ menu.");
-                    }
-                }
+                var restoreDefault = MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter
+                    && !string.IsNullOrEmpty(GetResourceKvpString("vmenu_default_character"));
+
                 if (!restoreDefault)
                 {
-                    if (MainMenu.MiscSettingsMenu.RestorePlayerAppearance && IsAllowed(Permission.MSRestoreAppearance))
+                    if (IsAllowed(Permission.MSRestoreAppearance))
                     {
-                        await SavePed("vMenu_tmp_saved_ped");
+                        var savedMpSnapshot = MainMenu.MpPedCustomizationMenu != null
+                            && MainMenu.MpPedCustomizationMenu.CaptureCurrentMpAppearanceSnapshot();
+                        if (!savedMpSnapshot)
+                        {
+                            await SavePed("vMenu_tmp_saved_ped");
+                        }
                     }
                 }
 
@@ -2019,15 +2036,22 @@ namespace vMenuClient
                     await Delay(0);
                 }
 
-                if (restoreDefault)
+                var restoredMpAppearance = MainMenu.MpPedCustomizationMenu != null
+                    && await MainMenu.MpPedCustomizationMenu.RestorePreferredMpAppearance(true);
+                if (restoredMpAppearance)
                 {
-                    await MainMenu.MpPedCustomizationMenu.SpawnThisCharacter(GetResourceKvpString("vmenu_default_character"), false);
+                    var deathAppearancePatchJson = await WaitForDpClothingDeathAppearancePatchJson();
+                    if (HasDpClothingDeathAppearancePatch(deathAppearancePatchJson))
+                    {
+                        ApplyDpClothingDeathAppearancePatchToLivePed(deathAppearancePatchJson);
+                        TriggerServerEvent("dpclothing:server:consumeDeathAppearancePatch");
+                    }
                 }
                 else
                 {
-                    if (IsTempPedSaved() && MainMenu.MiscSettingsMenu.RestorePlayerAppearance && IsAllowed(Permission.MSRestoreAppearance))
+                    if (IsTempPedSaved() && IsAllowed(Permission.MSRestoreAppearance))
                     {
-                        LoadSavedPed("vMenu_tmp_saved_ped", false);
+                        LoadSavedPed("vMenu_tmp_saved_ped", false, true);
                     }
                 }
 
@@ -2153,8 +2177,95 @@ namespace vMenuClient
         #endregion
 
         #region player blips tasks
+        // Blips this script created for other players (server id -> blip handle). GetBlipFromEntity only
+        // returns one blip per ped, so it can't tell ours from another resource's (like the duty blip).
+        private readonly Dictionary<int, int> ownedPlayerBlips = new();
+
+        // Players whose blip another resource is already drawing. vMenu leaves them alone.
+        // client/dutyBlips.lua pushes this list to us with a plain string event. It used to be
+        // pulled from here through a Lua export every 100 ms: a constant stream of C# -> Lua calls,
+        // each creating and releasing function references, which coincided with vMenu's key
+        // handlers failing ("No such reference for 1": F1 and noclip stop responding until a game
+        // restart). A string event carries no function references.
+        private HashSet<int> externalBlipPlayers = new();
+        private int externalBlipPlayersUpdatedAt;
+        // dutyBlips.lua resends at least every 5 s. If it goes quiet (stopped, erroring), drop the
+        // list so vMenu draws its own blips again rather than hiding them indefinitely.
+        private const int ExternalBlipPlayersStaleMs = 15000;
+        private int ownedPlayerBlipsPrunedAt;
+        private const int OwnedPlayerBlipsPruneMs = 100;
+
+        private static bool HasGpsRoute(int serverId)
+        {
+            return MainMenu.OnlinePlayersMenu != null && MainMenu.OnlinePlayersMenu.PlayersWaypointList.Contains(serverId);
+        }
+
+        /// <summary>
+        /// Removes the blip vMenu created for this player, if any. Blips from other resources are never touched.
+        /// </summary>
+        private void RemoveOwnedPlayerBlip(int serverId)
+        {
+            if (ownedPlayerBlips.TryGetValue(serverId, out var blip))
+            {
+                ownedPlayerBlips.Remove(serverId);
+                if (DoesBlipExist(blip))
+                {
+                    RemoveBlip(ref blip);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Server ids whose blip another resource is drawing, as a comma-separated list ("" for none),
+        /// pushed by client/dutyBlips.lua.
+        /// </summary>
+        [EventHandler("vMenu:SetExternalBlipPlayers")]
+        public void SetExternalBlipPlayers(string serverIds)
+        {
+            var players = new HashSet<int>();
+            if (!string.IsNullOrEmpty(serverIds))
+            {
+                foreach (var part in serverIds.Split(','))
+                {
+                    if (int.TryParse(part, out var serverId) && serverId > 0)
+                    {
+                        players.Add(serverId);
+                    }
+                }
+            }
+            externalBlipPlayers = players;
+            externalBlipPlayersUpdatedAt = GetGameTimer();
+        }
+
+        private void PruneOwnedPlayerBlips()
+        {
+            ownedPlayerBlipsPrunedAt = GetGameTimer();
+
+            // forget blips that no longer exist (player left, streamed out or was respawned).
+            foreach (var serverId in ownedPlayerBlips.Where(entry => !DoesBlipExist(entry.Value)).Select(entry => entry.Key).ToList())
+            {
+                ownedPlayerBlips.Remove(serverId);
+            }
+
+            // stop trusting a list the duty script has stopped refreshing.
+            if (externalBlipPlayers.Count > 0 && GetGameTimer() - externalBlipPlayersUpdatedAt > ExternalBlipPlayersStaleMs)
+            {
+                externalBlipPlayers = new HashSet<int>();
+            }
+        }
+
         private async Task PlayerBlipsControl()
         {
+            // Idle gate: with the blips toggle off this tick still looped every
+            // player in scope at frame rate. The body must keep running while
+            // off — it deletes leftover blips and keeps our sprite decorator
+            // fresh for other players who have blips enabled — but 2Hz is
+            // plenty for that. Toggled on, it stays per-frame as before.
+            if (MainMenu.MiscSettingsMenu == null || !MainMenu.MiscSettingsMenu.ShowPlayerBlips)
+            {
+                await Delay(500);
+            }
+
             if (DecorIsRegisteredAsType("vmenu_player_blip_sprite_id", 3))
             {
                 var sprite = 1;
@@ -2181,6 +2292,11 @@ namespace vMenuClient
                 {
                     var enabled = MainMenu.MiscSettingsMenu.ShowPlayerBlips;
 
+                    if (enabled && GetGameTimer() - ownedPlayerBlipsPrunedAt >= OwnedPlayerBlipsPruneMs)
+                    {
+                        PruneOwnedPlayerBlips();
+                    }
+
                     foreach (var p in MainMenu.PlayersList)
                     {
                         // continue only if this player is valid.
@@ -2192,13 +2308,39 @@ namespace vMenuClient
                                 if (!p.IsLocal)
                                 {
                                     var ped = p.Character.Handle;
-                                    var blip = GetBlipFromEntity(ped);
 
-                                    // if blip id is invalid.
-                                    if (blip < 1)
+                                    // the duty blip already covers this player, so drop our own blip (unless it is carrying a GPS route).
+                                    if (externalBlipPlayers.Contains(p.ServerId))
                                     {
-                                        blip = AddBlipForEntity(ped);
+                                        if (!HasGpsRoute(p.ServerId))
+                                        {
+                                            RemoveOwnedPlayerBlip(p.ServerId);
+                                        }
+                                        continue;
                                     }
+
+                                    var attachedBlip = GetBlipFromEntity(ped);
+                                    int blip;
+
+                                    // keep using our blip for as long as it is still attached to this player.
+                                    if (!(ownedPlayerBlips.TryGetValue(p.ServerId, out blip) && attachedBlip > 0 && DoesBlipExist(blip)))
+                                    {
+                                        RemoveOwnedPlayerBlip(p.ServerId);
+                                        blip = attachedBlip;
+
+                                        // if blip id is invalid.
+                                        if (blip < 1)
+                                        {
+                                            blip = AddBlipForEntity(ped);
+                                            ownedPlayerBlips[p.ServerId] = blip;
+                                        }
+                                        // a blip from another resource is on this player; don't restyle it (GPS routes are the exception).
+                                        else if (!HasGpsRoute(p.ServerId))
+                                        {
+                                            continue;
+                                        }
+                                    }
+
                                     // only manage the blip for this player if the player is nearby
                                     if (p.Character.Position.DistanceToSquared2D(Game.PlayerPed.Position) < 500000 || Game.IsPaused)
                                     {
@@ -2264,9 +2406,10 @@ namespace vMenuClient
                             }
                             else // blips are not enabled.
                             {
-                                if (!(p.Character.AttachedBlip == null || !p.Character.AttachedBlip.Exists()) && MainMenu.OnlinePlayersMenu != null && !MainMenu.OnlinePlayersMenu.PlayersWaypointList.Contains(p.ServerId))
+                                // remove the player blip we created. Blips from other resources (like the duty blip) are left alone.
+                                if (MainMenu.OnlinePlayersMenu != null && !HasGpsRoute(p.ServerId))
                                 {
-                                    p.Character.AttachedBlip.Delete(); // remove player blip if it exists.
+                                    RemoveOwnedPlayerBlip(p.ServerId);
                                 }
                             }
                         }
@@ -2398,7 +2541,7 @@ namespace vMenuClient
                                 SetBlipRoute(blip, false);
                                 RemoveBlip(ref blip);
                                 waypointPlayerIdsToRemove.Add(playerId);
-                                Notify.Custom($"~g~You've reached ~s~<C>{GetPlayerName(playerId)}</C>'s~g~ location, disabling GPS route.");
+                                Notify.Custom($"~g~You've reached ~s~{GetPlayerName(playerId)}'s~g~ location, disabling GPS route.");
                             }
                         }
                     }
@@ -2862,6 +3005,68 @@ namespace vMenuClient
         #region Personal Vehicle options
         private bool didShowPvHelpMessage = false;
         private int time = 0;
+
+        private async Task AutoPVBlipOnExitTick()
+        {
+            if (!MainMenu.PermissionsSetupComplete || MainMenu.PersonalVehicleMenu == null)
+            {
+                await Delay(200);
+                return;
+            }
+
+            var personalVehicleMenu = MainMenu.PersonalVehicleMenu;
+            var personalVehicle = personalVehicleMenu.CurrentPersonalVehicle;
+
+            if (personalVehicle == null)
+            {
+                await Delay(200);
+                return;
+            }
+
+            if (!personalVehicle.Exists())
+            {
+                // The vehicle streamed out (e.g. the player walked deep into an
+                // interior); the entity handle is dead but the vehicle may still
+                // exist on the server. Keep the selection and re-resolve it from
+                // its network id once it streams back in.
+                personalVehicleMenu.TryReacquireCurrentPersonalVehicle();
+                await Delay(200);
+                return;
+            }
+
+            if (personalVehicle.IsDead)
+            {
+                personalVehicleMenu.ClearCurrentPersonalVehicle();
+                await Delay(200);
+                return;
+            }
+
+            var driver = personalVehicle.Driver;
+            var hasDriver = driver != null && driver.Exists();
+            if (hasDriver)
+            {
+                // Blips should only exist while there is no driver in the vehicle.
+                personalVehicleMenu.RemoveCurrentPersonalVehicleBlip();
+
+                if (driver != Game.PlayerPed && driver.IsPlayer)
+                {
+                    personalVehicleMenu.ClearCurrentPersonalVehicle();
+                    await Delay(200);
+                    return;
+                }
+            }
+            else if (personalVehicleMenu.BlipOnExit)
+            {
+                personalVehicleMenu.EnsureCurrentPersonalVehicleBlip();
+            }
+            else
+            {
+                personalVehicleMenu.RemoveCurrentPersonalVehicleBlip();
+            }
+
+            await Delay(100);
+        }
+
         /// <summary>
         /// Manages personal vehicle options like locking doors while close.
         /// </summary>

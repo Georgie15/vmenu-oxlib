@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 using Newtonsoft.Json;
 
@@ -222,6 +222,12 @@ namespace vMenuClient
             set { SetSavedSettingsBool("miscJoinQuitNotifications", value); }
         }
 
+        public static bool MPPedPreviews
+        {
+            get { return GetSettingsBool("mpPedPreviews"); }
+            set { SetSavedSettingsBool("mpPedPreviews", value); }
+        }
+
         public static bool MiscDeathNotifications
         {
             get { return GetSettingsBool("miscDeathNotifications"); }
@@ -262,12 +268,6 @@ namespace vMenuClient
         {
             get { return GetSettingsBool("miscShowOverheadNames"); }
             set { SetSavedSettingsBool("miscShowOverheadNames", value); }
-        }
-
-        public static bool MiscRestorePlayerAppearance
-        {
-            get { return GetSettingsBool("miscRestorePlayerAppearance"); }
-            set { SetSavedSettingsBool("miscRestorePlayerAppearance", value); }
         }
 
         public static bool MiscRestorePlayerWeapons
@@ -395,6 +395,12 @@ namespace vMenuClient
             get { return GetSettingsBool("pvEnableVehicleBlip"); }
             set { SetSavedSettingsBool("pvEnableVehicleBlip", value); }
         }
+
+        public static bool PVBlipOnExit
+        {
+            get { return GetSettingsBool("pvBlipOnExit"); }
+            set { SetSavedSettingsBool("pvBlipOnExit", value); }
+        }
         #endregion
         #endregion
 
@@ -425,7 +431,6 @@ namespace vMenuClient
                     "voiceChatShowSpeaker" or
                     "voiceChatEnabled" or
                     "autoEquipParachuteWhenInPlane" or
-                    "miscRestorePlayerAppearance" or
                     "miscRestorePlayerWeapons" or
                     "miscRightAlignMenu" or
                     "miscRespawnDefaultCharacter" or
@@ -548,6 +553,9 @@ namespace vMenuClient
                 MiscJoinQuitNotifications = MainMenu.MiscSettingsMenu.JoinQuitNotifications;
                 prefs.Add("miscJoinQuitNotifications", MiscJoinQuitNotifications);
 
+                MPPedPreviews = MainMenu.MiscSettingsMenu.MPPedPreviews;
+                prefs.Add("mpPedPreviews", MPPedPreviews);
+
                 MiscSpeedKmh = MainMenu.MiscSettingsMenu.ShowSpeedoKmh;
                 prefs.Add("miscSpeedKmh", MiscSpeedKmh);
 
@@ -568,9 +576,6 @@ namespace vMenuClient
 
                 MiscRespawnDefaultCharacter = MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter;
                 prefs.Add("miscRespawnDefaultCharacter", MiscRespawnDefaultCharacter);
-
-                MiscRestorePlayerAppearance = MainMenu.MiscSettingsMenu.RestorePlayerAppearance;
-                prefs.Add("miscRestorePlayerAppearance", MiscRestorePlayerAppearance);
 
                 MiscRestorePlayerWeapons = MainMenu.MiscSettingsMenu.RestorePlayerWeapons;
                 prefs.Add("miscRestorePlayerWeapons", MiscRestorePlayerWeapons);
@@ -702,8 +707,8 @@ namespace vMenuClient
 
             if (MainMenu.PersonalVehicleMenu != null)
             {
-                PVEnableVehicleBlip = MainMenu.PersonalVehicleMenu.EnableVehicleBlip;
-                prefs.Add("pvEnableVehicleBlip", PVEnableVehicleBlip);
+                PVBlipOnExit = MainMenu.PersonalVehicleMenu.BlipOnExit;
+                prefs.Add("pvBlipOnExit", PVBlipOnExit);
             }
 
             Notify.Success("Your settings have been saved.");

@@ -33,6 +33,8 @@ namespace vMenuClient.menus
         public Menu DeleteConfirmMenu { get; private set; }
         public Menu VehicleUnderglowMenu { get; private set; }
 
+        public static Dictionary<uint, Dictionary<int, string>> VehicleExtras;
+
         // Public variables (getters only), return the private variables.
         public bool VehicleGodMode { get; private set; } = UserDefaults.VehicleGodMode;
         public bool VehicleGodInvincible { get; private set; } = UserDefaults.VehicleGodInvincible;
@@ -69,7 +71,7 @@ namespace vMenuClient.menus
         private void CreateMenu()
         {
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Vehicle Options");
+            menu = new Menu(" ", "Vehicle Options");
 
             #region menu items variables
             // vehicle god mode menu
@@ -506,7 +508,20 @@ namespace vMenuClient.menus
                         // Repair vehicle.
                         if (item == fixVehicle)
                         {
-                            vehicle.Repair();
+                            if (GetEntitySpeed(vehicle.Handle) > 8.9408f)
+                            {
+                                SendNotification("You cannot repair your vehicle while moving over 20 mph.");
+                            }
+                            else
+                            {
+                                vehicle.Repair();
+                                var actionData = new Dictionary<string, object>
+                                {
+                                    ["vehicle"] = vehicle.Handle,
+                                    ["networkId"] = NetworkGetNetworkIdFromEntity(vehicle.Handle)
+                                };
+                                TriggerEvent("vMenu:Integrations:Action", "vehiclerepair", actionData);
+                            }
                         }
                         // Clean vehicle.
                         else if (item == cleanVehicle)
@@ -1042,21 +1057,32 @@ namespace vMenuClient.menus
             #endregion
 
             #region Vehicle Colors Submenu Stuff
+            // color customization menu
+            var customizeColorMenu = new Menu("Vehicle Colors", "Customize Colors");
+            MenuController.AddSubmenu(VehicleColorsMenu, customizeColorMenu);
+
+            var colorsCustomizationBtn = new MenuItem("Customize Colors") { Label = "→→→" };
+            VehicleColorsMenu.AddMenuItem(colorsCustomizationBtn);
+            MenuController.BindMenuItem(VehicleColorsMenu, customizeColorMenu, colorsCustomizationBtn);
+
             // primary menu
             var primaryColorsMenu = new Menu("Vehicle Colors", "Primary Colors");
-            MenuController.AddSubmenu(VehicleColorsMenu, primaryColorsMenu);
+            MenuController.AddSubmenu(customizeColorMenu, primaryColorsMenu);
 
             var primaryColorsBtn = new MenuItem("Primary Color") { Label = "→→→" };
-            VehicleColorsMenu.AddMenuItem(primaryColorsBtn);
-            MenuController.BindMenuItem(VehicleColorsMenu, primaryColorsMenu, primaryColorsBtn);
+            customizeColorMenu.AddMenuItem(primaryColorsBtn);
+            MenuController.BindMenuItem(customizeColorMenu, primaryColorsMenu, primaryColorsBtn);
 
             // secondary menu
             var secondaryColorsMenu = new Menu("Vehicle Colors", "Secondary Colors");
-            MenuController.AddSubmenu(VehicleColorsMenu, secondaryColorsMenu);
+            MenuController.AddSubmenu(customizeColorMenu, secondaryColorsMenu);
 
             var secondaryColorsBtn = new MenuItem("Secondary Color") { Label = "→→→" };
-            VehicleColorsMenu.AddMenuItem(secondaryColorsBtn);
-            MenuController.BindMenuItem(VehicleColorsMenu, secondaryColorsMenu, secondaryColorsBtn);
+            customizeColorMenu.AddMenuItem(secondaryColorsBtn);
+            MenuController.BindMenuItem(customizeColorMenu, secondaryColorsMenu, secondaryColorsBtn);
+
+            var presetColorsBtn = new MenuListItem("Preset Colors", new List<string>(), 0);
+            customizeColorMenu.AddMenuItem(presetColorsBtn);
 
             // color lists
             var classic = new List<string>();
@@ -1123,10 +1149,43 @@ namespace vMenuClient.menus
             var vehicleEnveffScale = new MenuSliderItem("Vehicle Enveff Scale", "This works on certain vehicles only, like the besra for example. It 'fades' certain paint layers.", 0, 20, 10, true);
 
             var chrome = new MenuItem("Chrome");
-            VehicleColorsMenu.AddMenuItem(chrome);
+            customizeColorMenu.AddMenuItem(chrome);
             VehicleColorsMenu.AddMenuItem(vehicleEnveffScale);
 
-            VehicleColorsMenu.OnItemSelect += (sender, item, index) =>
+            customizeColorMenu.OnMenuOpen += (_) =>
+            {
+                var veh = GetVehicle();
+                if (veh == null || !veh.Exists())
+                {
+                    presetColorsBtn.Enabled = false;
+                    presetColorsBtn.ListItems = new List<string>() { "No Preset Colors" };
+                    presetColorsBtn.ListIndex = 0;
+                    return;
+                }
+
+                int numVehColors = GetNumberOfVehicleColours(veh.Handle);
+                if (numVehColors <= 0)
+                {
+                    presetColorsBtn.Enabled = false;
+                    presetColorsBtn.ListItems = new List<string>() { "No Preset Colors" };
+                    presetColorsBtn.ListIndex = 0;
+                    return;
+                }
+
+                var colorOptions = new List<string>();
+                for (int i = 0; i < numVehColors; i++)
+                {
+                    colorOptions.Add($"Preset Color #{i + 1}");
+                }
+
+                presetColorsBtn.Enabled = true;
+                presetColorsBtn.ListItems = colorOptions;
+
+                int currentColor = GetVehicleColourCombination(veh.Handle);
+                presetColorsBtn.ListIndex = currentColor < 0 ? 0 : MathUtil.Clamp(currentColor, 0, colorOptions.Count - 1);
+            };
+
+            customizeColorMenu.OnItemSelect += (sender, item, index) =>
             {
                 var veh = GetVehicle();
                 if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
@@ -1141,6 +1200,22 @@ namespace vMenuClient.menus
                     Notify.Error("You need to be the driver of a driveable vehicle to change this.");
                 }
             };
+
+            void ChangeVehiclePresetColor(int index)
+            {
+                var veh = GetVehicle();
+                if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
+                {
+                    SetVehicleColourCombination(veh.Handle, index);
+                }
+                else
+                {
+                    Notify.Error("You need to be the driver of a driveable vehicle to change this.");
+                }
+            }
+
+            customizeColorMenu.OnListItemSelect += (_, _, index, _) => ChangeVehiclePresetColor(index);
+            customizeColorMenu.OnListIndexChange += (_, _, _, index, _) => ChangeVehiclePresetColor(index);
             VehicleColorsMenu.OnSliderPositionChange += (m, sliderItem, oldPosition, newPosition, itemIndex) =>
             {
                 var veh = GetVehicle();
@@ -1659,18 +1734,35 @@ namespace vMenuClient.menus
                     // Check if the vehicle exists, it's actually a vehicle, it's not dead/broken and the player is in the drivers seat.
                     if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
                     {
-                        //List<int> extraIds = new List<int>();
+                        // Check if vehicle is too damaged to change extras
+                        bool checkDamageBeforeChangingExtras = GetSettingsBool(Setting.vmenu_prevent_extras_when_damaged) && !IsAllowed(Permission.VOBypassExtraDamage);
+                        bool isTooDamaged = checkDamageBeforeChangingExtras && IsVehicleTooDamagedToChangeExtras(veh);
+
+                        Dictionary<int, string> extraLabels;
+                        if (!VehicleExtras.TryGetValue((uint)veh.Model.Hash, out extraLabels))
+                        {
+                            extraLabels = new Dictionary<int, string>();
+                        }
+
                         // Loop through all possible extra ID's (AFAIK: 0-14).
                         for (var extra = 0; extra < 14; extra++)
                         {
                             // If this extra exists...
                             if (veh.ExtraExists(extra))
                             {
-                                // Add it's ID to the list.
-                                //extraIds.Add(extra);
-
+                                // Create the checkbox label
+                                string extraLabel;
+                                if (!extraLabels.TryGetValue(extra, out extraLabel))
+                                    extraLabel = $"Extra #{extra}";
                                 // Create a checkbox for it.
-                                var extraCheckbox = new MenuCheckboxItem($"Extra #{extra}", extra.ToString(), veh.IsExtraOn(extra));
+                                var extraCheckbox = new MenuCheckboxItem(extraLabel, extra.ToString(), veh.IsExtraOn(extra));
+                                
+                                // Disable checkbox if vehicle is too damaged
+                                if (isTooDamaged)
+                                {
+                                    extraCheckbox.Enabled = false;
+                                }
+                                
                                 // Add the checkbox to the menu.
                                 VehicleComponentsMenu.AddMenuItem(extraCheckbox);
 
@@ -1678,8 +1770,6 @@ namespace vMenuClient.menus
                                 vehicleExtras[extraCheckbox] = extra;
                             }
                         }
-
-
 
                         if (vehicleExtras.Count > 0)
                         {
@@ -1709,6 +1799,52 @@ namespace vMenuClient.menus
                     }
                 }
             };
+
+            // Disable all extra options if vehicle is too damaged
+            VehicleComponentsMenu.OnMenuOpen += (menu) =>
+            {
+                Vehicle vehicle;
+                bool checkDamageBeforeChangingExtras = GetSettingsBool(Setting.vmenu_prevent_extras_when_damaged) && !IsAllowed(Permission.VOBypassExtraDamage);
+
+                if (!checkDamageBeforeChangingExtras || !Entity.Exists(vehicle = GetVehicle()))
+                {
+                    return;
+                }
+
+                List<MenuItem> menuItems = menu.GetMenuItems();
+                bool isTooDamaged = IsVehicleTooDamagedToChangeExtras(vehicle);
+
+                menu.ClearMenuItems();
+
+                if (isTooDamaged && !menuItems.Exists(i => i.Text.Contains("too damaged")))
+                {
+                    MenuItem spacer = GetSpacerMenuItem("Vehicle too damaged!", "Vehicle is too damaged to change extras, repair it first!");
+
+                    // Place at the start of the menu
+                    menuItems.Insert(0, spacer);
+                }
+
+                foreach (MenuItem item in menuItems)
+                {
+                    // Check for spacer
+                    if (item.Text.Contains("too damaged"))
+                    {
+                        if (!isTooDamaged)
+                        {
+                            continue;
+                        }
+                    }
+                    else if (item.Text != "Go Back")
+                    {
+                        item.Enabled = !isTooDamaged;
+                    }
+
+                    menu.AddMenuItem(item);
+                }
+
+                menu.RefreshIndex();
+            };
+
             // when a checkbox in the components menu changes
             VehicleComponentsMenu.OnCheckboxChange += (sender, item, index, _checked) =>
             {
@@ -1717,7 +1853,47 @@ namespace vMenuClient.menus
                 if (vehicleExtras.TryGetValue(item, out var extra))
                 {
                     var veh = GetVehicle();
+
+                    if (!Entity.Exists(veh))
+                    {
+                        Notify.Error(CommonErrors.NoVehicle);
+                        return;
+                    }
+
+                    if (GetEntitySpeed(veh.Handle) > 8.9408f)
+                    {
+                        ((MenuCheckboxItem)item).Checked = veh.IsExtraOn(extra);
+                        SendNotification("You cannot change vehicle extras while moving over 20 mph.");
+                        return;
+                    }
+
+                    bool checkDamageBeforeChangingExtras = GetSettingsBool(Setting.vmenu_prevent_extras_when_damaged) && !IsAllowed(Permission.VOBypassExtraDamage);
+
+                    if (checkDamageBeforeChangingExtras)
+                    {
+                        bool isTooDamaged = IsVehicleTooDamagedToChangeExtras(veh);
+
+                        if (isTooDamaged)
+                        {
+                            // Send message to player when extra change is denied
+                            Notify.Alert("Vehicle is too damaged to change extra, repair it first!", true, false);
+
+                            // Revert checkbox back to original state
+                            ((MenuCheckboxItem)item).Checked = veh.IsExtraOn(extra);
+
+                            // Send to previous menu
+                            VehicleComponentsMenu.GoBack();
+                            return;
+                        }
+                    }
+
+                    float engineHealth = veh.EngineHealth;
+                    float fuelTankHealth = GetVehiclePetrolTankHealth(veh.Handle);
+
                     veh.ToggleExtra(extra, _checked);
+
+                    veh.EngineHealth = engineHealth;
+                    SetVehiclePetrolTankHealth(veh.Handle, fuelTankHealth);
                 }
             };
             #endregion
@@ -1964,7 +2140,7 @@ namespace vMenuClient.menus
                 SetVehicleModKit(veh.Handle, 0);
 
                 // Get all mods available on this vehicle.
-                var mods = veh.Mods.GetAllMods();
+                var mods = GetAllVehicleMods(veh);
 
                 // Loop through all the mods.
                 foreach (var mod in mods)
@@ -2447,6 +2623,16 @@ namespace vMenuClient.menus
             return 0;
         }
         #endregion
+
+        private bool IsVehicleTooDamagedToChangeExtras(Vehicle vehicle)
+        {
+            float bodyHealth = vehicle.BodyHealth;
+            float engineHealth = vehicle.EngineHealth;
+            float allowedBodyHealth = GetSettingsInt(Setting.vmenu_allowed_body_damage_for_extra_change);
+            float allowedEngineHealth = GetSettingsInt(Setting.vmenu_allowed_engine_damage_for_extra_change);
+
+            return bodyHealth < allowedBodyHealth || engineHealth < allowedEngineHealth;
+        }
 
         private static bool HasDestroyedEngine(Vehicle vehicle)
         {

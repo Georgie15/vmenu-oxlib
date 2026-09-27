@@ -26,6 +26,7 @@ files {
     'MenuAPI.dll',
     'config/locations.json',
     'config/addons.json',
+    'config/pedpack.json',
     'storage.html'
 }
 

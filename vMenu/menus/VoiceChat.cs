@@ -49,7 +49,7 @@ namespace vMenuClient.menus
             }
 
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Voice Chat Settings");
+            menu = new Menu(" ", "Voice Chat Settings");
 
             var voiceChatEnabled = new MenuCheckboxItem("Enable Voice Chat", "Enable or disable voice chat.", EnableVoicechat);
             var showCurrentSpeaker = new MenuCheckboxItem("Show Current Speaker", "Shows who is currently talking.", ShowCurrentSpeaker);

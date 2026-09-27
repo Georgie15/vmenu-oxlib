@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 
 using CitizenFX.Core;
@@ -15,12 +15,18 @@ namespace vMenuClient.menus
     {
         // Variables
         private Menu menu;
-        public bool EnableVehicleBlip { get; private set; } = UserDefaults.PVEnableVehicleBlip;
+        private MenuItem currentVehicleInfoItem;
+        public bool BlipOnExit { get; private set; } = UserDefaults.PVBlipOnExit;
 
         // Empty constructor
         public PersonalVehicle() { }
 
         public Vehicle CurrentPersonalVehicle { get; internal set; } = null;
+
+        // Entity handles die whenever the vehicle streams out (e.g. the player
+        // walks into an interior), so the network id is what actually
+        // identifies the personal vehicle across its lifetime.
+        public int CurrentPersonalVehicleNetId { get; private set; } = 0;
 
         public Menu VehicleDoorsMenu { get; internal set; } = null;
 
@@ -31,10 +37,10 @@ namespace vMenuClient.menus
         private void CreateMenu()
         {
             // Menu
-            menu = new Menu(GetSafePlayerName(Game.Player.Name), "Personal Vehicle Options");
+            menu = new Menu(" ", "Personal Vehicle Options");
 
             // menu items
-            var setVehice = new MenuItem("Set Vehicle", "Sets your current vehicle as your personal vehicle. If you already have a personal vehicle set then this will override your selection.") { Label = "Current Vehicle: None" };
+            currentVehicleInfoItem = new MenuItem("Current Personal Vehicle", "Drive a vehicle as the driver to set it as your personal vehicle.") { Label = "None", Enabled = false };
             var toggleEngine = new MenuItem("Toggle Engine", "Toggles the engine on or off, even when you're not inside of the vehicle. This does not work if someone else is currently using your vehicle.");
             var toggleLights = new MenuListItem("Set Vehicle Lights", new List<string>() { "Force On", "Force Off", "Reset" }, 0, "This will enable or disable your vehicle headlights, the engine of your vehicle needs to be running for this to work.");
             var toggleStance = new MenuListItem("Vehicle Stance", new List<string>() { "Default", "Lowered" }, 0, "Select stance for your Personal Vehicle.");
@@ -48,7 +54,7 @@ namespace vMenuClient.menus
             };
             var soundHorn = new MenuItem("Sound Horn", "Sounds the horn of the vehicle.");
             var toggleAlarm = new MenuItem("Toggle Alarm Sound", "Toggles the vehicle alarm sound on or off. This does not set an alarm. It only toggles the current sounding status of the alarm.");
-            var enableBlip = new MenuCheckboxItem("Add Blip For Personal Vehicle", "Enables or disables the blip that gets added when you mark a vehicle as your personal vehicle.", EnableVehicleBlip) { Style = MenuCheckboxItem.CheckboxStyle.Cross };
+            var blipOnExit = new MenuCheckboxItem("Vehicle Blip On Exit", "When enabled, a blip is shown for your personal vehicle only while no driver is inside. The blip is removed if anyone is driving.", BlipOnExit);
             var exclusiveDriver = new MenuCheckboxItem("Exclusive Driver", "If enabled, then you will be the only one that can enter the drivers seat. Other players will not be able to drive the car. They can still be passengers.", false) { Style = MenuCheckboxItem.CheckboxStyle.Cross };
             //submenu
             VehicleDoorsMenu = new Menu("Vehicle Doors", "Vehicle Doors Management");
@@ -56,7 +62,7 @@ namespace vMenuClient.menus
             MenuController.BindMenuItem(menu, VehicleDoorsMenu, doorsMenuBtn);
 
             // This is always allowed if this submenu is created/allowed.
-            menu.AddMenuItem(setVehice);
+            menu.AddMenuItem(currentVehicleInfoItem);
 
             // Add conditional features.
 
@@ -108,11 +114,8 @@ namespace vMenuClient.menus
                 menu.AddMenuItem(toggleAlarm);
             }
 
-            // Enable blip for personal vehicle
-            if (IsAllowed(Permission.PVAddBlip))
-            {
-                menu.AddMenuItem(enableBlip);
-            }
+            // Blip option for personal vehicle.
+            menu.AddMenuItem(blipOnExit);
 
             if (IsAllowed(Permission.PVExclusiveDriver))
             {
@@ -174,32 +177,31 @@ namespace vMenuClient.menus
             // Handle checkbox changes
             menu.OnCheckboxChange += (sender, item, index, _checked) =>
             {
-                if (item == enableBlip)
+                if (item == blipOnExit)
                 {
-                    EnableVehicleBlip = _checked;
-                    if (EnableVehicleBlip)
+                    BlipOnExit = _checked;
+                    if (BlipOnExit)
                     {
                         if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists())
                         {
-                            if (CurrentPersonalVehicle.AttachedBlip == null || !CurrentPersonalVehicle.AttachedBlip.Exists())
+                            var driver = CurrentPersonalVehicle.Driver;
+                            if (driver == null || !driver.Exists())
                             {
-                                CurrentPersonalVehicle.AttachBlip();
+                                EnsureCurrentPersonalVehicleBlip();
                             }
-                            CurrentPersonalVehicle.AttachedBlip.Sprite = BlipSprite.PersonalVehicleCar;
-                            CurrentPersonalVehicle.AttachedBlip.Name = "Personal Vehicle";
+                            else
+                            {
+                                RemoveCurrentPersonalVehicleBlip();
+                            }
                         }
                         else
                         {
                             Notify.Error("You have not yet selected a personal vehicle, or your vehicle has been deleted. Set a personal vehicle before you can use these options.");
                         }
-
                     }
                     else
                     {
-                        if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists() && CurrentPersonalVehicle.AttachedBlip != null && CurrentPersonalVehicle.AttachedBlip.Exists())
-                        {
-                            CurrentPersonalVehicle.AttachedBlip.Delete();
-                        }
+                        RemoveCurrentPersonalVehicleBlip();
                     }
                 }
                 else if (item == exclusiveDriver)
@@ -231,59 +233,21 @@ namespace vMenuClient.menus
             };
 
             // Handle button presses.
-            menu.OnItemSelect += (sender, item, index) =>
+            menu.OnItemSelect += async (sender, item, index) =>
             {
-                if (item == setVehice)
+                if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
                 {
-                    if (Game.PlayerPed.IsInVehicle())
-                    {
-                        var veh = GetVehicle();
-                        if (veh != null && veh.Exists())
-                        {
-                            if (Game.PlayerPed == veh.Driver)
-                            {
-                                CurrentPersonalVehicle = veh;
-                                veh.PreviouslyOwnedByPlayer = true;
-                                veh.IsPersistent = true;
-                                if (EnableVehicleBlip && IsAllowed(Permission.PVAddBlip))
-                                {
-                                    if (veh.AttachedBlip == null || !veh.AttachedBlip.Exists())
-                                    {
-                                        veh.AttachBlip();
-                                    }
-                                    veh.AttachedBlip.Sprite = BlipSprite.PersonalVehicleCar;
-                                    veh.AttachedBlip.Name = "Personal Vehicle";
-                                }
-                                var name = GetLabelText(veh.DisplayName);
-                                if (string.IsNullOrEmpty(name) || name.ToLower() == "null")
-                                {
-                                    name = veh.DisplayName;
-                                }
-                                item.Label = $"Current Vehicle: {name}";
-                            }
-                            else
-                            {
-                                Notify.Error(CommonErrors.NeedToBeTheDriver);
-                            }
-                        }
-                        else
-                        {
-                            Notify.Error(CommonErrors.NoVehicle);
-                        }
-                    }
-                    else
-                    {
-                        Notify.Error(CommonErrors.NoVehicle);
-                    }
+                    TryReacquireCurrentPersonalVehicle();
                 }
-                else if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists())
+
+                if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists())
                 {
                     if (item == kickAllPassengers)
                     {
-                        if (CurrentPersonalVehicle.Occupants.Count() > 0 && CurrentPersonalVehicle.Occupants.Any(p => p != Game.PlayerPed))
+                        Ped[] occupants = CurrentPersonalVehicle.Occupants;
+                        if (occupants.Count() > 0 && occupants.Any(p => p != Game.PlayerPed && p.IsPlayer))
                         {
-                            var netId = VehToNet(CurrentPersonalVehicle.Handle);
-                            TriggerServerEvent("vMenu:GetOutOfCar", netId, Game.Player.ServerId);
+                            TriggerServerEvent("vMenu:GetOutOfCar", CurrentPersonalVehicle.NetworkId);
                         }
                         else
                         {
@@ -292,13 +256,10 @@ namespace vMenuClient.menus
                     }
                     else
                     {
-                        if (!NetworkHasControlOfEntity(CurrentPersonalVehicle.Handle))
+                        if (!await RequestEntityControl(CurrentPersonalVehicle.Handle))
                         {
-                            if (!NetworkRequestControlOfEntity(CurrentPersonalVehicle.Handle))
-                            {
-                                Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
-                                return;
-                            }
+                            Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
+                            return;
                         }
 
                         if (item == toggleEngine)
@@ -363,18 +324,20 @@ namespace vMenuClient.menus
             VehicleDoorsMenu.AddMenuItem(removeDoorList);
             VehicleDoorsMenu.AddMenuItem(deleteDoors);
 
-            VehicleDoorsMenu.OnListItemSelect += (sender, item, index, itemIndex) =>
+            VehicleDoorsMenu.OnListItemSelect += async (sender, item, index, itemIndex) =>
             {
+                if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
+                {
+                    TryReacquireCurrentPersonalVehicle();
+                }
+
                 var veh = CurrentPersonalVehicle;
                 if (veh != null && veh.Exists())
                 {
-                    if (!NetworkHasControlOfEntity(CurrentPersonalVehicle.Handle))
+                    if (!await RequestEntityControl(veh.Handle))
                     {
-                        if (!NetworkRequestControlOfEntity(CurrentPersonalVehicle.Handle))
-                        {
-                            Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
-                            return;
-                        }
+                        Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
+                        return;
                     }
 
                     if (item == removeDoorList)
@@ -385,18 +348,20 @@ namespace vMenuClient.menus
                 }
             };
 
-            VehicleDoorsMenu.OnItemSelect += (sender, item, index) =>
+            VehicleDoorsMenu.OnItemSelect += async (sender, item, index) =>
             {
+                if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
+                {
+                    TryReacquireCurrentPersonalVehicle();
+                }
+
                 var veh = CurrentPersonalVehicle;
                 if (veh != null && veh.Exists() && !veh.IsDead)
                 {
-                    if (!NetworkHasControlOfEntity(CurrentPersonalVehicle.Handle))
+                    if (!await RequestEntityControl(veh.Handle))
                     {
-                        if (!NetworkRequestControlOfEntity(CurrentPersonalVehicle.Handle))
-                        {
-                            Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
-                            return;
-                        }
+                        Notify.Error("You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.");
+                        return;
                     }
 
                     if (index < 8)
@@ -458,6 +423,137 @@ namespace vMenuClient.menus
                 }
             };
             #endregion
+        }
+
+        private void UpdateCurrentVehicleLabel()
+        {
+            if (currentVehicleInfoItem == null)
+            {
+                return;
+            }
+
+            if (CurrentPersonalVehicle == null || !CurrentPersonalVehicle.Exists())
+            {
+                currentVehicleInfoItem.Label = "None";
+                return;
+            }
+
+            var name = GetLabelText(CurrentPersonalVehicle.DisplayName);
+            if (string.IsNullOrEmpty(name) || name.ToLower() == "null")
+            {
+                name = CurrentPersonalVehicle.DisplayName;
+            }
+            currentVehicleInfoItem.Label = name;
+        }
+
+        private static void DeleteVehicleBlip(Vehicle vehicle)
+        {
+            if (vehicle != null && vehicle.Exists() && vehicle.AttachedBlip != null && vehicle.AttachedBlip.Exists())
+            {
+                vehicle.AttachedBlip.Delete();
+            }
+        }
+
+        public void EnsureCurrentPersonalVehicleBlip(bool showNotSetError = false)
+        {
+            if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists())
+            {
+                if (CurrentPersonalVehicle.AttachedBlip == null || !CurrentPersonalVehicle.AttachedBlip.Exists())
+                {
+                    CurrentPersonalVehicle.AttachBlip();
+                }
+                CurrentPersonalVehicle.AttachedBlip.Sprite = BlipSprite.PersonalVehicleCar;
+                CurrentPersonalVehicle.AttachedBlip.Name = "Personal Vehicle";
+            }
+            else if (showNotSetError)
+            {
+                Notify.Error("You have not yet selected a personal vehicle, or your vehicle has been deleted. Set a personal vehicle before you can use these options.");
+            }
+        }
+
+        public void RemoveCurrentPersonalVehicleBlip()
+        {
+            DeleteVehicleBlip(CurrentPersonalVehicle);
+        }
+
+        public void SetCurrentPersonalVehicle(Vehicle vehicle)
+        {
+            if (vehicle == null || !vehicle.Exists())
+            {
+                ClearCurrentPersonalVehicle();
+                return;
+            }
+
+            if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists() && CurrentPersonalVehicle.Handle != vehicle.Handle)
+            {
+                DeleteVehicleBlip(CurrentPersonalVehicle);
+            }
+
+            CurrentPersonalVehicle = vehicle;
+            CurrentPersonalVehicle.PreviouslyOwnedByPlayer = true;
+            CurrentPersonalVehicle.IsPersistent = true;
+            CurrentPersonalVehicleNetId = NetworkGetEntityIsNetworked(vehicle.Handle) ? vehicle.NetworkId : 0;
+
+            if (BlipOnExit)
+            {
+                var driver = CurrentPersonalVehicle.Driver;
+                if (driver == null || !driver.Exists())
+                {
+                    EnsureCurrentPersonalVehicleBlip();
+                }
+                else
+                {
+                    RemoveCurrentPersonalVehicleBlip();
+                }
+            }
+            else
+            {
+                RemoveCurrentPersonalVehicleBlip();
+            }
+
+            UpdateCurrentVehicleLabel();
+        }
+
+        public void ClearCurrentPersonalVehicle(bool clearBlip = true)
+        {
+            if (clearBlip)
+            {
+                DeleteVehicleBlip(CurrentPersonalVehicle);
+            }
+            CurrentPersonalVehicle = null;
+            CurrentPersonalVehicleNetId = 0;
+            UpdateCurrentVehicleLabel();
+        }
+
+        /// <summary>
+        /// Re-resolves the personal vehicle from its network id after the local
+        /// entity handle went stale (the vehicle streamed out and back in).
+        /// Returns true if the personal vehicle currently exists in the world.
+        /// </summary>
+        public bool TryReacquireCurrentPersonalVehicle()
+        {
+            if (CurrentPersonalVehicleNetId == 0 || !NetworkDoesNetworkIdExist(CurrentPersonalVehicleNetId))
+            {
+                return false;
+            }
+
+            var handle = NetToVeh(CurrentPersonalVehicleNetId);
+            if (!DoesEntityExist(handle) || !IsEntityAVehicle(handle))
+            {
+                return false;
+            }
+
+            if (CurrentPersonalVehicle == null || CurrentPersonalVehicle.Handle != handle)
+            {
+                CurrentPersonalVehicle = new Vehicle(handle)
+                {
+                    PreviouslyOwnedByPlayer = true,
+                    IsPersistent = true
+                };
+                UpdateCurrentVehicleLabel();
+            }
+
+            return true;
         }
 
 

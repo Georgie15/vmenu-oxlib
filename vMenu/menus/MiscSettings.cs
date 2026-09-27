@@ -12,6 +12,7 @@ using vMenuClient.data;
 
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
+using static vMenuShared.ConfigManager;
 using static vMenuShared.PermissionsManager;
 
 namespace vMenuClient.menus
@@ -34,9 +35,21 @@ namespace vMenuClient.menus
         public bool JoinQuitNotifications { get; private set; } = UserDefaults.MiscJoinQuitNotifications;
         public bool LockCameraX { get; private set; } = false;
         public bool LockCameraY { get; private set; } = false;
+        public bool MPPedPreviews { get; private set; } = UserDefaults.MPPedPreviews;
         public bool ShowLocationBlips { get; private set; } = UserDefaults.MiscLocationBlips;
         public bool ShowPlayerBlips { get; private set; } = UserDefaults.MiscShowPlayerBlips;
-        public bool MiscShowOverheadNames { get; private set; } = UserDefaults.MiscShowOverheadNames;
+        private bool _miscShowOverheadNames;
+        // Backed by a state bag so server-side resources (e.g. EasyAdmin spectate overlay)
+        // can ask "does this player have overhead names enabled?" without a callback round-trip.
+        public bool MiscShowOverheadNames
+        {
+            get => _miscShowOverheadNames;
+            private set
+            {
+                _miscShowOverheadNames = value;
+                Game.Player.State.Set("vmenuNamesEnabled", value, true);
+            }
+        }
         public bool ShowVehicleModelDimensions { get; private set; } = false;
         public bool ShowPedModelDimensions { get; private set; } = false;
         public bool ShowPropModelDimensions { get; private set; } = false;
@@ -44,17 +57,24 @@ namespace vMenuClient.menus
         public bool ShowEntityModels { get; private set; } = false;
         public bool ShowEntityNetOwners { get; private set; } = false;
         public bool MiscRespawnDefaultCharacter { get; private set; } = UserDefaults.MiscRespawnDefaultCharacter;
-        public bool RestorePlayerAppearance { get; private set; } = UserDefaults.MiscRestorePlayerAppearance;
         public bool RestorePlayerWeapons { get; private set; } = UserDefaults.MiscRestorePlayerWeapons;
         public bool DrawTimeOnScreen { get; internal set; } = UserDefaults.MiscShowTime;
         public bool MiscRightAlignMenu { get; private set; } = UserDefaults.MiscRightAlignMenu;
-        public bool MiscDisablePrivateMessages { get; private set; } = UserDefaults.MiscDisablePrivateMessages;
+        private bool _disablePrivateMessages;
+        public bool MiscDisablePrivateMessages
+        {
+            get => _disablePrivateMessages;
+            private set
+            {
+                _disablePrivateMessages = value;
+                Game.Player.State.Set("vmenu_pms_disabled", value, true);
+            }
+        }
         public bool MiscDisableControllerSupport { get; private set; } = UserDefaults.MiscDisableControllerSupport;
 
         internal bool TimecycleEnabled { get; private set; } = false;
         internal int LastTimeCycleModifierIndex { get; private set; } = UserDefaults.MiscLastTimeCycleModifierIndex;
         internal int LastTimeCycleModifierStrength { get; private set; } = UserDefaults.MiscLastTimeCycleModifierStrength;
-
 
         // keybind states
         public bool KbTpToWaypoint { get; private set; } = UserDefaults.KbTpToWaypoint;
@@ -67,6 +87,19 @@ namespace vMenuClient.menus
         public bool KbPointKeys { get; private set; } = UserDefaults.KbPointKeys;
 
         internal static List<vMenuShared.ConfigManager.TeleportLocation> TpLocations = new();
+
+        // === ADDED: instance + refs so we can flip state and untick/tick the UI ===
+        public static MiscSettings Instance { get; private set; }
+        private MenuCheckboxItem _playerBlipsItem;
+        private MenuCheckboxItem _playerNamesItem;
+
+        public MiscSettings()
+        {
+            Instance = this;
+            // Ensure statebags reflect local preference on startup.
+            MiscDisablePrivateMessages = UserDefaults.MiscDisablePrivateMessages;
+            MiscShowOverheadNames = UserDefaults.MiscShowOverheadNames;
+        }
 
         /// <summary>
         /// Creates the menu.
@@ -85,19 +118,19 @@ namespace vMenuClient.menus
             }
 
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Misc Settings");
-            teleportOptionsMenu = new Menu(Game.Player.Name, "Teleport Options");
-            developerToolsMenu = new Menu(Game.Player.Name, "Development Tools");
-            entitySpawnerMenu = new Menu(Game.Player.Name, "Entity Spawner");
+            menu = new Menu(" ", "Misc Settings");
+            teleportOptionsMenu = new Menu(" ", "Teleport Options");
+            developerToolsMenu = new Menu(" ", "Development Tools");
+            entitySpawnerMenu = new Menu(" ", "Entity Spawner");
 
             // teleport menu
-            var teleportMenu = new Menu(Game.Player.Name, "Teleport Locations");
+            var teleportMenu = new Menu(" ", "Teleport Locations");
             var teleportMenuBtn = new MenuItem("Teleport Locations", "Teleport to pre-configured locations, added by the server owner.");
             MenuController.AddSubmenu(menu, teleportMenu);
             MenuController.BindMenuItem(menu, teleportMenu, teleportMenuBtn);
 
             // keybind settings menu
-            var keybindMenu = new Menu(Game.Player.Name, "Keybind Settings");
+            var keybindMenu = new Menu(" ", "Keybind Settings");
             var keybindMenuBtn = new MenuItem("Keybind Settings", "Enable or disable keybinds for some options.");
             MenuController.AddSubmenu(menu, keybindMenu);
             MenuController.BindMenuItem(menu, keybindMenu, keybindMenuBtn);
@@ -143,6 +176,7 @@ namespace vMenuClient.menus
             var clearArea = new MenuItem("Clear Area", "Clears the area around your player (100 meters). Damage, dirt, peds, props, vehicles, etc. Everything gets cleaned up, fixed and reset to the default world state.");
             var lockCamX = new MenuCheckboxItem("Lock Camera Horizontal Rotation", "Locks your camera horizontal rotation. Could be useful in helicopters I guess.", false);
             var lockCamY = new MenuCheckboxItem("Lock Camera Vertical Rotation", "Locks your camera vertical rotation. Could be useful in helicopters I guess.", false);
+            var mpPedPreview = new MenuCheckboxItem("3D MP Ped Preview", "Shows a 3D Ped preview when viewing saved MP Peds.", MPPedPreviews);
 
             // Entity spawner
             var spawnNewEntity = new MenuItem("Spawn New Entity", "Spawns entity into the world and lets you set its position and rotation.\n~y~Upon creation, all entities are automatically frozen in position.");
@@ -150,7 +184,7 @@ namespace vMenuClient.menus
             var cancelEntity = new MenuItem("Cancel", "Deletes current entity and cancels its placement");
             var confirmAndDuplicate = new MenuItem("Confirm Entity Position And Duplicate", "Stops placing entity and sets it at it current location and creates new one to place.");
 
-            var connectionSubmenu = new Menu(Game.Player.Name, "Connection Options");
+            var connectionSubmenu = new Menu(" ", "Connection Options");
             var connectionSubmenuBtn = new MenuItem("Connection Options", "Server connection/game quit options.");
 
             var quitSession = new MenuItem("Quit Session", "Leaves you connected to the server, but quits the network session. ~r~Can not be used when you are the host.");
@@ -172,10 +206,22 @@ namespace vMenuClient.menus
             var timeCycleIntensity = new MenuSliderItem("Timecycle Modifier Intensity", "Set the timecycle modifier intensity.", 0, 20, LastTimeCycleModifierStrength, true);
 
             var locationBlips = new MenuCheckboxItem("Location Blips", "Shows blips on the map for some common locations.", ShowLocationBlips);
-            var playerBlips = new MenuCheckboxItem("Show Player Blips", "Shows blips on the map for all players. ~y~Note for when the server is using OneSync Infinity: this won't work for players that are too far away.", ShowPlayerBlips);
-            var playerNames = new MenuCheckboxItem("Show Player Names", "Enables or disables player overhead names.", MiscShowOverheadNames);
-            var respawnDefaultCharacter = new MenuCheckboxItem("Respawn As Default MP Character", "If you enable this, then you will (re)spawn as your default saved MP character. Note the server owner can globally disable this option. To set your default character, go to one of your saved MP Characters and click the 'Set As Default Character' button.", MiscRespawnDefaultCharacter);
-            var restorePlayerAppearance = new MenuCheckboxItem("Restore Player Appearance", "Restore your player's skin whenever you respawn after being dead. Re-joining a server will not restore your previous skin.", RestorePlayerAppearance);
+
+            var playerBlips = new MenuCheckboxItem(
+                "Show Player Blips",
+                "Shows blips on the map for all players. ~y~Note for when the server is using OneSync Infinity: this won't work for players that are too far away.",
+                ShowPlayerBlips
+            );
+            _playerBlipsItem = playerBlips;   // <-- ADDED: keep a reference
+
+            var playerNames = new MenuCheckboxItem(
+                "Show Player Names",
+                "Enables or disables player overhead names.",
+                MiscShowOverheadNames
+            );
+            _playerNamesItem = playerNames;   // <-- ADDED: keep a reference
+
+            var respawnDefaultCharacter = new MenuCheckboxItem("Respawn As Default MP Character", "If enabled, your saved default MP character is forced when you join, respawn, or revive. If disabled, vMenu restores the last MP character/outfit you were wearing instead. Server owners can globally disable this option. To choose the default, open a saved MP Character and click 'Set As Default Character'.", MiscRespawnDefaultCharacter);
             var restorePlayerWeapons = new MenuCheckboxItem("Restore Player Weapons", "Restore your weapons whenever you respawn after being dead. Re-joining a server will not restore your previous weapons.", RestorePlayerWeapons);
 
             MenuController.AddSubmenu(menu, connectionSubmenu);
@@ -469,8 +515,7 @@ namespace vMenuClient.menus
             {
                 if (item == clearArea)
                 {
-                    var pos = Game.PlayerPed.Position;
-                    BaseScript.TriggerServerEvent("vMenu:ClearArea", pos.X, pos.Y, pos.Z);
+                    BaseScript.TriggerServerEvent("vMenu:ClearArea");
                 }
                 else if (item == copyCoords)
                 {
@@ -494,7 +539,8 @@ namespace vMenuClient.menus
                     CopyToClipboard(text);
                     Notify.Info("Vehicle hash copied to clipboard.");
 
-                };
+                }
+                ;
             };
 
             developerToolsMenu.OnCheckboxChange += (sender, item, index, _checked) =>
@@ -597,7 +643,6 @@ namespace vMenuClient.menus
 
             #endregion
 
-
             // Keybind options
             if (IsAllowed(Permission.MSDriftMode))
             {
@@ -642,7 +687,7 @@ namespace vMenuClient.menus
                 bool nvEnabled = false;
                 RegisterCommand("toggle-nv", new Action<int, List<object>, string>((source, args, rawCommand) =>
                 {
-                    if(!CanDoInteraction("nightvision") && !nvEnabled)
+                    if (!CanDoInteraction("nightvision") && !nvEnabled)
                     {
                         Notify.Error("You can't use night vision right now.");
                         return;
@@ -686,10 +731,6 @@ namespace vMenuClient.menus
             }
             // always allowed, it just won't do anything if the server owner disabled the feature, but players can still toggle it.
             menu.AddMenuItem(respawnDefaultCharacter);
-            if (IsAllowed(Permission.MSRestoreAppearance))
-            {
-                menu.AddMenuItem(restorePlayerAppearance);
-            }
             if (IsAllowed(Permission.MSRestoreWeapons))
             {
                 menu.AddMenuItem(restorePlayerWeapons);
@@ -700,6 +741,12 @@ namespace vMenuClient.menus
             menu.AddMenuItem(hideHud);
             menu.AddMenuItem(lockCamX);
             menu.AddMenuItem(lockCamY);
+
+            if (GetSettingsBool(Setting.vmenu_mp_ped_preview))
+            {
+                menu.AddMenuItem(mpPedPreview);
+            }
+
             if (MainMenu.EnableExperimentalFeatures)
             {
                 menu.AddMenuItem(exportData);
@@ -800,6 +847,10 @@ namespace vMenuClient.menus
                 {
                     LockCameraY = _checked;
                 }
+                else if (item == mpPedPreview)
+                {
+                    MPPedPreviews = _checked;
+                }
                 else if (item == locationBlips)
                 {
                     ToggleBlips(_checked);
@@ -839,10 +890,6 @@ namespace vMenuClient.menus
                 {
                     MiscRespawnDefaultCharacter = _checked;
                 }
-                else if (item == restorePlayerAppearance)
-                {
-                    RestorePlayerAppearance = _checked;
-                }
                 else if (item == restorePlayerWeapons)
                 {
                     RestorePlayerWeapons = _checked;
@@ -879,6 +926,28 @@ namespace vMenuClient.menus
             };
         }
 
+        /// <summary>
+        /// Flip Names/Blips from outside (and sync the checkbox UI)
+        /// </summary>
+        public void ForceSetPlayerBlips(bool enabled)
+        {
+            ShowPlayerBlips = enabled;
+            if (_playerBlipsItem != null && _playerBlipsItem.Checked != enabled)
+                _playerBlipsItem.Checked = enabled;
+
+            var data = new Dictionary<string, object> { ["enabled"] = enabled };
+            BaseScript.TriggerEvent("vMenu:Integrations:Action", "playerblips", data);
+        }
+
+        public void ForceSetPlayerNames(bool enabled)
+        {
+            MiscShowOverheadNames = enabled;
+            if (_playerNamesItem != null && _playerNamesItem.Checked != enabled)
+                _playerNamesItem.Checked = enabled;
+
+            var data = new Dictionary<string, object> { ["enabled"] = enabled };
+            BaseScript.TriggerEvent("vMenu:Integrations:Action", "playernames", data);
+        }
 
         /// <summary>
         /// Create the menu if it doesn't exist, and then returns it.

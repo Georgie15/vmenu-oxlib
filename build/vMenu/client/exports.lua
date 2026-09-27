@@ -75,8 +75,8 @@ CreateThread(function()
 		end)
 	end
 
-	-- so blackouts dont affect vehicle headlights
-	if GetConvar("vmenu_blackout_affect_vehicles", "false") == "false" then
+	-- keep vehicle lights enabled during blackout when configured
+	if GetConvar("vmenu_vehicle_blackout_enabled", "true") == "true" then
 		SetArtificialLightsStateAffectsVehicles(false)
 	end
 end)

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 using static CitizenFX.Core.Native.API;
 
@@ -43,6 +43,7 @@ namespace vMenuClient.data
             (uint)GetHashKey("a_c_retriever"),
             (uint)GetHashKey("a_c_rhesus"),
             (uint)GetHashKey("a_c_rottweiler"),
+            (uint)GetHashKey("a_c_rottweiler_02"), // mp2025_01
             (uint)GetHashKey("a_c_seagull"),
             (uint)GetHashKey("a_c_sharkhammer"),
             (uint)GetHashKey("a_c_sharktiger"),

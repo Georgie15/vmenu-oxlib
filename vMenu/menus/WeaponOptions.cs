@@ -44,7 +44,7 @@ namespace vMenuClient.menus
 
             #region create main weapon options menu and add items
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Weapon Options");
+            menu = new Menu(" ", "Weapon Options");
 
             var getAllWeapons = new MenuItem("Get All Weapons", "Get all weapons.");
             var removeAllWeapons = new MenuItem("Remove All Weapons", "Removes all weapons in your inventory.");

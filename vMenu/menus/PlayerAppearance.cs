@@ -1,25 +1,34 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 using CitizenFX.Core;
 
 using MenuAPI;
+using Newtonsoft.Json;
 
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
+using static vMenuShared.ConfigManager;
 using static vMenuShared.PermissionsManager;
 
 namespace vMenuClient.menus
 {
     public class PlayerAppearance
     {
+        private const string DefaultPedPackStoreUrl = "https://psrp.tebex.io/category/permissions";
+
         private Menu menu;
 
         private Menu pedCustomizationMenu;
+        private Menu pedCollectionsMenu;
+        private Menu pedCollectionsCustomizationMenu;
         private Menu savedPedsMenu;
         private Menu spawnPedsMenu;
         private Menu addonPedsMenu;
+        private Menu pedPackPedsMenu;
+        private Menu pedPackPedActionsMenu;
         private readonly Menu mainPedsMenu = new("Main Peds", "Spawn A Ped");
         private readonly Menu animalsPedsMenu = new("Animals", "Spawn A Ped");
         private readonly Menu malePedsMenu = new("Male Peds", "Spawn A Ped");
@@ -27,11 +36,18 @@ namespace vMenuClient.menus
         private readonly Menu otherPedsMenu = new("Other Peds", "Spawn A Ped");
 
         public static Dictionary<string, uint> AddonPeds;
+        public static List<PedPackEntry> PedPackPeds;
+        public static PlayerAppearance Instance { get; private set; }
 
         public static int ClothingAnimationType { get; set; } = UserDefaults.PAClothingAnimationType;
 
         private readonly Dictionary<MenuListItem, int> drawablesMenuListItems = new();
         private readonly Dictionary<MenuListItem, int> propsMenuListItems = new();
+
+        public PlayerAppearance()
+        {
+            Instance = this;
+        }
 
         #region create the menu
         /// <summary>
@@ -40,18 +56,26 @@ namespace vMenuClient.menus
         private void CreateMenu()
         {
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Player Appearance");
-            savedPedsMenu = new Menu(Game.Player.Name, "Saved Peds");
-            pedCustomizationMenu = new Menu(Game.Player.Name, "Customize Saved Ped");
-            spawnPedsMenu = new Menu(Game.Player.Name, "Spawn Ped");
-            addonPedsMenu = new Menu(Game.Player.Name, "Addon Peds");
+            menu = new Menu(" ", "Player Appearance");
+            savedPedsMenu = new Menu(" ", "Saved Peds");
+            pedCustomizationMenu = new Menu(" ", "Customize Saved Ped");
+            pedCollectionsMenu = new Menu(" ", "Ped Collections");
+            pedCollectionsCustomizationMenu = new Menu(" ", "I get updated at runtime!");
+            spawnPedsMenu = new Menu(" ", "Spawn Ped");
+            addonPedsMenu = new Menu(" ", "Addon Peds");
+            pedPackPedsMenu = new Menu(" ", "Ped Pack");
+            pedPackPedActionsMenu = new Menu(" ", "Ped Pack Ped");
 
 
             // Add the (submenus) to the menu pool.
             MenuController.AddSubmenu(menu, pedCustomizationMenu);
+            MenuController.AddSubmenu(menu, pedCollectionsMenu);
+            MenuController.AddSubmenu(pedCollectionsMenu, pedCollectionsCustomizationMenu);
             MenuController.AddSubmenu(menu, savedPedsMenu);
             MenuController.AddSubmenu(menu, spawnPedsMenu);
             MenuController.AddSubmenu(spawnPedsMenu, addonPedsMenu);
+            MenuController.AddSubmenu(spawnPedsMenu, pedPackPedsMenu);
+            MenuController.AddSubmenu(pedPackPedsMenu, pedPackPedActionsMenu);
             MenuController.AddSubmenu(spawnPedsMenu, mainPedsMenu);
             MenuController.AddSubmenu(spawnPedsMenu, animalsPedsMenu);
             MenuController.AddSubmenu(spawnPedsMenu, malePedsMenu);
@@ -60,6 +84,7 @@ namespace vMenuClient.menus
 
             // Create the menu items.
             var pedCustomization = new MenuItem("Ped Customization", "Modify your ped's appearance.") { Label = "→→→" };
+            var pedCollections = new MenuItem("Ped Collections", "Modify your ped's appearance using collections, such as from the Base Game, Offical DLCs, and Custom Collections.") { Label = "→→→" };
             var saveCurrentPed = new MenuItem("Save Ped", "Save your current ped. Note for the MP Male/Female peds this won't save most of their customization, just because that's impossible. Create those characters in the MP Character creator instead.");
             var savedPedsBtn = new MenuItem("Saved Peds", "Edit, rename, clone, spawn or delete saved peds.") { Label = "→→→" };
             var spawnPedsBtn = new MenuItem("Spawn Peds", "Change ped model by selecting one from the list or by selecting an addon ped from the list.") { Label = "→→→" };
@@ -67,6 +92,7 @@ namespace vMenuClient.menus
 
             var spawnByNameBtn = new MenuItem("Spawn By Name", "Spawn a ped by entering it's name manually.");
             var addonPedsBtn = new MenuItem("Addon Peds", "Spawn a ped from the addon peds list.") { Label = "→→→" };
+            var pedPackPedsBtn = new MenuItem("Ped Pack", "Browse your curated ped pack list.") { Label = "→→→" };
             var mainPedsBtn = new MenuItem("Main Peds", "Select a new ped from the main player-peds list.") { Label = "→→→" };
             var animalPedsBtn = new MenuItem("Animals", "Become an animal. ~r~Note this may crash your own or other players' game if you die as an animal, godmode can NOT prevent this.") { Label = "→→→" };
             var malePedsBtn = new MenuItem("Male Peds", "Select a male ped.") { Label = "→→→" };
@@ -82,6 +108,7 @@ namespace vMenuClient.menus
 
             // Add items to the menu.
             menu.AddMenuItem(pedCustomization);
+            menu.AddMenuItem(pedCollections);
             menu.AddMenuItem(saveCurrentPed);
             menu.AddMenuItem(savedPedsBtn);
             menu.AddMenuItem(spawnPedsBtn);
@@ -92,10 +119,12 @@ namespace vMenuClient.menus
             if (IsAllowed(Permission.PACustomize))
             {
                 MenuController.BindMenuItem(menu, pedCustomizationMenu, pedCustomization);
+                MenuController.BindMenuItem(menu, pedCollectionsMenu, pedCollections);
             }
             else
             {
                 menu.RemoveMenuItem(pedCustomization);
+                menu.RemoveMenuItem(pedCollections);
             }
 
             // always allowed
@@ -148,7 +177,8 @@ namespace vMenuClient.menus
                         {
                             if (StorageManager.SavePedInfo("ped_" + name, savedPed.Value, false))
                             {
-                                Notify.Success($"Saved Ped has successfully been cloned. Clone name: ~g~<C>{name}</C>~s~.");
+                                UpdateSavedPedsMenu();
+                                Notify.Success($"Saved Ped has successfully been cloned. Clone name: ~g~{name}~s~.");
                             }
                             else
                             {
@@ -173,10 +203,11 @@ namespace vMenuClient.menus
                         }
                         if (StorageManager.SavePedInfo("ped_" + name, savedPed.Value, false))
                         {
-                            Notify.Success($"Saved Ped has successfully been renamed. New ped name: ~g~<C>{name}</C>~s~.");
                             DeleteResourceKvp(savedPed.Key);
                             selectedSavedPedMenu.MenuSubtitle = name;
                             savedPed = new KeyValuePair<string, PedInfo>("ped_" + name, savedPed.Value);
+                            UpdateSavedPedsMenu();
+                            Notify.Success($"Saved Ped has successfully been renamed. New ped name: ~g~{name}~s~.");
                         }
                         else
                         {
@@ -210,6 +241,7 @@ namespace vMenuClient.menus
                     if (item.Label == "Are you sure?")
                     {
                         DeleteResourceKvp(savedPed.Key);
+                        UpdateSavedPedsMenu();
                         Notify.Success("Your saved ped has been deleted.");
                         selectedSavedPedMenu.GoBack();
                     }
@@ -295,6 +327,39 @@ namespace vMenuClient.menus
                 selectedSavedPedMenu.MenuSubtitle = item.Text;
             };
 
+            var selectedPedPackPed = new PedPackEntry();
+            var spawnPedPackPed = new MenuItem("Spawn Ped", "Spawn this ped.");
+
+            pedPackPedActionsMenu.AddMenuItem(spawnPedPackPed);
+
+            pedPackPedsMenu.OnItemSelect += (_, item, __) =>
+            {
+                selectedPedPackPed = item.ItemData as PedPackEntry ?? new PedPackEntry();
+                pedPackPedActionsMenu.MenuSubtitle = item.Text;
+            };
+
+            pedPackPedActionsMenu.OnItemSelect += async (_, item, __) =>
+            {
+                if (item == spawnPedPackPed)
+                {
+                    if (string.IsNullOrWhiteSpace(selectedPedPackPed?.Model))
+                    {
+                        Notify.Error(CommonErrors.InvalidModel);
+                        return;
+                    }
+
+                    await SetPlayerSkin(selectedPedPackPed.Model, new PedInfo() { version = -1 }, true);
+                }
+            };
+
+            spawnPedsMenu.OnItemSelect += (_, item, __) =>
+            {
+                if (item == pedPackPedsBtn && !IsAllowed(Permission.PAPedPack))
+                {
+                    ShowPedPackStorePrompt();
+                }
+            };
+
             if (AddonPeds != null && AddonPeds.Count > 0 && IsAllowed(Permission.PAAddonPeds))
             {
                 spawnPedsMenu.AddMenuItem(addonPedsBtn);
@@ -330,6 +395,40 @@ namespace vMenuClient.menus
                 };
             }
 
+            if (PedPackPeds != null && PedPackPeds.Count > 0)
+            {
+                spawnPedsMenu.AddMenuItem(pedPackPedsBtn);
+                if (IsAllowed(Permission.PAPedPack))
+                {
+                    MenuController.BindMenuItem(spawnPedsMenu, pedPackPedsMenu, pedPackPedsBtn);
+
+                    var pedPackEntries = PedPackPeds.ToList();
+                    pedPackEntries.Sort((a, b) => a.DisplayName.ToLower().CompareTo(b.DisplayName.ToLower()));
+
+                    foreach (var ped in pedPackEntries)
+                    {
+                        var pedBtn = new MenuItem(ped.DisplayName, "Click to manage this ped.") { Label = $"({ped.Model})", ItemData = ped };
+                        var model = (uint)GetHashKey(ped.Model);
+
+                        if (!IsModelInCdimage(model) || !IsModelAPed(model))
+                        {
+                            pedBtn.Enabled = false;
+                            pedBtn.LeftIcon = MenuItem.Icon.LOCK;
+                            pedBtn.Description = "This ped is not (correctly) streamed. If you are the server owner, please ensure that the ped name and model are valid!";
+                        }
+
+                        pedPackPedsMenu.AddMenuItem(pedBtn);
+                        MenuController.BindMenuItem(pedPackPedsMenu, pedPackPedActionsMenu, pedBtn);
+                    }
+                }
+                else
+                {
+                    pedPackPedsBtn.Label = string.Empty;
+                    pedPackPedsBtn.RightIcon = MenuItem.Icon.LOCK;
+                    pedPackPedsBtn.Description = "You do not have access to this ped pack. Select this option to visit the store.";
+                }
+            }
+
             if (IsAllowed(Permission.PASpawnNew))
             {
                 spawnPedsMenu.AddMenuItem(spawnByNameBtn);
@@ -340,7 +439,7 @@ namespace vMenuClient.menus
                 spawnPedsMenu.AddMenuItem(otherPedsBtn);
 
                 MenuController.BindMenuItem(spawnPedsMenu, mainPedsMenu, mainPedsBtn);
-                if (vMenuShared.ConfigManager.GetSettingsBool(vMenuShared.ConfigManager.Setting.vmenu_enable_animals_spawn_menu))
+                if (vMenuShared.ConfigManager.GetSettingsBool(vMenuShared.ConfigManager.Setting.vmenu_enable_animals_spawn_menu) && IsAllowed(Permission.PASpawnAnimals))
                 {
                     MenuController.BindMenuItem(spawnPedsMenu, animalsPedsMenu, animalPedsBtn);
                 }
@@ -510,6 +609,10 @@ namespace vMenuClient.menus
                 {
                     RefreshCustomizationMenu();
                 }
+                if (item == pedCollections)
+                {
+                    RefreshCollectionsMenu();
+                }
                 else if (item == saveCurrentPed)
                 {
                     if (await SavePed())
@@ -547,19 +650,7 @@ namespace vMenuClient.menus
                     }
                     if (propID == 0)
                     {
-                        var component = GetPedPropIndex(Game.PlayerPed.Handle, 0);      // helmet index
-                        var texture = GetPedPropTextureIndex(Game.PlayerPed.Handle, 0); // texture
-                        var compHash = GetHashNameForProp(Game.PlayerPed.Handle, 0, component, texture); // prop combination hash
-                        if (GetShopPedApparelVariantPropCount((uint)compHash) > 0) // helmet has visor. 
-                        {
-                            if (!IsHelpMessageBeingDisplayed())
-                            {
-                                BeginTextCommandDisplayHelp("TWOSTRINGS");
-                                AddTextComponentSubstringPlayerName("Hold ~INPUT_SWITCH_VISOR~ to flip your helmet visor open or closed");
-                                AddTextComponentSubstringPlayerName("when on foot or on a motorcycle and when vMenu is closed.");
-                                EndTextCommandDisplayHelp(0, false, true, 6000);
-                            }
-                        }
+                        ShowVisorText(Game.PlayerPed.Handle);
                     }
 
                 }
@@ -594,6 +685,106 @@ namespace vMenuClient.menus
                     SetPedPropIndex(Game.PlayerPed.Handle, currentPropIndex, currentPropVariationIndex, newPropTextureVariationIndex, true);
                 }
             };
+
+            pedCollectionsCustomizationMenu.OnListIndexChange += (_, item, oldListIndex, newListIndex, ___) =>
+            {
+                string collectionName = item.ItemData;
+                int pedHandle = Game.PlayerPed.Handle;
+
+                if (drawablesMenuListItems.ContainsKey(item))
+                {
+                    int currentDrawableID = drawablesMenuListItems[item];
+                    bool isValid = IsPedCollectionComponentVariationValid(pedHandle, currentDrawableID, collectionName, newListIndex, 0)
+                        && !IsPedCollectionComponentVariationGen9Exclusive(pedHandle, currentDrawableID, collectionName, newListIndex);
+
+                    if (isValid)
+                    {
+                        int maxDrawableTextures = GetNumberOfPedCollectionTextureVariations(pedHandle, currentDrawableID, collectionName, newListIndex);
+                        SetPedCollectionComponentVariation(pedHandle, currentDrawableID, collectionName, newListIndex, 0, 0);
+
+                        item.Description = $"← & → to select, ~r~enter~s~ to cycle textures. Selected texture: #{GetPedTextureVariation(pedHandle, currentDrawableID) + 1} (of {maxDrawableTextures}).";
+                    }
+                    else
+                    {
+                        item.Description = "← & → to select, ~r~enter~s~ to cycle textures. Selection is invalid (broken, Gen9, etc.)";
+                    }
+
+                    if (item.ListItems[oldListIndex].StartsWith("None"))
+                    {
+                        item.ListItems.RemoveAt(oldListIndex);
+                    }
+                }
+                else if (propsMenuListItems.ContainsKey(item))
+                {
+                    int propID = propsMenuListItems[item];
+
+                    if (newListIndex == 0)
+                    {
+                        SetPedPropIndex(pedHandle, propID, -1, 0, false);
+                        ClearPedProp(pedHandle, propID);
+
+                        item.Description = "← & → to select, ~r~enter~s~ to cycle textures.";
+                    }
+                    else
+                    {
+                        int maxDrawableTextures = GetNumberOfPedCollectionPropTextureVariations(pedHandle, propID, collectionName, newListIndex - 1);
+                        SetPedCollectionPropIndex(pedHandle, propID, collectionName, newListIndex - 1, 0, true);
+
+                        item.Description = $"← & → to select, ~r~enter~s~ to cycle textures. Selected texture: #{GetPedPropTextureIndex(pedHandle, propID) + 1} (of {maxDrawableTextures}).";
+                    }
+
+                    if (propID == 0)
+                    {
+                        ShowVisorText(pedHandle);
+                    }
+                }
+            };
+
+            pedCollectionsCustomizationMenu.OnListItemSelect += (_, item, listIndex, __) =>
+            {
+                int pedHandle = Game.PlayerPed.Handle;
+                string collectionName = item.ItemData;
+
+                if (drawablesMenuListItems.ContainsKey(item))
+                {
+                    int currentDrawableID = drawablesMenuListItems[item];
+                    bool isValid = IsPedCollectionComponentVariationValid(pedHandle, currentDrawableID, collectionName, listIndex, 0)
+                        && !IsPedCollectionComponentVariationGen9Exclusive(pedHandle, currentDrawableID, collectionName, listIndex);
+
+                    if (!isValid)
+                    {
+                        return;
+                    }
+
+                    int currentTextureIndex = GetPedTextureVariation(pedHandle, currentDrawableID);
+                    int maxDrawableTextures = GetNumberOfPedCollectionTextureVariations(pedHandle, currentDrawableID, collectionName, listIndex) - 1;
+
+                    if (currentTextureIndex == -1)
+                    {
+                        currentTextureIndex = 0;
+                    }
+
+                    int newTexture = currentTextureIndex < maxDrawableTextures ? currentTextureIndex + 1 : 0;
+                    SetPedCollectionComponentVariation(pedHandle, currentDrawableID, collectionName, listIndex, newTexture, 0);
+
+                    item.Description = $"← & → to select, ~r~enter~s~ to cycle textures. Selected texture: #{newTexture + 1} (of {maxDrawableTextures + 1}).";
+                }
+                else if (propsMenuListItems.ContainsKey(item))
+                {
+                    int currentPropID = propsMenuListItems[item];
+                    int currentPropTextureVariation = GetPedPropTextureIndex(pedHandle, currentPropID);
+                    int maxPropTextureVariations = GetNumberOfPedCollectionPropTextureVariations(pedHandle, currentPropID, collectionName, listIndex - 1);
+                    int newPropTextureVariationIndex = currentPropTextureVariation + 1 < maxPropTextureVariations ? currentPropTextureVariation + 1 : 0;
+
+                    SetPedCollectionPropIndex(pedHandle, currentPropID, collectionName, listIndex - 1, newPropTextureVariationIndex, true);
+                    item.Description = $"← & → to select, ~r~enter~s~ to cycle textures. Selected texture: #{newPropTextureVariationIndex + 1} (of {maxPropTextureVariations}).";
+                }
+            };
+
+            pedCollectionsMenu.OnItemSelect += (_, menuItem, ___) =>
+            {
+                RefreshCollectionsDrawables(menuItem.ItemData);
+            };
             #endregion
 
         }
@@ -614,7 +805,34 @@ namespace vMenuClient.menus
             }
             return menu;
         }
+
+        public void OpenSpawnPedsMenu()
+        {
+            GetMenu();
+            spawnPedsMenu?.OpenMenu();
+        }
         #endregion
+
+        private static string GetPedPackStoreUrl()
+        {
+            var configuredUrl = GetSettingsString(Setting.vmenu_pedpack_store_url, DefaultPedPackStoreUrl);
+            return string.IsNullOrWhiteSpace(configuredUrl) ? DefaultPedPackStoreUrl : configuredUrl.Trim();
+        }
+
+        private static void ShowPedPackStorePrompt()
+        {
+            MenuController.CloseAllMenus();
+            SetNuiFocus(true, true);
+            SendNuiMessage(JsonConvert.SerializeObject(new
+            {
+                action = "showPedPackPrompt",
+                title = "Ped Pack Locked",
+                body = "Purchase access in the store to unlock this curated ped pack.",
+                confirmLabel = "Visit Store",
+                cancelLabel = "Not Now",
+                url = GetPedPackStoreUrl()
+            }));
+        }
 
         #region Ped Customization Menu
         ///// <summary>
@@ -677,6 +895,131 @@ namespace vMenuClient.menus
             }
             pedCustomizationMenu.RefreshIndex();
             #endregion
+        }
+
+        ///// <summary>
+        ///// Refresh/create the ped collections menu.
+        ///// </summary>
+        private void RefreshCollectionsMenu()
+        {
+            drawablesMenuListItems.Clear();
+            propsMenuListItems.Clear();
+            pedCollectionsMenu.ClearMenuItems();
+
+            int pedHandle = Game.PlayerPed.Handle;
+            int collectionsCount = GetPedCollectionsCount(pedHandle);
+
+            // In reverse so newest are at the top.
+            for (int i = collectionsCount - 1; i > -1; i--)
+            {
+                string collectionName = i == 0 ? "Base Collection" : GetPedCollectionName(pedHandle, i);
+                MenuItem collectionItem = new(collectionName, $"Customize your ped using the \"{collectionName}\" collection.")
+                {
+                    ItemData = collectionName,
+                    Label = $"(#{i})"
+                };
+
+                pedCollectionsMenu.AddMenuItem(collectionItem);
+                MenuController.BindMenuItem(pedCollectionsMenu, pedCollectionsCustomizationMenu, collectionItem);
+            }
+
+            pedCollectionsMenu.RefreshIndex();
+        }
+
+        private void RefreshCollectionsDrawables(string collectionName)
+        {
+            pedCollectionsCustomizationMenu.ClearMenuItems();
+            pedCollectionsCustomizationMenu.MenuSubtitle = collectionName;
+
+            int pedHandle = Game.PlayerPed.Handle;
+            if (collectionName == "Base Collection")
+            {
+                collectionName = "";
+            }
+
+            for (int drawable = 0; drawable < 12; drawable++)
+            {
+                int totalVariations = GetNumberOfPedCollectionDrawableVariations(pedHandle, drawable, collectionName);
+                if (totalVariations == 0)
+                {
+                    continue;
+                }
+
+                string suffixText;
+                int currentLocalIndex;
+                List<string> drawableTexturesList = new();
+                int currentDrawableGlobalId = GetPedDrawableVariation(pedHandle, drawable);
+                string currentCollection = GetPedCollectionNameFromDrawable(pedHandle, drawable, currentDrawableGlobalId);
+
+                for (int i = 0; i < totalVariations; i++)
+                {
+                    bool isValid = IsPedCollectionComponentVariationValid(pedHandle, drawable, collectionName, i, 0)
+                        && !IsPedCollectionComponentVariationGen9Exclusive(pedHandle, drawable, collectionName, i);
+                    drawableTexturesList.Add($"Drawable #{i + 1}{(!isValid ? " (Invalid)" : "")} (of {totalVariations})");
+                }
+
+                if (currentCollection == collectionName)
+                {
+                    currentLocalIndex = GetPedCollectionLocalIndexFromDrawable(pedHandle, drawable, currentDrawableGlobalId);
+                    suffixText = $"Selected texture: #{GetPedTextureVariation(pedHandle, drawable) + 1} (of {GetNumberOfPedCollectionTextureVariations(pedHandle, drawable, collectionName, currentLocalIndex)}).";
+                }
+                else
+                {
+                    drawableTexturesList.Add($"None Selected (of {totalVariations})");
+                    currentLocalIndex = drawableTexturesList.Count - 1;
+                    suffixText = "Current selection not part collection.";
+                }
+
+                MenuListItem item = new($"{textureNames[drawable]}", drawableTexturesList, currentLocalIndex, $"← & → to select, ~r~enter~s~ to cycle textures. {suffixText}")
+                {
+                    ItemData = collectionName
+                };
+
+                drawablesMenuListItems.Add(item, drawable);
+                pedCollectionsCustomizationMenu.AddMenuItem(item);
+            }
+
+            for (int tmpProp = 0; tmpProp < 5; tmpProp++)
+            {
+                int realProp = tmpProp > 2 ? tmpProp + 3 : tmpProp;
+                int totalVariations = GetNumberOfPedCollectionPropDrawableVariations(pedHandle, realProp, collectionName);
+                if (totalVariations == 0)
+                {
+                    continue;
+                }
+
+                string suffixText;
+                int currentLocalIndex;
+                int currentPropGlobalId = GetPedPropIndex(pedHandle, realProp);
+                List<string> propTexturesList = new() { $"None Selected (of {totalVariations})" };
+                string currentCollection = GetPedCollectionNameFromProp(pedHandle, realProp, currentPropGlobalId);
+
+                for (int i = 0; i < totalVariations; i++)
+                {
+                    propTexturesList.Add($"Prop #{i + 1} (of {totalVariations})");
+                }
+
+                if (currentCollection == collectionName)
+                {
+                    currentLocalIndex = GetPedCollectionLocalIndexFromProp(pedHandle, realProp, currentPropGlobalId);
+                    suffixText = $"Selected texture: #{GetPedPropTextureIndex(pedHandle, realProp) + 1} (of {GetNumberOfPedCollectionPropTextureVariations(pedHandle, realProp, collectionName, currentLocalIndex)}).";
+                }
+                else
+                {
+                    currentLocalIndex = -1;
+                    suffixText = "Current selection not part collection.";
+                }
+
+                MenuListItem propTextures = new($"{propNames[tmpProp]}", propTexturesList, currentLocalIndex + 1, $"← & → to select, ~r~enter~s~ to cycle textures. {suffixText}")
+                {
+                    ItemData = collectionName
+                };
+
+                propsMenuListItems.Add(propTextures, realProp);
+                pedCollectionsCustomizationMenu.AddMenuItem(propTextures);
+            }
+
+            pedCollectionsCustomizationMenu.RefreshIndex();
         }
 
         #region Textures & Props
@@ -1462,6 +1805,7 @@ namespace vMenuClient.menus
             ["csb_abigail"] = "AbigailCutscene",
             ["csb_agatha"] = "AgathaCutscene", // mpvinewood
             ["csb_agent"] = "AgentCutscene",
+            ["csb_agent14_02"] = "Agent1402Cutscene", // mp2025_01
             ["csb_alan"] = "AlanCutscene",
             ["csb_anita"] = "AnitaCutscene",
             ["csb_anton"] = "AntonCutscene",
@@ -1552,6 +1896,7 @@ namespace vMenuClient.menus
             ["csb_porndudes"] = "PornDudesCutscene",
             ["csb_prologuedriver"] = "PrologueDriverCutscene",
             ["csb_prolsec"] = "PrologueSec01Cutscene",
+            ["csb_rafdeangelis"] = "RafDeAngelisCutscene", // mp2025_01
             ["csb_ramp_gang"] = "RampGangCutscene",
             ["csb_ramp_hic"] = "RampHicCutscene",
             ["csb_ramp_hipster"] = "RampHipsterCutscene",
@@ -1579,14 +1924,17 @@ namespace vMenuClient.menus
             ["csb_undercover"] = "UndercoverCutscene",
             ["csb_vagos_leader"] = "VagosLeaderCutscene", // mpsecurity
             ["csb_vagspeak"] = "VagSpeakCutscene",
+            ["csb_valentina"] = "ValentinaCutscene", // mp2025_01
             ["csb_vernon"] = "VernonCutscene", // mpsecurity
             ["csb_vincent"] = "VincentCutscene", // mpvinewood
             ["csb_vincent_2"] = "Vincent2Cutscene", // mpheist3
             ["csb_vincent_4"] = "Vincent4Cutscene", // mp2023_02
             ["csb_yusufamir"] = "YusufAmirCuscene", // mp2023_02
+            ["csb_weiss"] = "WeissCutscene", // mp2025_01
             ["csb_wendy"] = "WendyCutscene", // mpheist3
             ["g_f_importexport_01"] = "ImportExport01GF",
             ["g_f_m_fooliganz_01"] = "Fooliganz01GFM", // mpchristmas3
+            ["g_f_m_undeadmage"] = "UndeadMageGFM", // mp2025_01
             ["g_f_y_ballas_01"] = "Ballas01GFY",
             ["g_f_y_families_01"] = "Families01GFY",
             ["g_f_y_lost_01"] = "Lost01GFY",
@@ -1617,6 +1965,8 @@ namespace vMenuClient.menus
             ["g_m_m_zombie_01"] = "Zombie01GMM", // mp2024_01
             ["g_m_m_zombie_02"] = "Zombie02GMM", // mp2024_01
             ["g_m_m_zombie_03"] = "Zombie03GMM", // mp2024_01
+            ["g_m_m_zombie_04"] = "Zombie04GMM", // mp2025_01
+            ["g_m_m_zombie_05"] = "Zombie05GMM", // mp2025_01
             ["g_m_y_armgoon_02"] = "ArmGoon02GMY",
             ["g_m_y_azteca_01"] = "Azteca01GMY",
             ["g_m_y_ballaeast_01"] = "BallaEast01GMY",
@@ -1650,6 +2000,7 @@ namespace vMenuClient.menus
             ["ig_acidlabcook"] = "AcidLabCook", // mpchristmas3
             ["ig_agatha"] = "Agatha", // mpvinewood
             ["ig_agent"] = "Agent",
+            ["ig_agent14_02"] = "Agent1402", // mp2025_01
             ["ig_agent_02"] = "Agent02", //mpsum2
             ["ig_ahronward"] = "AhronWard", // mp2023_02
             ["ig_amandatownley"] = "AmandaTownley",
@@ -1737,6 +2088,7 @@ namespace vMenuClient.menus
             ["ig_guadalope"] = "Guadalope", // mp2024_02
             ["ig_gunvanseller"] = "GunVanSeller", // mpchristmas3
             ["ig_gustavo"] = "Gustavo", // mpheist4
+            ["ig_gustavo_02"] = "Gustavo02", // mp2025_01
             ["ig_hao"] = "Hao",
             ["ig_hao_02"] = "Hao02", // patchday26ng
             ["ig_helmsmanpavel"] = "HelmsmanPavel", // mpheist4
@@ -1790,10 +2142,12 @@ namespace vMenuClient.menus
             ["ig_lifeinvad_02"] = "Lifeinvad02",
             ["ig_lildee"] = "LilDee", // mptuner
             ["ig_luchadora"] = "Luchadora", // mpchristmas3
+            ["ig_madrazodriver_01"] = "MadrazoDriver01", // mp2025_01
             ["ig_magenta"] = "Magenta",
             ["ig_malc"] = "Malc",
             ["ig_manuel"] = "Manuel",
             ["ig_marnie"] = "Marnie",
+            ["ig_martinmadrazo_02"] = "MartinMadrazo02", // mp2025_01
             ["ig_maryann"] = "MaryAnn",
             ["ig_mason_duggan"] = "MasonDuggan", // mpsum2
             ["ig_maude"] = "Maude",
@@ -1838,6 +2192,7 @@ namespace vMenuClient.menus
             ["ig_popov"] = "Popov",
             ["ig_priest"] = "Priest",
             ["ig_prolsec_02"] = "PrologueSec02",
+            ["ig_rafdeangelis"] = "RafDeAngelis", // mp2025_01
             ["ig_ramp_gang"] = "RampGang",
             ["ig_ramp_hic"] = "RampHic",
             ["ig_ramp_hipster"] = "RampHipster",
@@ -1852,6 +2207,7 @@ namespace vMenuClient.menus
             ["ig_security_a"] = "SecurityA", // mpsecurity
             ["ig_sessanta"] = "Sessanta", // mptuner
             ["ig_siemonyetarian"] = "SiemonYetarian",
+            ["ig_skeleton_01"] = "Skeleton01", // mp2025_01
             ["ig_sol"] = "Sol",
             ["ig_solomon"] = "Solomon",
             ["ig_soundeng_00"] = "SoundEng00", // mpsecurity
@@ -1880,16 +2236,19 @@ namespace vMenuClient.menus
             ["ig_tylerdix_02"] = "TylerDixon02",
             ["ig_vagos_leader"] = "VagosLeader", // mpsecurity
             ["ig_vagspeak"] = "VagSpeak",
+            ["ig_valentina"] = "Valentina", // mp2025_01
             ["ig_vernon"] = "Vernon", // mpsecurity
             ["ig_vincent"] = "Vincent", // mpvinewood
             ["ig_vincent_2"] = "Vincent2", // mpheist3
             ["ig_vincent_3"] = "Vincent3", // mpsecurity
             ["ig_vincent_4"] = "Vincent4", // mp2023_02
             ["ig_wade"] = "Wade",
+            ["ig_weiss"] = "Weiss", // mp2025_01
             ["ig_warehouseboss"] = "WarehouseBoss", // mpsum2
             ["ig_wendy"] = "Wendy", // mpheist3
             ["ig_yusufamir"] = "YusufAmir", // mp2023_02
             ["ig_zimbor"] = "Zimbor",
+            ["ig_zombie_dj_01"] = "ZombieDJ01", // mp2025_01
             ["mp_f_bennymech_01"] = "BennyMechanic01",
             ["mp_f_boatstaff_01"] = "MBoatStaff01",
             ["mp_f_cardesign_01"] = "CarDesign01",
@@ -2178,5 +2537,21 @@ namespace vMenuClient.menus
 
         #endregion
 
+        private void ShowVisorText(int pedHandle)
+        {
+            var component = GetPedPropIndex(pedHandle, 0); // helmet index
+            var texture = GetPedPropTextureIndex(pedHandle, 0); // texture
+            var compHash = GetHashNameForProp(pedHandle, 0, component, texture); // prop combination hash
+            if (GetShopPedApparelVariantPropCount((uint)compHash) > 0) // helmet has visor.
+            {
+                if (!IsHelpMessageBeingDisplayed())
+                {
+                    BeginTextCommandDisplayHelp("TWOSTRINGS");
+                    AddTextComponentSubstringPlayerName("Hold ~INPUT_SWITCH_VISOR~ to flip your helmet visor open or closed");
+                    AddTextComponentSubstringPlayerName("when on foot or on a motorcycle and when vMenu is closed.");
+                    EndTextCommandDisplayHelp(0, false, true, 6000);
+                }
+            }
+        }
     }
 }

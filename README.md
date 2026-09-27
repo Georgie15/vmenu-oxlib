@@ -13,6 +13,8 @@ Here's an example where we can move away from 3 separate input popups for rgb nu
 ### Documentation
 For installation, configuration and support, please visit our docs: https://docs.grav.wtf/
 
+For this fork's current source and packaged build, see [Current build and branch handoff](docs/current-build.md).
+
 # Fork Features/Changes
 
 ### Core/UI
@@ -47,7 +49,7 @@ _Say goodbye to huge spreadsheets with different numbers and say hello to simple
 
 ### Weather
 
-- Added convar `vmenu_blackout_affect_vehicles` (default: false) so that vehicle headlights/police lightbars continue to operate during blackouts
+- Added convar `vmenu_vehicle_blackout_enabled` (default: true) so vehicle headlights/police lightbars can remain active during blackouts
 
 ### Misc
 

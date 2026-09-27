@@ -45,6 +45,11 @@ namespace vMenuClient
             }
 
             NoclipActive = active;
+            // Replicated statebag so server-side integrity monitoring (psrp_telemetry)
+            // can suppress movement detections during a permitted noclip session.
+            // The server still verifies the vMenu.NoClip ace, so a spoofed bag alone
+            // grants nothing.
+            Game.Player.State.Set("vmenu_noclip_active", NoclipActive, true);
             var actionData = new Dictionary<string, object>
             {
                 ["enabled"] = NoclipActive

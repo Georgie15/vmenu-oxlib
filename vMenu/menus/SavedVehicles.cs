@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -26,6 +26,7 @@ namespace vMenuClient.menus
         private Dictionary<string, VehicleInfo> savedVehicles = new();
         private readonly List<Menu> subMenus = new();
         private KeyValuePair<string, VehicleInfo> currentlySelectedVehicle = new();
+        private Menu selectedVehicleParentMenu;
         private int deleteButtonPressedCount = 0;
         private int replaceButtonPressedCount = 0;
         private SavedVehicleCategory currentCategory;
@@ -41,6 +42,137 @@ namespace vMenuClient.menus
         private void CreateClassMenu()
         {
             var menuTitle = "Saved Vehicles";
+            void PopulateSavedVehiclesCategoryMenu()
+            {
+                if (string.IsNullOrEmpty(currentCategory.Name))
+                {
+                    return;
+                }
+
+                bool isUncategorized = currentCategory.Name == "Uncategorized";
+
+                savedVehiclesCategoryMenu.MenuTitle = currentCategory.Name;
+                savedVehiclesCategoryMenu.MenuSubtitle = $"~s~Category: ~y~{currentCategory.Name}";
+                savedVehiclesCategoryMenu.ClearMenuItems();
+
+                var iconNames = Enum.GetNames(typeof(MenuItem.Icon)).ToList();
+
+                string ChangeCallback(MenuDynamicListItem item, bool left)
+                {
+                    int currentIndex = iconNames.IndexOf(item.CurrentItem);
+                    int newIndex = left ? currentIndex - 1 : currentIndex + 1;
+
+                    if (iconNames.ElementAtOrDefault(newIndex) == default)
+                    {
+                        newIndex = left ? iconNames.Count - 1 : 0;
+                    }
+
+                    item.RightIcon = (MenuItem.Icon)newIndex;
+
+                    return iconNames[newIndex];
+                }
+
+                var renameBtn = new MenuItem("Rename Category", "Rename this category.")
+                {
+                    Enabled = !isUncategorized
+                };
+                var descriptionBtn = new MenuItem("Change Category Description", "Change this category's description.")
+                {
+                    Enabled = !isUncategorized
+                };
+                var iconBtn = new MenuDynamicListItem("Change Category Icon", iconNames[(int)currentCategory.Icon], new MenuDynamicListItem.ChangeItemCallback(ChangeCallback), "Change this category's icon. Select to save.")
+                {
+                    Enabled = !isUncategorized,
+                    RightIcon = currentCategory.Icon
+                };
+                var deleteBtn = new MenuItem("Delete Category", "Delete this category. This can not be undone!")
+                {
+                    RightIcon = MenuItem.Icon.WARNING,
+                    Enabled = !isUncategorized
+                };
+                var deleteCharsBtn = new MenuCheckboxItem("Delete All Vehicles", "If checked, when \"Delete Category\" is pressed, all the saved vehicles in this category will be deleted as well. If not checked, saved vehicles will be moved to \"Uncategorized\".")
+                {
+                    Enabled = !isUncategorized
+                };
+
+                savedVehiclesCategoryMenu.AddMenuItem(renameBtn);
+                savedVehiclesCategoryMenu.AddMenuItem(descriptionBtn);
+                savedVehiclesCategoryMenu.AddMenuItem(iconBtn);
+                savedVehiclesCategoryMenu.AddMenuItem(deleteBtn);
+                savedVehiclesCategoryMenu.AddMenuItem(deleteCharsBtn);
+
+                var spacer = GetSpacerMenuItem("â†“ Vehicles â†“");
+                savedVehiclesCategoryMenu.AddMenuItem(spacer);
+
+                if (savedVehicles.Count > 0)
+                {
+                    List<MenuItem> spawnableVehicles = [];
+                    List<MenuItem> unspawnableVehicles = [];
+
+                    foreach (var kvp in savedVehicles)
+                    {
+                        string name = kvp.Key;
+                        VehicleInfo vehicle = kvp.Value;
+
+                        if (string.IsNullOrEmpty(vehicle.Category))
+                        {
+                            if (!isUncategorized)
+                            {
+                                continue;
+                            }
+                        }
+                        else if (vehicle.Category != currentCategory.Name)
+                        {
+                            continue;
+                        }
+
+                        string buttonName = name.Substring(4);
+                        bool canUse = IsModelInCdimage(vehicle.model);
+                        string buttonDescription = "Manage this saved vehicle.";
+
+                        if (!canUse)
+                        {
+                            buttonName = $"~italic~{buttonName}~italic~";
+                            buttonDescription += "\n\n~r~NOTE~w~~s~: This model could not be found, and so cannot be spawned.";
+                        }
+
+                        var btn = new MenuItem(buttonName, buttonDescription)
+                        {
+                            Label = $"({vehicle.name}) â†’â†’â†’",
+                            LeftIcon = canUse ? MenuItem.Icon.NONE : MenuItem.Icon.LOCK,
+                            ItemData = kvp,
+                        };
+
+                        if (canUse)
+                        {
+                            spawnableVehicles.Add(btn);
+                        }
+                        else
+                        {
+                            unspawnableVehicles.Add(btn);
+                        }
+                    }
+
+                    foreach (MenuItem menuItem in spawnableVehicles.Concat(unspawnableVehicles))
+                    {
+                        savedVehiclesCategoryMenu.AddMenuItem(menuItem);
+                    }
+                }
+
+                savedVehiclesCategoryMenu.RefreshIndex();
+            }
+
+            void RefreshSelectedVehicleSourceMenu()
+            {
+                UpdateMenuAvailableCategories();
+                UpdateSavedVehicleCategoriesMenu();
+
+                if (selectedVehicleParentMenu == savedVehiclesCategoryMenu)
+                {
+                    PopulateSavedVehiclesCategoryMenu();
+                }
+            }
+
             #region Create menus and submenus
             // Create the menu.
             classMenu = new Menu(menuTitle, "Manage Saved Vehicles");
@@ -75,6 +207,10 @@ namespace vMenuClient.menus
             classMenu.AddMenuItem(unavailableModels);
             MenuController.BindMenuItem(classMenu, unavailableVehiclesMenu, unavailableModels);
             MenuController.AddSubmenu(classMenu, unavailableVehiclesMenu);
+            unavailableVehiclesMenu.OnItemSelect += (sender, item, index) =>
+            {
+                UpdateSelectedVehicleMenu(item, sender);
+            };
 
 
             MenuController.AddMenu(savedVehicleTypeMenu);
@@ -104,7 +240,7 @@ namespace vMenuClient.menus
 
                         if (StorageManager.SaveJsonData("saved_veh_category_" + name, JsonConvert.SerializeObject(newCategory), false))
                         {
-                            Notify.Success($"Your category (~g~<C>{name}</C>~s~) has been saved.");
+                            Notify.Success($"Your category (~g~{name}~s~) has been saved.");
                             Log($"Saved Category {name}.");
                             MenuController.CloseAllMenus();
                             UpdateSavedVehicleCategoriesMenu();
@@ -114,7 +250,7 @@ namespace vMenuClient.menus
                         }
                         else
                         {
-                            Notify.Error($"Saving failed, most likely because this name (~y~<C>{name}</C>~s~) is already in use.");
+                            Notify.Error($"Saving failed, most likely because this name (~y~{name}~s~) is already in use.");
                             return;
                         }
                     }
@@ -190,6 +326,9 @@ namespace vMenuClient.menus
 
                 if (savedVehicles.Count > 0)
                 {
+                    List<MenuItem> spawnableVehicles = [];
+                    List<MenuItem> unspawnableVehicles = [];
+
                     foreach (var kvp in savedVehicles)
                     {
                         string name = kvp.Key;
@@ -210,17 +349,36 @@ namespace vMenuClient.menus
                             }
                         }
 
+                        string buttonName = name.Substring(4);
                         bool canUse = IsModelInCdimage(vehicle.model);
+                        string buttonDescription = "Manage this saved vehicle.";
 
-                        var btn = new MenuItem(name.Substring(4), canUse ? "Manage this saved vehicle." : "This model could not be found in the game files. Most likely because this is an addon vehicle and it's currently not streamed by the server.")
+                        if (!canUse)
+                        {
+                            buttonName = $"~italic~{buttonName}~italic~";
+                            buttonDescription += "\n\n~r~NOTE~w~~s~: This model could not be found, and so cannot be spawned.";
+                        }
+
+                        var btn = new MenuItem(buttonName, buttonDescription)
                         {
                             Label = $"({vehicle.name}) →→→",
-                            Enabled = canUse,
                             LeftIcon = canUse ? MenuItem.Icon.NONE : MenuItem.Icon.LOCK,
                             ItemData = kvp,
                         };
 
-                        savedVehiclesCategoryMenu.AddMenuItem(btn);
+                        if (canUse)
+                        {
+                            spawnableVehicles.Add(btn);
+                        }
+                        else
+                        {
+                            unspawnableVehicles.Add(btn);
+                        }
+                    }
+
+                    foreach (MenuItem menuItem in spawnableVehicles.Concat(unspawnableVehicles))
+                    {
+                        savedVehiclesCategoryMenu.AddMenuItem(menuItem);
                     }
                 }
             };
@@ -288,7 +446,7 @@ namespace vMenuClient.menus
                                 }
                             }
 
-                            Notify.Success($"Your category has been renamed to ~g~<C>{name}</C>~s~. {updatedCount}/{totalCount} vehicles updated.");
+                            Notify.Success($"Your category has been renamed to ~g~{name}~s~. {updatedCount}/{totalCount} vehicles updated.");
                             MenuController.CloseAllMenus();
                             UpdateSavedVehicleCategoriesMenu();
                             vehicleCategoryMenu.OpenMenu();
@@ -385,21 +543,7 @@ namespace vMenuClient.menus
 
                     // Load saved vehicle menu
                     default:
-                        List<string> categoryNames = GetAllCategoryNames();
-                        List<MenuItem.Icon> categoryIcons = GetCategoryIcons(categoryNames);
-                        int nameIndex = categoryNames.IndexOf(currentCategory.Name);
-
-                        setCategoryBtn.ItemData = categoryIcons;
-                        setCategoryBtn.ListItems = categoryNames;
-                        setCategoryBtn.ListIndex = nameIndex == 1 ? 0 : nameIndex;
-                        setCategoryBtn.RightIcon = categoryIcons[setCategoryBtn.ListIndex];
-
-                        var vehInfo = item.ItemData;
-                        selectedVehicleMenu.MenuSubtitle = $"{vehInfo.Key.Substring(4)} ({vehInfo.Value.name})";
-                        currentlySelectedVehicle = vehInfo;
-                        MenuController.CloseAllMenus();
-                        selectedVehicleMenu.OpenMenu();
-                        MenuController.AddSubmenu(savedVehiclesCategoryMenu, selectedVehicleMenu);
+                        UpdateSelectedVehicleMenu(item, savedVehiclesCategoryMenu);
                         break;
                 }
             };
@@ -414,7 +558,7 @@ namespace vMenuClient.menus
 
                 if (StorageManager.SaveJsonData("saved_veh_category_" + currentCategory.Name, JsonConvert.SerializeObject(currentCategory), true))
                 {
-                    Notify.Success($"Your category icon been changed to ~g~<C>{iconNames[iconIndex]}</C>~s~.");
+                    Notify.Success($"Your category icon been changed to ~g~{iconNames[iconIndex]}~s~.");
                     UpdateSavedVehicleCategoriesMenu();
                 }
                 else
@@ -423,8 +567,9 @@ namespace vMenuClient.menus
                 }
             };
 
-            var spawnVehicle = new MenuItem("Spawn Vehicle", "Spawn this saved vehicle.");
+            var spawnVehicle = new MenuItem("Spawn Vehicle");
             var renameVehicle = new MenuItem("Rename Vehicle", "Rename your saved vehicle.");
+            var saveToCad = new MenuItem("Save to CAD", "Register this vehicle in the CAD against your active character.");
             var generateVehicleCode = new MenuItem("Generate Vehicle Code", "Generate a share code for this vehicle to give to other players.");
 
             if (!vehicleCodesEnabled)
@@ -437,6 +582,7 @@ namespace vMenuClient.menus
             var replaceVehicle = new MenuItem("~r~Replace Vehicle", "Your saved vehicle will be replaced with the vehicle you are currently sitting in. ~r~Warning: this can NOT be undone!");
             var deleteVehicle = new MenuItem("~r~Delete Vehicle", "~r~This will delete your saved vehicle. Warning: this can NOT be undone!");
             selectedVehicleMenu.AddMenuItem(spawnVehicle);
+            selectedVehicleMenu.AddMenuItem(saveToCad);
             selectedVehicleMenu.AddMenuItem(renameVehicle);
             selectedVehicleMenu.AddMenuItem(generateVehicleCode);
             selectedVehicleMenu.AddMenuItem(setCategoryBtn);
@@ -445,7 +591,43 @@ namespace vMenuClient.menus
 
             selectedVehicleMenu.OnMenuOpen += (sender) =>
             {
+                bool vehicleModelExists = IsModelInCdimage(currentlySelectedVehicle.Value.model);
+
+                spawnVehicle.Enabled = vehicleModelExists;
+                spawnVehicle.Description = !vehicleModelExists
+                    ? "This model could not be found in the game files. Most likely because this is an addon vehicle and it's currently not streamed by the server."
+                    : "Spawn this saved vehicle.";
                 spawnVehicle.Label = "(" + GetDisplayNameFromVehicleModel(currentlySelectedVehicle.Value.model).ToLower() + ")";
+
+                // "Save to CAD" — start enabled (fail-open if PSRP_cad isn't running),
+                // then asynchronously fetch the imported state and grey out the item if
+                // already saved. The snapshot key guards against the user having
+                // navigated to a different saved vehicle by the time the round-trip lands.
+                saveToCad.Enabled = true;
+                saveToCad.Description = "Register this vehicle in the CAD against your active character.";
+                saveToCad.RightIcon = MenuItem.Icon.NONE;
+
+                // Block emergency-class vehicles (police, ambulance, fire — class 18).
+                // The CAD's civilian vehicle table is for personal vehicles owned by
+                // characters; police-spawned units shouldn't be registered there or
+                // they'd surface as the civilian's "owned" vehicle when cops run ANPR.
+                if (GetVehicleClassFromName((uint)currentlySelectedVehicle.Value.model) == 18)
+                {
+                    saveToCad.Enabled = false;
+                    saveToCad.Description = "Emergency vehicles can't be registered in the CAD.";
+                    saveToCad.RightIcon = MenuItem.Icon.LOCK;
+                    return;
+                }
+
+                var snapshotKey = currentlySelectedVehicle.Key;
+                var plate = currentlySelectedVehicle.Value.plateText ?? "";
+                // Dedupe key uses the player-chosen save name (the value vMenu
+                // shows on the menu row), NOT the GTA model display name —
+                // matches what we INSERT into the CAD's `model` column.
+                var openSaveName = (snapshotKey != null && snapshotKey.StartsWith("veh_"))
+                    ? snapshotKey.Substring(4)
+                    : (snapshotKey ?? "");
+                _ = RefreshSaveToCadState(snapshotKey, plate, openSaveName, saveToCad);
             };
 
             selectedVehicleMenu.OnMenuClose += (sender) =>
@@ -470,6 +652,47 @@ namespace vMenuClient.menus
                         await SpawnVehicle(currentlySelectedVehicle.Value.model, true, true, false, vehicleInfo: currentlySelectedVehicle.Value, saveName: currentlySelectedVehicle.Key.Substring(4));
                     }
                 }
+                else if (item == saveToCad)
+                {
+                    var v = currentlySelectedVehicle.Value;
+                    // Hard gate — emergency-class vehicles never reach the
+                    // server. Mirrors the OnMenuOpen disable so a stale UI
+                    // state can't bypass the restriction.
+                    if (GetVehicleClassFromName((uint)v.model) == 18)
+                    {
+                        Notify.Alert("Emergency vehicles can't be registered in the CAD.");
+                        return;
+                    }
+                    var saveName = currentlySelectedVehicle.Key != null && currentlySelectedVehicle.Key.StartsWith("veh_")
+                        ? currentlySelectedVehicle.Key.Substring(4)
+                        : (currentlySelectedVehicle.Key ?? "");
+                    int colorPrimary = (v.colors != null && v.colors.TryGetValue("primary", out var p)) ? p : 0;
+                    int customR = (v.colors != null && v.colors.TryGetValue("customPrimaryR", out var cr)) ? cr : -1;
+                    int customG = (v.colors != null && v.colors.TryGetValue("customPrimaryG", out var cg)) ? cg : -1;
+                    int customB = (v.colors != null && v.colors.TryGetValue("customPrimaryB", out var cb)) ? cb : -1;
+
+                    var payload = new Dictionary<string, object>
+                    {
+                        ["name"]            = saveName,
+                        ["plate"]           = v.plateText ?? "",
+                        ["save_token"]      = v.cadSaveToken,
+                        ["model_hash"]      = v.model,
+                        // Server stores `model_display` in the CAD `model` column.
+                        // We send the player-chosen save name (e.g. "My Cool Truck"),
+                        // not the GTA model code (e.g. "sultan"), per the user's preference.
+                        ["model_display"]   = saveName,
+                        ["color_primary"]   = colorPrimary,
+                        ["color_custom_r"]  = customR,
+                        ["color_custom_g"]  = customG,
+                        ["color_custom_b"]  = customB,
+                    };
+                    BaseScript.TriggerServerEvent("PSRP_cad:vmenu:registerVehicle", payload);
+
+                    // Optimistic flip — server's :result event toasts success/failure.
+                    saveToCad.Enabled = false;
+                    saveToCad.Description = "Already saved to CAD.";
+                    saveToCad.RightIcon = MenuItem.Icon.LOCK;
+                }
                 else if (item == renameVehicle)
                 {
                     string currentlySelectedVehicleSaveName = currentlySelectedVehicle.Key.Substring(4); // gets rid of the veh_ prefix used to store in KVP
@@ -487,8 +710,9 @@ namespace vMenuClient.menus
                             {
                                 await BaseScript.Delay(0);
                             }
+                            currentlySelectedVehicle = new KeyValuePair<string, VehicleInfo>("veh_" + newName, currentlySelectedVehicle.Value);
+                            RefreshSelectedVehicleSourceMenu();
                             Notify.Success("Your vehicle has successfully been renamed.");
-                            UpdateMenuAvailableCategories();
                             selectedVehicleMenu.GoBack();
                             currentlySelectedVehicle = new KeyValuePair<string, VehicleInfo>(); // clear the old info
                         }
@@ -519,7 +743,9 @@ namespace vMenuClient.menus
                             replaceButtonPressedCount = 0;
                             item.Label = "";
                             SaveVehicle(currentlySelectedVehicle.Key.Substring(4), currentlySelectedVehicle.Value.Category);
-                            selectedVehicleMenu.GoBack();
+                            currentlySelectedVehicle = new KeyValuePair<string, VehicleInfo>(currentlySelectedVehicle.Key, StorageManager.GetSavedVehicleInfo(currentlySelectedVehicle.Key));
+                            RefreshSelectedVehicleSourceMenu();
+                            selectedVehicleMenu.CloseMenu();
                             Notify.Success("Your saved vehicle has been replaced with your current vehicle.");
                         }
                     }
@@ -541,7 +767,7 @@ namespace vMenuClient.menus
                         deleteButtonPressedCount = 0;
                         item.Label = "";
                         DeleteResourceKvp(currentlySelectedVehicle.Key);
-                        UpdateMenuAvailableCategories();
+                        RefreshSelectedVehicleSourceMenu();
                         selectedVehicleMenu.GoBack();
                         Notify.Success("Your saved vehicle has been deleted.");
                     }
@@ -585,7 +811,7 @@ namespace vMenuClient.menus
 
                         if (StorageManager.SaveJsonData("saved_veh_category_" + newName, JsonConvert.SerializeObject(newCategory), false))
                         {
-                            Notify.Success($"Your category (~g~<C>{newName}</C>~s~) has been saved.");
+                            Notify.Success($"Your category (~g~{newName}~s~) has been saved.");
                             Log($"Saved Category {newName}.");
                             MenuController.CloseAllMenus();
                             UpdateSavedVehicleCategoriesMenu();
@@ -596,7 +822,7 @@ namespace vMenuClient.menus
                         }
                         else
                         {
-                            Notify.Error($"Saving failed, most likely because this name (~y~<C>{newName}</C>~s~) is already in use.");
+                            Notify.Error($"Saving failed, most likely because this name (~y~{newName}~s~) is already in use.");
                             return;
                         }
                     }
@@ -608,6 +834,7 @@ namespace vMenuClient.menus
 
                 if (StorageManager.SaveVehicleInfo(currentlySelectedVehicle.Key, vehicle, true))
                 {
+                    currentlySelectedVehicle = new KeyValuePair<string, VehicleInfo>(currentlySelectedVehicle.Key, vehicle);
                     Notify.Success("Your vehicle was saved successfully.");
                 }
                 else
@@ -616,7 +843,7 @@ namespace vMenuClient.menus
                 }
 
                 MenuController.CloseAllMenus();
-                UpdateSavedVehicleCategoriesMenu();
+                RefreshSelectedVehicleSourceMenu();
                 vehicleCategoryMenu.OpenMenu();
             };
 
@@ -738,6 +965,28 @@ namespace vMenuClient.menus
             MenuController.BindMenuItem(savedVehicleTypeMenu, vehicleCategoryMenu, categoryButton);
         }
 
+        // Async PSRP_cad lookup. Skips applying the disabled state if the user
+        // backed out and selected a different saved vehicle while the
+        // round-trip was in flight (snapshotKey vs the live currentlySelected
+        // key). Failure is swallowed — the menu item stays enabled, which is
+        // the correct fail-open behaviour.
+        private async System.Threading.Tasks.Task RefreshSaveToCadState(string snapshotKey, string plate, string model, MenuItem item)
+        {
+            try
+            {
+                bool imported = await IsVehicleInPsrpCad(plate, model, currentlySelectedVehicle.Value.cadSaveToken);
+                if (!imported) return;
+                if (currentlySelectedVehicle.Key != snapshotKey) return;
+                item.Enabled = false;
+                item.Description = "Already saved to CAD.";
+                item.RightIcon = MenuItem.Icon.LOCK;
+            }
+            catch
+            {
+                // PSRP_cad missing or down. Leave the item enabled.
+            }
+        }
+
         /// <summary>
         /// Updates the selected vehicle.
         /// </summary>
@@ -748,12 +997,21 @@ namespace vMenuClient.menus
             var vehInfo = selectedItem.ItemData;
             List<string> categoryNames = GetAllCategoryNames();
             List<MenuItem.Icon> categoryIcons = GetCategoryIcons(categoryNames);
+            string selectedCategory = string.IsNullOrEmpty(vehInfo.Value.Category) ? "Uncategorized" : vehInfo.Value.Category;
+            int categoryIndex = categoryNames.IndexOf(selectedCategory);
+
+            if (categoryIndex < 0)
+            {
+                categoryIndex = 1;
+            }
+
             setCategoryBtn.ItemData = categoryIcons;
             setCategoryBtn.ListItems = categoryNames;
-            setCategoryBtn.ListIndex = 0;
-            setCategoryBtn.RightIcon = categoryIcons[0];
+            setCategoryBtn.ListIndex = categoryIndex;
+            setCategoryBtn.RightIcon = categoryIcons[categoryIndex];
             selectedVehicleMenu.MenuSubtitle = $"{vehInfo.Key.Substring(4)} ({vehInfo.Value.name})";
             currentlySelectedVehicle = vehInfo;
+            selectedVehicleParentMenu = parentMenu;
             MenuController.CloseAllMenus();
             selectedVehicleMenu.OpenMenu();
             if (parentMenu != null)
@@ -833,7 +1091,6 @@ namespace vMenuClient.menus
                     var missingVehItem = new MenuItem(sv.Key.Substring(4), "This model could not be found in the game files. Most likely because this is an addon vehicle and it's currently not streamed by the server.")
                     {
                         Label = "(" + sv.Value.name + ")",
-                        Enabled = false,
                         LeftIcon = MenuItem.Icon.LOCK,
                         ItemData = sv
                     };

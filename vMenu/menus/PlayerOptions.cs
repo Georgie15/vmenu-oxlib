@@ -22,7 +22,16 @@ namespace vMenuClient.menus
         // Public variables (getters only), return the private variables.
         public bool PlayerGodMode { get; private set; } = UserDefaults.PlayerGodMode;
         public bool PlayerInvisible { get; private set; } = false;
-        public bool PlayerStamina { get; private set; } = UserDefaults.UnlimitedStamina;
+        private bool _playerStamina = UserDefaults.UnlimitedStamina;
+        public bool PlayerStamina
+        {
+            get => _playerStamina;
+            private set
+            {
+                _playerStamina = value;
+                Game.Player.State.Set("vmenu_unlimited_stamina", value && IsAllowed(Permission.POUnlimitedStamina), true);
+            }
+        }
         public bool PlayerFastRun { get; private set; } = UserDefaults.FastRun;
         public bool PlayerFastSwim { get; private set; } = UserDefaults.FastSwim;
         public bool PlayerSuperJump { get; private set; } = UserDefaults.SuperJump;
@@ -36,6 +45,11 @@ namespace vMenuClient.menus
 
         private readonly Menu CustomDrivingStyleMenu = new("Driving Style", "Custom Driving Style");
 
+        public PlayerOptions()
+        {
+            PlayerStamina = _playerStamina;
+        }
+
         /// <summary>
         /// Creates the menu.
         /// </summary>
@@ -43,7 +57,7 @@ namespace vMenuClient.menus
         {
             #region create menu and menu items
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Player Options");
+            menu = new Menu(" ", "Player Options");
 
             // Create all checkboxes.
             var playerGodModeCheckbox = new MenuCheckboxItem("Godmode", "Makes you invincible.", PlayerGodMode);
@@ -246,6 +260,16 @@ namespace vMenuClient.menus
 
                 vehicleAutoPilot.OnItemSelect += async (sender, item, index) =>
                 {
+                    if (item == startDrivingWaypoint || item == startDrivingRandomly)
+                    {
+                        var activeOrg = Game.Player.State["activeOrg"];
+                        if (activeOrg is string dutyOrg && !string.IsNullOrWhiteSpace(dutyOrg))
+                        {
+                            Notify.Error("You cannot use auto pilot while on duty.");
+                            return;
+                        }
+                    }
+
                     if (Game.PlayerPed.IsInVehicle() && item != stopDriving && item != forceStopDriving)
                     {
                         if (Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists() && !Game.PlayerPed.CurrentVehicle.IsDead && Game.PlayerPed.CurrentVehicle.IsDriveable)
@@ -452,7 +476,7 @@ namespace vMenuClient.menus
                 }
                 else if (listItem == setArmorItem)
                 {
-                    Game.PlayerPed.Armor = listItem.ListIndex * 20;
+                    VitalTelemetry.RequestVital("armour", listItem.ListIndex * 20);
                 }
             };
 
@@ -481,8 +505,7 @@ namespace vMenuClient.menus
                 }
                 else if (item == healPlayerBtn)
                 {
-                    Game.PlayerPed.Health = Game.PlayerPed.MaxHealth;
-                    Notify.Success("Player healed.");
+                    VitalTelemetry.RequestVital("health", 200);
                 }
                 else if (item == cleanPlayerBtn)
                 {

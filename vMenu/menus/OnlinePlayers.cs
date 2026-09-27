@@ -33,7 +33,7 @@ namespace vMenuClient.menus
         private void CreateMenu()
         {
             // Create the menu.
-            menu = new Menu(Game.Player.Name, "Online Players")
+            menu = new Menu(" ", "Online Players")
             {
                 CounterPreText = "Players: "
             };
@@ -52,8 +52,10 @@ namespace vMenuClient.menus
             var ban = new MenuItem("~r~Ban Player Permanently", "Ban this player permanently from the server. Are you sure you want to do this? You can specify the ban reason after clicking this button.");
             var tempban = new MenuItem("~r~Ban Player Temporarily", "Give this player a tempban of up to 30 days (max). You can specify duration and ban reason after clicking this button.");
 
-            // always allowed
-            playerMenu.AddMenuItem(sendMessage);
+            if (IsAllowed(Permission.OPSendMessage))
+            {
+                playerMenu.AddMenuItem(sendMessage);
+            }
             // permissions specific
             if (IsAllowed(Permission.OPTeleport))
             {
@@ -111,6 +113,12 @@ namespace vMenuClient.menus
                 // send message
                 if (item == sendMessage)
                 {
+                    if (currentPlayer.Handle == Game.Player.Handle)
+                    {
+                        Notify.Error("You cannot message yourself!");
+                        return;
+                    }
+
                     if (MainMenu.MiscSettingsMenu != null && !MainMenu.MiscSettingsMenu.MiscDisablePrivateMessages)
                     {
                         var message = await GetUserInput($"Private Message To {currentPlayer.Name}", 200);
@@ -199,7 +207,7 @@ namespace vMenuClient.menus
                                 var oldBlip = GetBlipFromEntity(playerPed);
                                 SetBlipRoute(oldBlip, false);
                                 RemoveBlip(ref oldBlip);
-                                Notify.Custom($"~g~GPS route to ~s~<C>{GetSafePlayerName(currentPlayer.Name)}</C>~g~ is now disabled.");
+                                Notify.Custom($"~g~GPS route to ~s~{GetSafePlayerName(currentPlayer.Name)}~g~ is now disabled.");
                             }
                         }
                         PlayersWaypointList.Clear();
@@ -235,7 +243,7 @@ namespace vMenuClient.menus
                             SetBlipRoute(blip, true);
 
                             PlayersWaypointList.Add(currentPlayer.ServerId);
-                            Notify.Custom($"~g~GPS route to ~s~<C>{GetSafePlayerName(currentPlayer.Name)}</C>~g~ is now active, press the ~s~Toggle GPS Route~g~ button again to disable the route.");
+                            Notify.Custom($"~g~GPS route to ~s~{GetSafePlayerName(currentPlayer.Name)}~g~ is now active, press the ~s~Toggle GPS Route~g~ button again to disable the route.");
                         }
                         else
                         {
@@ -253,7 +261,7 @@ namespace vMenuClient.menus
                         {
                             ids += "~n~" + s;
                         }
-                        Notify.Custom($"~y~<C>{GetSafePlayerName(currentPlayer.Name)}</C>~g~'s Identifiers: {ids}", false);
+                        Notify.Custom($"~y~{GetSafePlayerName(currentPlayer.Name)}~g~'s Identifiers: {ids}", false);
                         return data;
                     };
                     BaseScript.TriggerServerEvent("vMenu:GetPlayerIdentifiers", currentPlayer.ServerId, CallbackFunction);

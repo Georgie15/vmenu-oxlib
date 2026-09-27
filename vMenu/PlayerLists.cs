@@ -130,6 +130,10 @@ namespace vMenuClient
 
         private int updatingPlayerList;
 
+        // --- anti-spam cooldown (client-side) ---
+        private const int REQUEST_COOLDOWN_MS = 1500;   // 1.5s
+        private static int _lastRequestAtMs = 0;
+
         public InfinityPlayerList(PlayerList playerList)
         {
             this.playerList = playerList;
@@ -167,6 +171,14 @@ namespace vMenuClient
 
         public void RequestPlayerList()
         {
+            // debounce to avoid hammering the server
+            int now = GetGameTimer();
+            if (now - _lastRequestAtMs < REQUEST_COOLDOWN_MS)
+            {
+                return; // too soon; drop duplicate request
+            }
+            _lastRequestAtMs = now;
+
             updatingPlayerList++;
             BaseScript.TriggerServerEvent("vMenu:RequestPlayerList");
         }
@@ -192,6 +204,7 @@ namespace vMenuClient
             }
 
             updatingPlayerList--;
+            if (updatingPlayerList < 0) updatingPlayerList = 0; // safety clamp
         }
 
         public async Task WaitRequested()

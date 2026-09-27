@@ -60,6 +60,8 @@ namespace vMenuClient
 
         public static bool MenuEnabled { get; private set; } = true;
 
+        private static bool _wasMenuOpen = false;
+
         private const int currentCleanupVersion = 2;
         #endregion
 
@@ -120,7 +122,7 @@ namespace vMenuClient
             }
             #endregion
             #region keymapping
-            string KeyMappingID = String.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
+            string KeyMappingID = GetKeyMappingId();
             RegisterCommand($"vMenu:{KeyMappingID}:NoClip", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
             {
                 if (IsAllowed(Permission.NoClip))
@@ -144,20 +146,6 @@ namespace vMenuClient
                     }
                 }
             }), false);
-            RegisterCommand($"vMenu:{KeyMappingID}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
-            {
-                if (MenuEnabled)
-                {
-                    if (!MenuController.IsAnyMenuOpen())
-                    {
-                        Menu.OpenMenu();
-                    }
-                    else
-                    {
-                        MenuController.CloseAllMenus();
-                    }
-                }
-            }), false);
 
             if (!(GetSettingsString(Setting.vmenu_noclip_toggle_key) == null))
             {
@@ -177,6 +165,22 @@ namespace vMenuClient
                 MenuToggleKey = "M";
             }
             MenuController.MenuToggleKey = (Control)(-1); // disables the menu toggle key
+            RegisterCommand($"vMenu:{KeyMappingID}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
+            {
+                if (!MenuEnabled || !PermissionsSetupComplete || !ConfigOptionsSetupComplete || Menu == null)
+                {
+                    return;
+                }
+
+                if (!MenuController.IsAnyMenuOpen())
+                {
+                    Menu.OpenMenu();
+                }
+                else
+                {
+                    MenuController.CloseAllMenus();
+                }
+            }), false);
             RegisterKeyMapping($"vMenu:{KeyMappingID}:NoClip", "vMenu NoClip Toggle Button", "keyboard", NoClipKey);
             RegisterKeyMapping($"vMenu:{KeyMappingID}:MenuToggle", "vMenu Toggle Button", "keyboard", MenuToggleKey);
             RegisterKeyMapping($"vMenu:{KeyMappingID}:MenuToggle", "vMenu Toggle Button Controller", "pad_digitalbuttonany", "start_index");
@@ -340,29 +344,19 @@ namespace vMenuClient
             // Clear all previous pause menu info/brief messages on resource start.
             ClearBrief();
 
-            // Request the permissions data from the server.
+            if (DebugMode)
+            {
+                Debug.WriteLine("[vMenu] Requesting permissions bootstrap from server.");
+            }
             TriggerServerEvent("vMenu:RequestPermissions");
 
-            // Request server state from the server.
-            TriggerServerEvent("vMenu:RequestServerState");
-        }
-
-        #region Infinity bits
-        [EventHandler("vMenu:SetServerState")]
-        public void SetServerState(IDictionary<string, object> data)
-        {
-            if (data.TryGetValue("IsInfinity", out var isInfinity))
+            if (GlobalState.Get("vmenu_onesync") ?? false)
             {
-                if (isInfinity is bool isInfinityBool)
-                {
-                    if (isInfinityBool)
-                    {
-                        PlayersList = new InfinityPlayerList(Players);
-                    }
-                }
+                PlayersList = new InfinityPlayerList(Players);
             }
         }
 
+        #region Infinity bits
         [EventHandler("vMenu:ReceivePlayerList")]
         public void ReceivedPlayerList(IList<object> players)
         {
@@ -400,40 +394,52 @@ namespace vMenuClient
         /// <param name="dict"></param>
         public static async void SetPermissions(string permissionsList)
         {
-            vMenuShared.PermissionsManager.SetPermissions(permissionsList);
+            try
+            {
+                if (DebugMode)
+                {
+                    Debug.WriteLine("[vMenu] Received permissions payload from server.");
+                }
 
-            VehicleSpawner.allowedCategories = new List<bool>()
-            {
-                IsAllowed(Permission.VSCompacts, checkAnyway: true),
-                IsAllowed(Permission.VSSedans, checkAnyway: true),
-                IsAllowed(Permission.VSSUVs, checkAnyway: true),
-                IsAllowed(Permission.VSCoupes, checkAnyway: true),
-                IsAllowed(Permission.VSMuscle, checkAnyway: true),
-                IsAllowed(Permission.VSSportsClassic, checkAnyway: true),
-                IsAllowed(Permission.VSSports, checkAnyway: true),
-                IsAllowed(Permission.VSSuper, checkAnyway: true),
-                IsAllowed(Permission.VSMotorcycles, checkAnyway: true),
-                IsAllowed(Permission.VSOffRoad, checkAnyway: true),
-                IsAllowed(Permission.VSIndustrial, checkAnyway: true),
-                IsAllowed(Permission.VSUtility, checkAnyway: true),
-                IsAllowed(Permission.VSVans, checkAnyway: true),
-                IsAllowed(Permission.VSCycles, checkAnyway: true),
-                IsAllowed(Permission.VSBoats, checkAnyway: true),
-                IsAllowed(Permission.VSHelicopters, checkAnyway: true),
-                IsAllowed(Permission.VSPlanes, checkAnyway: true),
-                IsAllowed(Permission.VSService, checkAnyway: true),
-                IsAllowed(Permission.VSEmergency, checkAnyway: true),
-                IsAllowed(Permission.VSMilitary, checkAnyway: true),
-                IsAllowed(Permission.VSCommercial, checkAnyway: true),
-                IsAllowed(Permission.VSTrains, checkAnyway: true),
-                IsAllowed(Permission.VSOpenWheel, checkAnyway: true)
-            };
-            ArePermissionsSetup = true;
-            while (!ConfigOptionsSetupComplete)
-            {
-                await Delay(100);
+                vMenuShared.PermissionsManager.SetPermissions(permissionsList);
+
+                VehicleSpawner.allowedCategories = new List<bool>()
+                {
+                    IsAllowed(Permission.VSCompacts, checkAnyway: true),
+                    IsAllowed(Permission.VSSedans, checkAnyway: true),
+                    IsAllowed(Permission.VSSUVs, checkAnyway: true),
+                    IsAllowed(Permission.VSCoupes, checkAnyway: true),
+                    IsAllowed(Permission.VSMuscle, checkAnyway: true),
+                    IsAllowed(Permission.VSSportsClassic, checkAnyway: true),
+                    IsAllowed(Permission.VSSports, checkAnyway: true),
+                    IsAllowed(Permission.VSSuper, checkAnyway: true),
+                    IsAllowed(Permission.VSMotorcycles, checkAnyway: true),
+                    IsAllowed(Permission.VSOffRoad, checkAnyway: true),
+                    IsAllowed(Permission.VSIndustrial, checkAnyway: true),
+                    IsAllowed(Permission.VSUtility, checkAnyway: true),
+                    IsAllowed(Permission.VSVans, checkAnyway: true),
+                    IsAllowed(Permission.VSCycles, checkAnyway: true),
+                    IsAllowed(Permission.VSBoats, checkAnyway: true),
+                    IsAllowed(Permission.VSHelicopters, checkAnyway: true),
+                    IsAllowed(Permission.VSPlanes, checkAnyway: true),
+                    IsAllowed(Permission.VSService, checkAnyway: true),
+                    IsAllowed(Permission.VSEmergency, checkAnyway: true),
+                    IsAllowed(Permission.VSMilitary, checkAnyway: true),
+                    IsAllowed(Permission.VSCommercial, checkAnyway: true),
+                    IsAllowed(Permission.VSTrains, checkAnyway: true),
+                    IsAllowed(Permission.VSOpenWheel, checkAnyway: true)
+                };
+                ArePermissionsSetup = true;
+                while (!ConfigOptionsSetupComplete)
+                {
+                    await Delay(100);
+                }
+                PostPermissionsSetup();
             }
-            PostPermissionsSetup();
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[vMenu] [ERROR] Failed during permission setup: {ex.Message}\n{ex.StackTrace}");
+            }
         }
         #endregion
 
@@ -444,6 +450,20 @@ namespace vMenuClient
         /// </summary>
         private static void PostPermissionsSetup()
         {
+            if (Menu != null)
+            {
+                if (DebugMode)
+                {
+                    Debug.WriteLine("[vMenu] PostPermissionsSetup skipped because the main menu is already initialized.");
+                }
+                return;
+            }
+
+            if (DebugMode)
+            {
+                Debug.WriteLine("[vMenu] Running PostPermissionsSetup.");
+            }
+
             switch (GetSettingsInt(Setting.vmenu_pvp_mode))
             {
                 case 1:
@@ -482,10 +502,10 @@ namespace vMenuClient
                 return;
             }
             // Create the main menu.
-            Menu = new Menu(Game.Player.Name, "Main Menu");
-            PlayerSubmenu = new Menu(Game.Player.Name, "Player Related Options");
-            VehicleSubmenu = new Menu(Game.Player.Name, "Vehicle Related Options");
-            WorldSubmenu = new Menu(Game.Player.Name, "World Options");
+            Menu = new Menu(" ", "Main Menu");
+            PlayerSubmenu = new Menu(" ", "Player Related Options");
+            VehicleSubmenu = new Menu(" ", "Vehicle Related Options");
+            WorldSubmenu = new Menu(" ", "World Options");
 
             // Add the main menu to the menu pool.
             MenuController.AddMenu(Menu);
@@ -534,6 +554,12 @@ namespace vMenuClient
             {
                 #region Handle Opening/Closing of the menu.
                 var tmpMenu = GetOpenMenu();
+                var isMenuOpen = tmpMenu != null;
+                if (isMenuOpen != _wasMenuOpen)
+                {
+                    _wasMenuOpen = isMenuOpen;
+                    TriggerEvent("vMenu:MenuStateChanged", isMenuOpen);
+                }
                 if (MpPedCustomizationMenu != null)
                 {
                     static bool IsOpen()
@@ -886,6 +912,10 @@ namespace vMenuClient
                 MenuController.EnableMenuToggleKeyOnController = !MiscSettingsMenu.MiscDisableControllerSupport;
             }
         }
+        #endregion
+
+        #region Utilities
+        private static string GetKeyMappingId() => string.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
         #endregion
     }
 }

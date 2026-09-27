@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -27,6 +27,7 @@ namespace vMenuClient
         public static string GetServerWeather => GetSettingsString(Setting.vmenu_current_weather, "CLEAR");
         public static bool DynamicWeatherEnabled => GetSettingsBool(Setting.vmenu_enable_dynamic_weather);
         public static bool IsBlackoutEnabled => GetSettingsBool(Setting.vmenu_blackout_enabled);
+        public static bool IsVehicleLightsEnabled => GetSettingsBool(Setting.vmenu_vehicle_blackout_enabled);
         public static int WeatherChangeTime => MathUtil.Clamp(GetSettingsInt(Setting.vmenu_weather_change_duration), 0, 45);
 
         /// <summary>
@@ -35,20 +36,22 @@ namespace vMenuClient
         public EventManager()
         {
             // Add event handlers.
-            EventHandlers.Add("vMenu:SetAddons", new Action(SetAddons));
+            EventHandlers.Add("vMenu:SetAddons", new Action(SetConfigOptions)); // backward-compatible
+            EventHandlers.Add("vMenu:SetConfigOptions", new Action(SetConfigOptions));
             EventHandlers.Add("vMenu:SetPermissions", new Action<string>(MainMenu.SetPermissions));
-            EventHandlers.Add("vMenu:GoToPlayer", new Action<string>(SummonPlayer));
             EventHandlers.Add("vMenu:KillMe", new Action<string>(KillMe));
             EventHandlers.Add("vMenu:Notify", new Action<string>(NotifyPlayer));
             EventHandlers.Add("vMenu:SetClouds", new Action<float, string>(SetClouds));
             EventHandlers.Add("vMenu:GoodBye", new Action(GoodBye));
             EventHandlers.Add("vMenu:SetBanList", new Action<string>(UpdateBanList));
-            EventHandlers.Add("vMenu:ClearArea", new Action<float, float, float>(ClearAreaNearPos));
+            EventHandlers.Add("vMenu:ClearArea", new Action<Vector3>(ClearAreaNearPos));
             EventHandlers.Add("vMenu:updatePedDecors", new Action(UpdatePedDecors));
             EventHandlers.Add("playerSpawned", new Action(SetAppearanceOnFirstSpawn));
-            EventHandlers.Add("vMenu:GetOutOfCar", new Action<int, int>(GetOutOfCar));
             EventHandlers.Add("vMenu:PrivateMessage", new Action<string, string>(PrivateMessage));
             EventHandlers.Add("vMenu:UpdateTeleportLocations", new Action<string>(UpdateTeleportLocations));
+            EventHandlers.Add("dpclothing:vmenu:setDeathAppearancePatch", new Action<string>(SetDpClothingDeathAppearancePatchCache));
+            EventHandlers.Add("dpclothing:vmenu:clearDeathAppearancePatch", new Action(ClearDpClothingDeathAppearancePatchCache));
+            EventHandlers.Add("dpclothing:vmenu:applyDeathAppearancePatchToTempPed", new Action<string>(ApplyDpClothingDeathAppearancePatchToTempPed));
 
             if (GetSettingsBool(Setting.vmenu_enable_weather_sync))
             {
@@ -62,6 +65,7 @@ namespace vMenuClient
 
             RegisterNuiCallbackType("disableImportExportNUI");
             RegisterNuiCallbackType("importData");
+            RegisterNuiCallbackType("closePedPackPrompt");
         }
 
         [EventHandler("__cfx_nui:importData")]
@@ -80,6 +84,25 @@ namespace vMenuClient
             cb(JsonConvert.SerializeObject(new { ok = true }));
         }
 
+        [EventHandler("__cfx_nui:closePedPackPrompt")]
+        internal async void ClosePedPackPrompt(IDictionary<string, object> data, CallbackDelegate cb)
+        {
+            SetNuiFocus(false, false);
+            cb(JsonConvert.SerializeObject(new { ok = true }));
+
+            var reopen = false;
+            if (data != null && data.TryGetValue("reopen", out var reopenValue))
+            {
+                _ = bool.TryParse(reopenValue?.ToString(), out reopen);
+            }
+
+            if (reopen)
+            {
+                await Delay(0);
+                PlayerAppearance.Instance?.OpenSpawnPedsMenu();
+            }
+        }
+
         private bool firstSpawn = true;
         /// <summary>
         /// Sets the saved character whenever the player first spawns.
@@ -89,9 +112,9 @@ namespace vMenuClient
             if (firstSpawn)
             {
                 firstSpawn = false;
-                if (MainMenu.MiscSettingsMenu != null && MainMenu.MpPedCustomizationMenu != null && MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter && !string.IsNullOrEmpty(GetResourceKvpString("vmenu_default_character")) && !GetSettingsBool(Setting.vmenu_disable_spawning_as_default_character))
+                if (MainMenu.MiscSettingsMenu != null && MainMenu.MpPedCustomizationMenu != null && !GetSettingsBool(Setting.vmenu_disable_spawning_as_default_character))
                 {
-                    await MainMenu.MpPedCustomizationMenu.SpawnThisCharacter(GetResourceKvpString("vmenu_default_character"), false);
+                    await MainMenu.MpPedCustomizationMenu.RestorePreferredMpAppearance(false);
                 }
                 while (!IsScreenFadedIn() || IsPlayerSwitchInProgress() || IsPauseMenuActive() || GetIsLoadingScreenActive())
                 {
@@ -107,6 +130,17 @@ namespace vMenuClient
 
                 }
             }
+        }
+
+        /// <summary>
+        /// Sets config-driven options (addons, extras).
+        /// </summary>
+        private void SetConfigOptions()
+        {
+            SetAddons();
+            SetPedPackPeds();
+            SetExtras();
+            MainMenu.ConfigOptionsSetupComplete = true;
         }
 
         /// <summary>
@@ -177,8 +211,46 @@ namespace vMenuClient
             {
                 Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your addons.json file contains a problem! Error details: {ex.Message}\n\n");
             }
+        }
 
-            MainMenu.ConfigOptionsSetupComplete = true;
+        /// <summary>
+        /// Sets the curated ped pack entries from the pedpack.json file.
+        /// </summary>
+        private void SetPedPackPeds()
+        {
+            PlayerAppearance.PedPackPeds = new List<PedPackEntry>();
+
+            var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/pedpack.json") ?? "[]";
+            try
+            {
+                var pedPackEntries = JsonConvert.DeserializeObject<List<PedPackEntry>>(jsonData) ?? new List<PedPackEntry>();
+
+                foreach (var ped in pedPackEntries)
+                {
+                    if (string.IsNullOrWhiteSpace(ped?.Model))
+                    {
+                        Debug.WriteLine("[vMenu] [Error] Your pedpack.json file contains an entry with an empty model name! Please fix or remove this entry.");
+                        continue;
+                    }
+
+                    var modelName = ped.Model.Trim();
+                    if (PlayerAppearance.PedPackPeds.Any(existing => existing.Model.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        Debug.WriteLine($"[vMenu] [Error] Your pedpack.json file contains 2 or more entries with the same ped model! ({modelName}) Please remove duplicate lines!");
+                        continue;
+                    }
+
+                    PlayerAppearance.PedPackPeds.Add(new PedPackEntry
+                    {
+                        Model = modelName,
+                        DisplayName = string.IsNullOrWhiteSpace(ped.DisplayName) ? modelName : ped.DisplayName.Trim()
+                    });
+                }
+            }
+            catch (JsonReaderException ex)
+            {
+                Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your pedpack.json file contains a problem! Error details: {ex.Message}\n\n");
+            }
         }
 
         /// <summary>
@@ -225,6 +297,48 @@ namespace vMenuClient
         }
 
         /// <summary>
+        /// Sets the extras labels from the extras.json file.
+        /// </summary>
+        private void SetExtras()
+        {
+            // reset extras
+            VehicleOptions.VehicleExtras = new Dictionary<uint, Dictionary<int, string>>();
+
+            string jsonData = LoadResourceFile(GetCurrentResourceName(), "config/extras.json") ?? "{}";
+
+            try
+            {
+                // load new extras.
+                var extras = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<int, string>>>(jsonData);
+
+                foreach (string model in extras.Keys)
+                {
+                    uint modelHash = (uint)GetHashKey(model);
+
+                    if (extras[model] != null && extras[model].Count > 0)
+                    {
+                        if (!VehicleOptions.VehicleExtras.ContainsKey(modelHash) || VehicleOptions.VehicleExtras[modelHash] == null)
+                            VehicleOptions.VehicleExtras.Add(modelHash, extras[model]);
+                        else
+                        {
+                            foreach (int extra in extras[model].Keys)
+                            {
+                                if (!VehicleOptions.VehicleExtras[modelHash].ContainsKey(extra))
+                                    VehicleOptions.VehicleExtras[modelHash].Add(extra, extras[model][extra]);
+                                else
+                                    Debug.WriteLine($"[vMenu] [Warning] Your extras.json file contains duplicate extra index ({model}, Extra {extra}). Please remove duplicates!");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonReaderException ex)
+            {
+                Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your extras.json file contains a problem! Error details: {ex.Message}\n\n");
+            }
+        }
+
+        /// <summary>
         /// OnTick loop to keep the weather synced.
         /// </summary>
         /// <returns></returns>
@@ -232,6 +346,7 @@ namespace vMenuClient
         {
             await UpdateWeatherParticles();
             SetArtificialLightsState(IsBlackoutEnabled);
+            SetArtificialLightsStateAffectsVehicles(!IsVehicleLightsEnabled);
             if (GetNextWeatherType() != GetHashKey(GetServerWeather))
             {
                 SetWeatherTypeOvertimePersist(GetServerWeather, (float)WeatherChangeTime);
@@ -296,96 +411,16 @@ namespace vMenuClient
         /// </summary>
         private void KillMe(string sourceName)
         {
-            Notify.Alert($"You have been killed by <C>{GetSafePlayerName(sourceName)}</C>~s~ using the ~r~Kill Player~s~ option in vMenu.");
+            Notify.Alert($"You have been killed by ~r~{GetSafePlayerName(sourceName)}~s~ using the ~r~Kill Player~s~ option in vMenu.");
             SetEntityHealth(Game.PlayerPed.Handle, 0);
-        }
-
-        /// <summary>
-        /// Teleport to the specified player.
-        /// </summary>
-        /// <param name="targetPlayer"></param>
-        private async void SummonPlayer(string targetPlayer)
-        {
-            // ensure the player list is requested in case of Infinity
-            MainMenu.PlayersList.RequestPlayerList();
-            await MainMenu.PlayersList.WaitRequested();
-
-            var player = MainMenu.PlayersList.FirstOrDefault(a => a.ServerId == int.Parse(targetPlayer));
-
-            if (player != null)
-            {
-                _ = TeleportToPlayer(player);
-            }
         }
 
         /// <summary>
         /// Clear the area around the provided x, y, z coordinates. Clears everything like (destroyed) objects, peds, (ai) vehicles, etc.
         /// Also restores broken streetlights, etc.
         /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <param name="z"></param>
-        private void ClearAreaNearPos(float x, float y, float z)
-        {
-            ClearAreaOfEverything(x, y, z, 100f, false, false, false, false);
-        }
-
-        /// <summary>
-        /// Kicks the current player from the specified vehicle if they're inside and don't own the vehicle themselves.
-        /// </summary>
-        /// <param name="vehNetId"></param>
-        /// <param name="vehicleOwnedBy"></param>
-        private async void GetOutOfCar(int vehNetId, int vehicleOwnedBy)
-        {
-            if (NetworkDoesNetworkIdExist(vehNetId))
-            {
-                var veh = NetToVeh(vehNetId);
-                if (DoesEntityExist(veh))
-                {
-                    var vehicle = new Vehicle(veh);
-
-                    if (vehicle == null || !vehicle.Exists())
-                    {
-                        return;
-                    }
-
-                    if (Game.PlayerPed.IsInVehicle(vehicle) && vehicleOwnedBy != Game.Player.ServerId)
-                    {
-                        if (!vehicle.IsStopped)
-                        {
-                            Notify.Alert("The owner of this vehicle is reclaiming their personal vehicle. You will be kicked from this vehicle in about 10 seconds. Stop the vehicle now to avoid taking damage.", false, true);
-                        }
-
-                        // Wait for the vehicle to come to a stop, or 10 seconds, whichever is faster.
-                        var timer = GetGameTimer();
-                        while (vehicle != null && vehicle.Exists() && !vehicle.IsStopped)
-                        {
-                            await Delay(0);
-                            if (GetGameTimer() - timer > (10 * 1000)) // 10 second timeout
-                            {
-                                break;
-                            }
-                        }
-
-                        // just to make sure they're actually still inside the vehicle and the vehicle still exists.
-                        if (vehicle != null && vehicle.Exists() && Game.PlayerPed.IsInVehicle(vehicle))
-                        {
-                            // Make the ped jump out because the car isn't stopped yet.
-                            if (!vehicle.IsStopped)
-                            {
-                                Notify.Info("You were warned, now you'll have to suffer the consequences!");
-                                TaskLeaveVehicle(Game.PlayerPed.Handle, vehicle.Handle, 4160);
-                            }
-                            // Make the ped exit gently.
-                            else
-                            {
-                                TaskLeaveVehicle(Game.PlayerPed.Handle, vehicle.Handle, 0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        /// <param name="position"></param>
+        private void ClearAreaNearPos(Vector3 position) => ClearAreaOfEverything(position.X, position.Y, position.Z, 100f, false, false, false, false);
 
         /// <summary>
         /// Updates ped decorators for the clothing animation when players have joined.

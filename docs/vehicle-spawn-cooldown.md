@@ -56,6 +56,10 @@ respects the existing settings/permissions.
 
 ## Source and deployment handoff
 
+This section records the September 12 development state. The combined local
+source and packaged build were subsequently saved on `main`; see
+[`current-build.md`](current-build.md) for the current branch and build hashes.
+
 This checkout already contained extensive uncommitted PSRP source and built-DLL
 changes. Only the cooldown source delta, new gate, regression harness, and this
 note are committed. The rebuilt local DLL includes the existing PSRP changes

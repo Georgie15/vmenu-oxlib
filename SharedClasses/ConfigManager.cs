@@ -25,6 +25,7 @@ namespace vMenuShared
             vmenu_quit_session_in_rockstar_editor,
             vmenu_server_info_message,
             vmenu_server_info_website_url,
+            vmenu_pedpack_store_url,
             vmenu_teleport_to_wp_keybind_key,
             vmenu_disable_spawning_as_default_character,
             vmenu_enable_animals_spawn_menu,
@@ -41,6 +42,14 @@ namespace vMenuShared
             // Vehicle Chameleon Colours
             vmenu_using_chameleon_colours,
 
+            // Prevent Extras Abuse
+            vmenu_prevent_extras_when_damaged,
+            vmenu_allowed_engine_damage_for_extra_change,
+            vmenu_allowed_body_damage_for_extra_change,
+
+            // MP Ped preview setting
+            vmenu_mp_ped_preview,
+
             // Kick & ban settings
             vmenu_default_ban_message_information,
             vmenu_auto_ban_cheaters,
@@ -54,6 +63,7 @@ namespace vMenuShared
             vmenu_dynamic_weather_timer,
             vmenu_current_weather,
             vmenu_blackout_enabled,
+            vmenu_vehicle_blackout_enabled,
             vmenu_weather_change_duration,
             vmenu_enable_snow,
 
@@ -197,6 +207,30 @@ namespace vMenuShared
         {
             return GetLocations().teleports;
         }
+
+#if SERVER
+        private static string cachedTeleportLocationsJson = null;
+
+        /// <summary>
+        /// Serialized teleports list sent to every joining client. locations.json is
+        /// only mutated by MainServer's SaveTeleportLocation, which invalidates this —
+        /// so we don't re-read and re-parse the file from disk on every player join.
+        /// </summary>
+        /// <returns></returns>
+        public static string GetTeleportLocationsJson()
+        {
+            cachedTeleportLocationsJson ??= JsonConvert.SerializeObject(GetTeleportLocationsData());
+            return cachedTeleportLocationsJson;
+        }
+
+        /// <summary>
+        /// Call after any write to locations.json so the next join re-reads it.
+        /// </summary>
+        public static void InvalidateTeleportLocationsCache()
+        {
+            cachedTeleportLocationsJson = null;
+        }
+#endif
 
         /// <summary>
         /// Gets just the blips data from the locations.json.

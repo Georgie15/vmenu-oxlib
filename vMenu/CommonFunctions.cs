@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -32,6 +32,10 @@ namespace vMenuClient
         {
             Exports["vMenu"].copyToClipboard(text);
         }
+        public void NotifyViaOxLib(IDictionary<string, object> data)
+        {
+            Exports["ox_lib"].notify(data);
+        }
         public bool CanDoInteraction(string type)
         {
             return Exports["vMenu"].canDoInteraction(type);
@@ -49,13 +53,51 @@ namespace vMenuClient
         {
             return await Exports["vMenu"].getUserConfirmation(windowTitle, description);
         }
+        public async Task<string> BeginVehicleIdentity(uint model, string token)
+        {
+            try { return await Exports["PSRP_cad"].BeginVehicleIdentitySpawn(model, token); }
+            catch { return ""; }
+        }
+        public async Task<bool> ClaimVehicleIdentity(string ticket, int veh, string token)
+        {
+            try { return await Exports["PSRP_cad"].ClaimVehicleIdentity(ticket, veh, token); }
+            catch { return false; }
+        }
+        public string VehicleSaveToken(int veh)
+        {
+            try { return Exports["PSRP_cad"].VehicleSaveToken(veh); }
+            catch { return ""; }
+        }
+        public async Task RememberVehicleSave(int veh, string token)
+        {
+            try { await Exports["PSRP_cad"].RememberVehicleSave(veh, token); }
+            catch { }
+        }
+        // PSRP_cad bridge: returns true when the player's active CAD character
+        // already has this exact saved vehicle linked. Used to grey out the
+        // "Save to CAD" item in the saved-vehicle menu. Fails open (false) if
+        // PSRP_cad is missing or down so the menu doesn't get permanently
+        // locked out.
+        public async Task<bool> IsVehicleInPsrpCad(string plate, string model, string saveToken = null)
+        {
+            try
+            {
+                return await Exports["PSRP_cad"].IsVehicleInCad(plate, model, saveToken);
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 
         public static class CommonFunctions
         {
         #region Variables
+        private static readonly ExternalFunctions IdentityBridge = new ExternalFunctions();
         private static string _currentScenario = "";
         private static Vehicle _previousVehicle;
+        private static bool _respawnDebuffActive = false;
 
         private static readonly VehicleSpawnGate SpawnGate = new VehicleSpawnGate(() => unchecked((uint)GetGameTimer()));
         public static bool VehicleSpawnerCooldownEnabled => SpawnGate.IsBlocked;
@@ -152,11 +194,43 @@ namespace vMenuClient
         }
         #endregion
 
+        #region request network control of an entity
+        /// <summary>
+        /// Requests network control of the entity, retrying for up to
+        /// <paramref name="timeoutMs"/> because ownership requests usually take
+        /// multiple ticks to be granted under OneSync.
+        /// </summary>
+        public static async Task<bool> RequestEntityControl(int handle, int timeoutMs = 1000)
+        {
+            if (!DoesEntityExist(handle))
+            {
+                return false;
+            }
+
+            var deadline = GetGameTimer() + timeoutMs;
+            while (!NetworkHasControlOfEntity(handle) && GetGameTimer() < deadline)
+            {
+                NetworkRequestControlOfEntity(handle);
+                await Delay(0);
+            }
+
+            return NetworkHasControlOfEntity(handle);
+        }
+        #endregion
+
         #region lock or unlock vehicle doors
         public static async void LockOrUnlockDoors(Vehicle veh, bool lockDoors)
         {
             if (veh != null && veh.Exists())
             {
+                // The lock state only replicates to other players when written
+                // by the vehicle's network owner.
+                if (!await RequestEntityControl(veh.Handle))
+                {
+                    Notify.Error("Your vehicle could not be locked or unlocked right now. Another player is currently controlling your vehicle, please try again.");
+                    return;
+                }
+
                 for (var i = 0; i < 2; i++)
                 {
                     var timer = GetGameTimer();
@@ -169,13 +243,15 @@ namespace vMenuClient
                 }
                 if (lockDoors)
                 {
-                    Subtitle.Custom("Vehicle doors are now locked.");
+                    SetVehicleDoorsLocked(veh.Handle, 2);
                     SetVehicleDoorsLockedForAllPlayers(veh.Handle, true);
+                    Subtitle.Custom("Vehicle doors are now locked.");
                 }
                 else
                 {
-                    Subtitle.Custom("Vehicle doors are now unlocked.");
                     SetVehicleDoorsLockedForAllPlayers(veh.Handle, false);
+                    SetVehicleDoorsLocked(veh.Handle, 1);
+                    Subtitle.Custom("Vehicle doors are now unlocked.");
                 }
             }
         }
@@ -536,7 +612,7 @@ namespace vMenuClient
                             if (vehicle.Exists() && !vehicle.IsDead && IsAnyVehicleSeatEmpty(vehicle.Handle))
                             {
                                 TaskWarpPedIntoVehicle(Game.PlayerPed.Handle, vehicle.Handle, (int)VehicleSeat.Any);
-                                Notify.Success("Teleported into ~g~<C>" + GetPlayerName(playerId) + "</C>'s ~s~vehicle.");
+                                Notify.Success("Teleported into ~g~" + GetPlayerName(playerId) + "'s ~s~vehicle.");
                             }
                             // If there are not enough empty vehicle seats or the vehicle doesn't exist/is dead then notify the user.
                             else
@@ -559,7 +635,7 @@ namespace vMenuClient
                 // Notify the user.
                 else
                 {
-                    Notify.Success("Teleported to ~y~<C>" + GetPlayerName(playerId) + "</C>~s~.");
+                    Notify.Success("Teleported to ~y~" + GetPlayerName(playerId) + "~s~.");
                 }
             }
             // The specified playerId does not exist, notify the user of the error.
@@ -577,8 +653,25 @@ namespace vMenuClient
         /// <param name="pos"></param>
         /// <param name="safeModeDisabled"></param>
         /// <returns></returns>
+        private static async void ClearVMenuTeleportFlag()
+        {
+            try
+            {
+                await BaseScript.Delay(3000);
+                Game.Player.State.Set("vmenu_teleporting", false, true);
+            }
+            catch { }
+        }
+
         public static async Task TeleportToCoords(Vector3 pos, bool safeModeDisabled = false)
         {
+            // Tell server integrity monitoring (psrp_telemetry) that this position
+            // jump is a sanctioned vMenu teleport. The server still verifies a vMenu
+            // teleport ace, so a spoofed statebag alone grants nothing. Cleared after
+            // 3s so the server's ~1s movement sample is covered.
+            Game.Player.State.Set("vmenu_teleporting", true, true);
+            ClearVMenuTeleportFlag();
+
             if (!safeModeDisabled)
             {
                 // Is player in a vehicle and the driver? Then we'll use that to teleport.
@@ -1027,7 +1120,13 @@ namespace vMenuClient
         /// Summon player.
         /// </summary>
         /// <param name="player"></param>
-        public static void SummonPlayer(IPlayer player) => TriggerServerEvent("vMenu:SummonPlayer", player.ServerId);
+        public static void SummonPlayer(IPlayer player)
+        {
+            Vehicle currentVehicle = GetVehicle();
+            int numberOfSeats = currentVehicle is not null ? GetVehicleModelNumberOfSeats(currentVehicle.Model) : 0;
+
+            TriggerServerEvent("vMenu:SummonPlayer", player.ServerId, numberOfSeats);
+        }
         #endregion
 
         #region Spectate function
@@ -1119,7 +1218,7 @@ namespace vMenuClient
                             }
 
                             DoScreenFadeIn(500);
-                            Notify.Success($"You are now spectating ~g~<C>{GetSafePlayerName(player.Name)}</C>~s~.", false, true);
+                            Notify.Success($"You are now spectating ~g~{GetSafePlayerName(player.Name)}~s~.", false, true);
                             currentlySpectatingPlayer = player.Handle;
                         }
                         else
@@ -1153,7 +1252,7 @@ namespace vMenuClient
                             }
 
                             DoScreenFadeIn(500);
-                            Notify.Success($"You are now spectating ~g~<C>{GetSafePlayerName(player.Name)}</C>~s~.", false, true);
+                            Notify.Success($"You are now spectating ~g~{GetSafePlayerName(player.Name)}~s~.", false, true);
                             currentlySpectatingPlayer = player.Handle;
                         }
                     }
@@ -1321,11 +1420,29 @@ namespace vMenuClient
 
             var speed = 0f;
             var rpm = 0f;
+            var previousVehicleSeverelyDamaged = false;
             if (Game.PlayerPed.IsInVehicle())
             {
                 var tmpOldVehicle = GetVehicle();
-                speed = GetEntitySpeedVector(tmpOldVehicle.Handle, true).Y; // get forward/backward speed only
-                rpm = tmpOldVehicle.CurrentRPM;
+                if (tmpOldVehicle != null && tmpOldVehicle.Exists())
+                {
+                    speed = GetEntitySpeedVector(tmpOldVehicle.Handle, true).Y; // get forward/backward speed only
+                    rpm = tmpOldVehicle.CurrentRPM;
+                    previousVehicleSeverelyDamaged = tmpOldVehicle.BodyHealth < 400f || tmpOldVehicle.EngineHealth < 400f;
+                }
+
+                if (Math.Abs(speed) > 8.9408f)
+                {
+                    SendNotification("You cannot spawn a vehicle while moving over 20 mph.");
+                    return 0;
+                }
+            }
+
+            if (_previousVehicle != null && _previousVehicle.Exists())
+            {
+                previousVehicleSeverelyDamaged = previousVehicleSeverelyDamaged
+                    || _previousVehicle.BodyHealth < 400f
+                    || _previousVehicle.EngineHealth < 400f;
             }
 
             var modelClass = GetVehicleClassFromName(vehicleHash);
@@ -1415,6 +1532,8 @@ namespace vMenuClient
                 pos = GetOffsetFromEntityInWorldCoords(Game.PlayerPed.Handle, 0, 8f, 0.1f) + new Vector3(0f, 0f, 1f);
             }
 
+            // Identity ticket is scoped to this character, model and a newly created entity.
+            var identityTicket = await IdentityBridge.BeginVehicleIdentity(vehicleHash, vehicleInfo.cadSaveToken);
             // Create the new vehicle and remove the need to hotwire the car.
             var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
             {
@@ -1453,8 +1572,10 @@ namespace vMenuClient
             if (saveName != null)
             {
                 ApplyVehicleModsDelayed(vehicle, vehicleInfo, 500);
+                await BaseScript.Delay(650);
             }
 
+            await IdentityBridge.ClaimVehicleIdentity(identityTicket, vehicle.Handle, vehicleInfo.cadSaveToken);
             // Set the previous vehicle to the new vehicle.
             _previousVehicle = vehicle;
             //vehicle.Speed = speed; // retarded feature that randomly breaks for no fucking reason
@@ -1473,7 +1594,38 @@ namespace vMenuClient
             // Discard the model.
             SetModelAsNoLongerNeeded(vehicleHash);
 
+            if (previousVehicleSeverelyDamaged && spawnInside)
+            {
+                _ = ApplyRespawnSpeedDebuff(vehicle);
+            }
+
             return vehicle.Handle;
+        }
+
+        private static async Task ApplyRespawnSpeedDebuff(Vehicle vehicle)
+        {
+            if (_respawnDebuffActive || vehicle == null || !vehicle.Exists())
+            {
+                return;
+            }
+
+            _respawnDebuffActive = true;
+            try
+            {
+                SetEntityMaxSpeed(vehicle.Handle, 5f);
+                SendNotification("Speed restricted for 7 seconds due to severely damaged previous vehicle.");
+
+                await Delay(7000);
+
+                if (vehicle.Exists())
+                {
+                    SetEntityMaxSpeed(vehicle.Handle, 500.01f);
+                }
+            }
+            finally
+            {
+                _respawnDebuffActive = false;
+            }
         }
 
         /// <summary>
@@ -1602,6 +1754,7 @@ namespace vMenuClient
             public bool neonLeft;
             public bool neonRight;
             public string plateText;
+            public string cadSaveToken;
             public int plateStyle;
             public bool turbo;
             public bool tyreSmoke;
@@ -1633,7 +1786,7 @@ namespace vMenuClient
                     #region new saving method
                     var mods = new Dictionary<int, int>();
 
-                    foreach (var mod in veh.Mods.GetAllMods())
+                    foreach (var mod in GetAllVehicleMods(veh))
                     {
                         mods.Add((int)mod.ModType, mod.Index);
                     }
@@ -1676,14 +1829,25 @@ namespace vMenuClient
                     int customPrimaryR = -1;
                     int customPrimaryG = -1;
                     int customPrimaryB = -1;
-                    GetVehicleCustomPrimaryColour(veh.Handle, ref customPrimaryR, ref customPrimaryG, ref customPrimaryB);
+                    bool primaryColorIsCustom = GetIsVehiclePrimaryColourCustom(veh.Handle);
+
+                    if (primaryColorIsCustom)
+                    {
+                        GetVehicleCustomPrimaryColour(veh.Handle, ref customPrimaryR, ref customPrimaryG, ref customPrimaryB);
+                    }
                     colors.Add("customPrimaryR", customPrimaryR);
                     colors.Add("customPrimaryG", customPrimaryG);
                     colors.Add("customPrimaryB", customPrimaryB);
                     int customSecondaryR = -1;
                     int customSecondaryG = -1;
                     int customSecondaryB = -1;
-                    GetVehicleCustomSecondaryColour(veh.Handle, ref customSecondaryR, ref customSecondaryG, ref customSecondaryB);
+
+                    bool secondaryColorIsCustom = GetIsVehicleSecondaryColourCustom(veh.Handle);
+
+                    if (secondaryColorIsCustom)
+                    {
+                        GetVehicleCustomSecondaryColour(veh.Handle, ref customSecondaryR, ref customSecondaryG, ref customSecondaryB);
+                    }
                     colors.Add("customSecondaryR", customSecondaryR);
                     colors.Add("customSecondaryG", customSecondaryG);
                     colors.Add("customSecondaryB", customSecondaryB);
@@ -1712,6 +1876,7 @@ namespace vMenuClient
                         neonLeft = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Left),
                         neonRight = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Right),
                         plateText = veh.Mods.LicensePlate,
+                        cadSaveToken = IdentityBridge.VehicleSaveToken(veh.Handle),
                         plateStyle = (int)veh.Mods.LicensePlateStyle,
                         turbo = IsToggleModOn(veh.Handle, 18),
                         tyreSmoke = IsToggleModOn(veh.Handle, 20),
@@ -1726,6 +1891,10 @@ namespace vMenuClient
                     };
 
                     #endregion
+
+                    // Re-saving the same live vehicle retains its token; a new vehicle gets a new token.
+                    if (string.IsNullOrEmpty(vi.cadSaveToken)) vi.cadSaveToken = Guid.NewGuid().ToString("N");
+                    await IdentityBridge.RememberVehicleSave(veh.Handle, vi.cadSaveToken);
 
                     if (updateExistingSavedVehicleName == null)
                     {
@@ -1907,6 +2076,26 @@ namespace vMenuClient
             var ExternalFunctions = new ExternalFunctions();
             ExternalFunctions.SetPlayerClipboard(text);
         }
+        public static void SendNotification(string message, string ntype = "warning")
+        {
+            try
+            {
+                var data = new Dictionary<string, object>
+                {
+                    ["title"] = "vMenu",
+                    ["description"] = message,
+                    ["type"] = ntype,
+                    ["position"] = "center-right",
+                    ["duration"] = 6500
+                };
+                var ext = new ExternalFunctions();
+                ext.NotifyViaOxLib(data);
+            }
+            catch
+            {
+                Notify.Custom("~y~~h~Alert~h~~s~: " + message);
+            }
+        }
         public static bool CanDoInteraction(string type)
         {
             var ExternalFunctions = new ExternalFunctions();
@@ -1926,6 +2115,11 @@ namespace vMenuClient
         {
             var ExternalFunctions = new ExternalFunctions();
             return await ExternalFunctions.GetUserConfirmation(windowTitle, description);
+        }
+        public static async Task<bool> IsVehicleInPsrpCad(string plate, string model, string saveToken = null)
+        {
+            var ExternalFunctions = new ExternalFunctions();
+            return await ExternalFunctions.IsVehicleInPsrpCad(plate, model, saveToken);
         }
         #endregion
 
@@ -2139,12 +2333,15 @@ namespace vMenuClient
 
         #region Weather Sync
         /// <summary>
-        /// Update the server with the new weather type, blackout status and dynamic weather changes enabled status.
+        /// Update the server with the new weather type and dynamic weather settings.
         /// </summary>
         /// <param name="newWeather">The new weather type.</param>
-        /// <param name="blackout">Manual blackout mode enabled/disabled.</param>
         /// <param name="dynamicChanges">Dynamic weather changes enabled/disabled.</param>
-        public static void UpdateServerWeather(string newWeather, bool blackout, bool dynamicChanges, bool isSnowEnabled) => TriggerServerEvent("vMenu:UpdateServerWeather", newWeather, blackout, dynamicChanges, isSnowEnabled);
+        public static void UpdateServerWeather(string newWeather, bool dynamicChanges, bool isSnowEnabled) => TriggerServerEvent("vMenu:UpdateServerWeather", newWeather, dynamicChanges, isSnowEnabled);
+
+        public static void UpdateServerBlackout(bool value) => TriggerServerEvent("vMenu:UpdateServerBlackout", value);
+
+        public static void UpdateServerVehicleBlackout(bool value) => TriggerServerEvent("vMenu:UpdateServerVehicleBlackout", value);
 
         /// <summary>
         /// Modify the clouds for everyone. If removeClouds is true, then remove all clouds. If it's false, then randomize the clouds.
@@ -2272,7 +2469,249 @@ namespace vMenuClient
             public Dictionary<int, int> drawableVariations;
             public Dictionary<int, int> drawableVariationTextures;
         };
+
+        public sealed class DpClothingAppearancePatch
+        {
+            public Dictionary<string, DpClothingComponentPatch> components { get; set; } = new Dictionary<string, DpClothingComponentPatch>();
+            public Dictionary<string, DpClothingPropPatch> props { get; set; } = new Dictionary<string, DpClothingPropPatch>();
+        }
+
+        public sealed class DpClothingComponentPatch
+        {
+            public int drawable { get; set; }
+            public int texture { get; set; }
+            public int palette { get; set; }
+        }
+
+        public sealed class DpClothingPropPatch
+        {
+            public int prop { get; set; }
+            public int texture { get; set; }
+        }
         #endregion
+
+        private static string dpClothingDeathAppearancePatchCache;
+
+        public static void SetDpClothingDeathAppearancePatchCache(string patchJson)
+        {
+            dpClothingDeathAppearancePatchCache = string.IsNullOrWhiteSpace(patchJson) ? null : patchJson;
+        }
+
+        public static void ClearDpClothingDeathAppearancePatchCache()
+        {
+            dpClothingDeathAppearancePatchCache = null;
+        }
+
+        private static string GetDpClothingDeathAppearancePatchJson()
+        {
+            var rawPatch = Game.Player.State["dpclothingDeathAppearancePatch"];
+            return rawPatch as string ?? dpClothingDeathAppearancePatchCache;
+        }
+
+        internal static bool HasDpClothingDeathAppearancePatch(string rawPatch = null)
+        {
+            rawPatch ??= GetDpClothingDeathAppearancePatchJson();
+            return !string.IsNullOrWhiteSpace(rawPatch);
+        }
+
+        internal static async Task<string> WaitForDpClothingDeathAppearancePatchJson(int timeoutMs = 1500)
+        {
+            var rawPatch = GetDpClothingDeathAppearancePatchJson();
+            if (!string.IsNullOrWhiteSpace(rawPatch))
+            {
+                return rawPatch;
+            }
+
+            var timeoutAt = GetGameTimer() + timeoutMs;
+            while (GetGameTimer() < timeoutAt)
+            {
+                await Delay(50);
+                rawPatch = GetDpClothingDeathAppearancePatchJson();
+                if (!string.IsNullOrWhiteSpace(rawPatch))
+                {
+                    return rawPatch;
+                }
+            }
+
+            return rawPatch;
+        }
+
+        private static PedInfo ApplyDpClothingDeathAppearancePatch(PedInfo pedInfo, string rawPatch = null)
+        {
+            rawPatch ??= GetDpClothingDeathAppearancePatchJson();
+            if (string.IsNullOrWhiteSpace(rawPatch))
+            {
+                return pedInfo;
+            }
+
+            try
+            {
+                var patch = JsonConvert.DeserializeObject<DpClothingAppearancePatch>(rawPatch);
+                if (patch == null)
+                {
+                    return pedInfo;
+                }
+
+                if (pedInfo.drawableVariations == null)
+                {
+                    pedInfo.drawableVariations = new Dictionary<int, int>();
+                }
+
+                if (pedInfo.drawableVariationTextures == null)
+                {
+                    pedInfo.drawableVariationTextures = new Dictionary<int, int>();
+                }
+
+                if (pedInfo.props == null)
+                {
+                    pedInfo.props = new Dictionary<int, int>();
+                }
+
+                if (pedInfo.propTextures == null)
+                {
+                    pedInfo.propTextures = new Dictionary<int, int>();
+                }
+
+                if (patch.components != null)
+                {
+                    foreach (var componentEntry in patch.components)
+                    {
+                        if (!int.TryParse(componentEntry.Key, out var componentId) || componentEntry.Value == null)
+                        {
+                            continue;
+                        }
+
+                        pedInfo.drawableVariations[componentId] = componentEntry.Value.drawable;
+                        pedInfo.drawableVariationTextures[componentId] = componentEntry.Value.texture;
+                    }
+                }
+
+                if (patch.props != null)
+                {
+                    foreach (var propEntry in patch.props)
+                    {
+                        if (!int.TryParse(propEntry.Key, out var propId) || propEntry.Value == null)
+                        {
+                            continue;
+                        }
+
+                        pedInfo.props[propId] = propEntry.Value.prop;
+                        pedInfo.propTextures[propId] = propEntry.Value.texture;
+                    }
+                }
+            }
+            catch (JsonException e)
+            {
+                Log($"Failed to parse dpclothing death appearance patch: {e.Message}");
+            }
+
+            return pedInfo;
+        }
+
+        public static void ApplyDpClothingDeathAppearancePatchToLivePed(string rawPatch)
+        {
+            if (string.IsNullOrWhiteSpace(rawPatch))
+            {
+                Log("dpclothing live ped patch skipped: patch payload was empty.");
+                return;
+            }
+
+            try
+            {
+                var patch = JsonConvert.DeserializeObject<DpClothingAppearancePatch>(rawPatch);
+                if (patch == null)
+                {
+                    Log("dpclothing live ped patch skipped: failed to deserialize patch.");
+                    return;
+                }
+
+                var ped = Game.PlayerPed.Handle;
+
+                if (patch.components != null)
+                {
+                    foreach (var componentEntry in patch.components)
+                    {
+                        if (!int.TryParse(componentEntry.Key, out var componentId) || componentEntry.Value == null)
+                        {
+                            continue;
+                        }
+
+                        SetPedComponentVariation(
+                            ped,
+                            componentId,
+                            componentEntry.Value.drawable,
+                            componentEntry.Value.texture,
+                            componentEntry.Value.palette
+                        );
+                    }
+                }
+
+                if (patch.props != null)
+                {
+                    foreach (var propEntry in patch.props)
+                    {
+                        if (!int.TryParse(propEntry.Key, out var propId) || propEntry.Value == null)
+                        {
+                            continue;
+                        }
+
+                        if (propEntry.Value.prop == -1)
+                        {
+                            ClearPedProp(ped, propId);
+                        }
+                        else
+                        {
+                            SetPedPropIndex(ped, propId, propEntry.Value.prop, propEntry.Value.texture, true);
+                        }
+                    }
+                }
+
+                Log("dpclothing live ped patch applied.");
+            }
+            catch (JsonException e)
+            {
+                Log($"dpclothing live ped patch failed: {e.Message}");
+            }
+        }
+
+        public static void ApplyDpClothingDeathAppearancePatchToTempPed(string rawPatch)
+        {
+            if (string.IsNullOrWhiteSpace(rawPatch))
+            {
+                Log("dpclothing temp ped patch skipped: patch payload was empty.");
+                return;
+            }
+
+            var savedPedJson = GetResourceKvpString("vMenu_tmp_saved_ped");
+            if (string.IsNullOrWhiteSpace(savedPedJson))
+            {
+                Log("dpclothing temp ped patch skipped: vMenu_tmp_saved_ped was not present.");
+                return;
+            }
+
+            try
+            {
+                var pedInfo = StorageManager.GetSavedPedInfo("vMenu_tmp_saved_ped");
+                if (pedInfo.version == 0 && pedInfo.model == 0)
+                {
+                    Log("dpclothing temp ped patch skipped: failed to deserialize vMenu_tmp_saved_ped.");
+                    return;
+                }
+
+                pedInfo = ApplyDpClothingDeathAppearancePatch(pedInfo, rawPatch);
+                if (!StorageManager.SavePedInfo("vMenu_tmp_saved_ped", pedInfo, true))
+                {
+                    Log("dpclothing temp ped patch failed: SavePedInfo returned false.");
+                    return;
+                }
+
+                Log("dpclothing temp ped patch applied to vMenu_tmp_saved_ped.");
+            }
+            catch (Exception e)
+            {
+                Log($"dpclothing temp ped patch failed: {e.Message}");
+            }
+        }
 
         #region Set Player Skin
         /// <summary>
@@ -2287,10 +2726,22 @@ namespace vMenuClient
         /// <param name="modelHash">The model hash.</param>
         public static async Task SetPlayerSkin(uint modelHash, PedInfo pedCustomizationOptions, bool keepWeapons = true)
         {
+            if (!CanDoInteraction("changepedmodel"))
+            {
+                return;
+            }
+            if (!IsModelAPed(modelHash))
+            {
+                // stops people purposefully crashing games with codes like "police" etc
+                Notify.Error(CommonErrors.InvalidModel);
+                return;
+            }
             if (IsModelInCdimage(modelHash))
             {
                 if (keepWeapons)
                 {
+                    TriggerEvent("vMenu:PedChange:Before");
+                    await Delay(0); // yield so external Lua handlers can save addon weapons
                     SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
                     Log("saved from SetPlayerSkin()");
                 }
@@ -2381,6 +2832,7 @@ namespace vMenuClient
                 if (keepWeapons)
                 {
                     await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, false);
+                    TriggerEvent("vMenu:PedChange:After");
                 }
                 if (modelHash == (uint)GetHashKey("mp_f_freemode_01") || modelHash == (uint)GetHashKey("mp_m_freemode_01"))
                 {
@@ -2473,7 +2925,7 @@ namespace vMenuClient
                 data.propTextures = propTextures;
 
                 data.isMpPed = model == (uint)GetHashKey("mp_f_freemode_01") || model == (uint)GetHashKey("mp_m_freemode_01");
-                if (data.isMpPed)
+                if (data.isMpPed && name != "vMenu_tmp_saved_ped")
                 {
                     Notify.Alert("Note, you should probably use the MP Character creator if you want more advanced features. Saving Multiplayer characters with this function does NOT save a lot of the online peds customization.");
                 }
@@ -2519,22 +2971,41 @@ namespace vMenuClient
         /// Load the saved ped and spawn it.
         /// </summary>
         /// <param name="savedName">The ped saved name</param>
-        public static async void LoadSavedPed(string savedName, bool restoreWeapons)
+        public static async void LoadSavedPed(string savedName, bool restoreWeapons, bool applyDeathAppearancePatch = false)
         {
+            string deathAppearancePatchJson = null;
+            if (applyDeathAppearancePatch)
+            {
+                deathAppearancePatchJson = await WaitForDpClothingDeathAppearancePatchJson();
+            }
+
+            var shouldConsumeDeathAppearancePatch = applyDeathAppearancePatch && HasDpClothingDeathAppearancePatch(deathAppearancePatchJson);
             if (savedName != "vMenu_tmp_saved_ped")
             {
                 var pi = StorageManager.GetSavedPedInfo("ped_" + savedName);
+                if (applyDeathAppearancePatch)
+                {
+                    pi = ApplyDpClothingDeathAppearancePatch(pi, deathAppearancePatchJson);
+                }
                 Log(JsonConvert.SerializeObject(pi));
                 await SetPlayerSkin(pi.model, pi, restoreWeapons);
             }
             else
             {
                 var pi = StorageManager.GetSavedPedInfo(savedName);
+                if (applyDeathAppearancePatch)
+                {
+                    pi = ApplyDpClothingDeathAppearancePatch(pi, deathAppearancePatchJson);
+                }
                 Log(JsonConvert.SerializeObject(pi));
                 await SetPlayerSkin(pi.model, pi, restoreWeapons);
                 DeleteResourceKvp("vMenu_tmp_saved_ped");
             }
 
+            if (shouldConsumeDeathAppearancePatch)
+            {
+                TriggerServerEvent("dpclothing:server:consumeDeathAppearancePatch");
+            }
         }
 
         /// <summary>
@@ -3351,6 +3822,26 @@ namespace vMenuClient
         }
         #endregion
 
+        #region Get all vehicle mods
+        public static VehicleMod[] GetAllVehicleMods(Vehicle vehicle)
+        {
+            int vehicleHandle = vehicle.Handle;
+
+            bool HasVehicleMod(VehicleData.Vehicles.ModType modType)
+            {
+                return GetNumVehicleMods(vehicleHandle, (int)modType) > 0;
+            }
+
+            return
+            [
+                .. Enum.GetValues(typeof(VehicleData.Vehicles.ModType))
+                    .Cast<VehicleData.Vehicles.ModType>()
+                    .Where(HasVehicleMod)
+                    .Select(modType => vehicle.Mods[(VehicleModType)modType])
+            ];
+        }
+        #endregion
+
         #region Map (math util) function
         /// <summary>
         /// Maps the <paramref name="value"/> (which is a value between <paramref name="min_in"/> and <paramref name="max_in"/>) to a new value in the range of <paramref name="min_out"/> and <paramref name="max_out"/>.
@@ -3393,10 +3884,6 @@ namespace vMenuClient
 
             if (MainMenu.MiscSettingsMenu == null || MainMenu.MiscSettingsMenu.MiscDisablePrivateMessages)
             {
-                if (!(sent && source == Game.Player.ServerId.ToString()))
-                {
-                    TriggerServerEvent("vMenu:PmsDisabled", source);
-                }
                 return;
             }
 
@@ -3421,22 +3908,22 @@ namespace vMenuClient
                     var headshotTxd = GetPedheadshotTxdString(headshotHandle);
                     if (sent)
                     {
-                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"<C>{GetSafePlayerName(name)}</C>", "Message Sent", true, 1);
+                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"{GetSafePlayerName(name)}", "Message Sent", true, 1);
                     }
                     else
                     {
-                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"<C>{GetSafePlayerName(name)}</C>", "Message Received", true, 1);
+                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"{GetSafePlayerName(name)}", "Message Received", true, 1);
                     }
                 }
                 else
                 {
                     if (sent)
                     {
-                        Notify.Custom($"PM From: <C>{GetSafePlayerName(name)}</C>. Message: {message}");
+                        Notify.Custom($"PM From: ~y~{GetSafePlayerName(name)}~s~. Message: {message}");
                     }
                     else
                     {
-                        Notify.Custom($"PM To: <C>{GetSafePlayerName(name)}</C>. Message: {message}");
+                        Notify.Custom($"PM To: ~y~{GetSafePlayerName(name)}~s~. Message: {message}");
                     }
                 }
                 UnregisterPedheadshot(headshotHandle);

@@ -76,6 +76,10 @@ exports("loadSharedOutfit", function(name)
         end
     end
 
+    -- The copied data still carries the source character's SaveName; if left
+    -- stale, editing this character later saves over the source character.
+    Data.SaveName = format("mp_ped_%s", newName)
+
     SetResourceKvp(format("mp_ped_%s", newName), json.encode(Data))
 
     Config.Notify("vMenu", "Outfit has been successfully loaded!", "success", 6500)
