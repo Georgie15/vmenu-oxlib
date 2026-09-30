@@ -344,16 +344,38 @@ namespace vMenuClient
             // Clear all previous pause menu info/brief messages on resource start.
             ClearBrief();
 
-            if (DebugMode)
-            {
-                Debug.WriteLine("[vMenu] Requesting permissions bootstrap from server.");
-            }
-            TriggerServerEvent("vMenu:RequestPermissions");
+            // Sends vMenu:RequestPermissions now (same moment as before) and again only if
+            // the menu still isn't built after a long wait; see PermissionBootstrapRetry.
+            Tick += PermissionBootstrapTick;
 
             if (GlobalState.Get("vmenu_onesync") ?? false)
             {
                 PlayersList = new InfinityPlayerList(Players);
             }
+        }
+
+        private readonly PermissionBootstrapRetry permissionBootstrap = new PermissionBootstrapRetry();
+
+        private async Task PermissionBootstrapTick()
+        {
+            // Ready means applied: permissions stored, config options loaded, menu built.
+            var wait = permissionBootstrap.Next(ArePermissionsSetup && ConfigOptionsSetupComplete && Menu != null);
+            if (wait < 0)
+            {
+                Tick -= PermissionBootstrapTick;
+                return;
+            }
+
+            if (permissionBootstrap.IsRetry)
+            {
+                Debug.WriteLine($"[vMenu] [WARNING] Permissions have not loaded yet; asking the server again (request {permissionBootstrap.Requests}).");
+            }
+            else if (DebugMode)
+            {
+                Debug.WriteLine("[vMenu] Requesting permissions bootstrap from server.");
+            }
+            TriggerServerEvent("vMenu:RequestPermissions");
+            await Delay(wait);
         }
 
         #region Infinity bits
