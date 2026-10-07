@@ -18,10 +18,19 @@ def member(signature):
 
 wrappers = '\n'.join(member('public static async Task<int> SpawnVehicle(' + kind)
                      for kind in ('string', 'uint'))
+waits = '\n'.join(member(signature) for signature in (
+    'private static async Task<bool> LoadModel(',
+    'private static async Task<T> WaitForVehicleIdentity<T>('))
+constants = '\n'.join(re.findall(
+    r'^        private const (?:uint|int) Vehicle(?:ModelLoad|Identity)TimeoutMilliseconds = \d+;$',
+    common, re.M))
 # The core must not re-check the gate it already owns or manage a second timer.
 core = member('private static async Task<int> SpawnVehicleCore(')
 assert 'VehicleSpawnerCooldownEnabled' not in core
 assert 'StartVehicleCooldown' not in common
+assert 'await IdentityBridge.BeginVehicleIdentity' not in core
+assert 'await IdentityBridge.ClaimVehicleIdentity' not in core
+assert core.count('await WaitForVehicleIdentity(') == 2
 
 program = r'''
 using System;
@@ -37,6 +46,28 @@ class Program
     static Func<Task<int>> spawn;
     static int calls, blocked;
     static Func<Task<string>> input = () => Task.FromResult("adder");
+    static bool modelValid, modelLoaded;
+    static int requested, released, pollingFrames;
+    static TaskCompletionSource<bool> identityTimer;
+    static bool IsModelInCdimage(uint hash) => modelValid;
+    static bool HasModelLoaded(uint hash) => modelLoaded;
+    static void RequestModel(uint hash) { requested++; }
+    static void SetModelAsNoLongerNeeded(uint hash) { released++; }
+    static int GetGameTimer() => unchecked((int)now);
+    static Task Delay(int milliseconds)
+    {
+        if (milliseconds == 0)
+        {
+            // Deterministically reproduce a streamed model that never loads.
+            if (++pollingFrames > 16) throw new Exception("unbounded model-loading wait holds spawn gate forever");
+            now = unchecked(now + 1000);
+            return Task.CompletedTask;
+        }
+        Check(milliseconds == 10000, "identity timeout is 10 seconds");
+        identityTimer = new TaskCompletionSource<bool>();
+        return identityTimer.Task;
+    }
+    static class Debug { public static void WriteLine(string message) { } }
     public struct VehicleInfo { }
     enum CommonErrors { InvalidInput }
     static class Notify
@@ -64,6 +95,8 @@ class Program
         SpawnGate = new VehicleSpawnGate(() => now);
         spawn = () => Task.FromResult(42);
         input = () => Task.FromResult("adder");
+        modelValid = true; modelLoaded = false;
+        requested = 0; released = 0; pollingFrames = 0; identityTimer = null;
     }
     static async Task Main()
     {
@@ -135,8 +168,56 @@ class Program
         Reset();
         Check(await SpawnVehicle() == 42 && await Saved() == 0, "custom spawn consumes shared cooldown");
         Console.WriteLine("PASS: custom prompt cancellation, submission race, shared cooldown");
+
+        foreach (uint start in new uint[] { 0, uint.MaxValue - 7499 })
+        {
+            Reset(); now = start;
+            spawn = async () => await LoadModel(123) ? 42 : 0;
+            Check(await Saved() == 0, "stalled model cancels without creating a vehicle");
+            Check(unchecked(now - start) == 15000 && released == 1, "timeout bounds streaming wait and releases model");
+            modelLoaded = true;
+            Check(await Saved() == 42, "model timeout releases gate with no success cooldown");
+        }
+        Reset(); modelValid = false;
+        Check(!await LoadModel(123) && requested == 0, "invalid model does not request streaming");
+        Reset(); modelLoaded = true;
+        Check(await LoadModel(123) && pollingFrames == 0 && released == 0, "loaded model stays available for creation");
+        Console.WriteLine("PASS: stalled/invalid/loaded models, timeout recovery and timer wrap");
+
+        foreach (bool begin in new[] { true, false })
+        {
+            Reset();
+            var ticket = new TaskCompletionSource<string>();
+            var claim = new TaskCompletionSource<bool>();
+            string resultTicket = null; bool resultClaim = true;
+            spawn = async () =>
+            {
+                if (begin) resultTicket = await WaitForVehicleIdentity(ticket.Task, "", "begin");
+                else resultClaim = await WaitForVehicleIdentity(claim.Task, false, "claim");
+                return 42;
+            };
+            first = Saved();
+            Check(!first.IsCompleted && await Saved() == 0, "CAD wait retains single-spawn protection");
+            now = 10000; identityTimer.SetResult(true);
+            Check(await first == 42 && (begin ? resultTicket == "" : !resultClaim), "stalled CAD call uses existing fail-open fallback");
+            Check(await Saved() == 0, "spawn completing after CAD timeout still consumes cooldown");
+            now = 11000;
+            var next = new TaskCompletionSource<int>(); spawn = () => next.Task;
+            var nextSpawn = Saved();
+            ticket.SetResult("late ticket"); claim.SetResult(true);
+            Check(await Saved() == 0 && calls == 2, "late CAD completion cannot unlock or repeat a newer spawn");
+            next.SetResult(43); Check(await nextSpawn == 43, "newer spawn finishes normally");
+        }
+        Reset();
+        Check(await WaitForVehicleIdentity(Task.FromResult("ticket"), "", "begin") == "ticket" && identityTimer == null,
+            "completed identity response avoids timeout timer");
+        var healthy = new TaskCompletionSource<string>();
+        var response = WaitForVehicleIdentity(healthy.Task, "", "begin");
+        healthy.SetResult("healthy ticket");
+        Check(await response == "healthy ticket", "identity response before timeout preserved");
+        Console.WriteLine("PASS: stalled CAD begin/claim, healthy responses, late responses and shared cooldown");
     }
-''' + wrappers + '\n}'
+''' + constants + '\n' + waits + '\n' + wrappers + '\n}'
 
 with tempfile.TemporaryDirectory(prefix='vmenu-spawn-cooldown-') as temp:
     work = Path(temp).resolve()

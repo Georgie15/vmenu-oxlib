@@ -105,6 +105,9 @@ namespace vMenuClient
             ? vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown)
             : 1000;
 
+        private const uint VehicleModelLoadTimeoutMilliseconds = 15000;
+        private const int VehicleIdentityTimeoutMilliseconds = 10000;
+
         private static uint _vehicleAllDoorsCooldownStartedAt;
         private static bool _vehicleAllDoorsCooldownStarted;
         private static bool _vehicleAllDoorsCooldownNotificationShown;
@@ -1454,11 +1457,15 @@ namespace vMenuClient
 
             if (!skipLoad)
             {
-                var successFull = await LoadModel(vehicleHash);
-                if (!successFull || !IsModelAVehicle(vehicleHash))
+                if (!IsModelAVehicle(vehicleHash) || !IsModelInCdimage(vehicleHash))
                 {
                     // Vehicle model is invalid.
                     Notify.Error(CommonErrors.InvalidModel);
+                    return 0;
+                }
+                if (!await LoadModel(vehicleHash))
+                {
+                    Notify.Error("Vehicle model loading timed out. Please try again or choose another vehicle.");
                     return 0;
                 }
             }
@@ -1533,7 +1540,8 @@ namespace vMenuClient
             }
 
             // Identity ticket is scoped to this character, model and a newly created entity.
-            var identityTicket = await IdentityBridge.BeginVehicleIdentity(vehicleHash, vehicleInfo.cadSaveToken);
+            var identityTicket = await WaitForVehicleIdentity(
+                IdentityBridge.BeginVehicleIdentity(vehicleHash, vehicleInfo.cadSaveToken), "", "begin");
             // Create the new vehicle and remove the need to hotwire the car.
             var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
             {
@@ -1575,7 +1583,8 @@ namespace vMenuClient
                 await BaseScript.Delay(650);
             }
 
-            await IdentityBridge.ClaimVehicleIdentity(identityTicket, vehicle.Handle, vehicleInfo.cadSaveToken);
+            await WaitForVehicleIdentity(
+                IdentityBridge.ClaimVehicleIdentity(identityTicket, vehicle.Handle, vehicleInfo.cadSaveToken), false, "claim");
             // Set the previous vehicle to the new vehicle.
             _previousVehicle = vehicle;
             //vehicle.Speed = speed; // retarded feature that randomly breaks for no fucking reason
@@ -1600,6 +1609,19 @@ namespace vMenuClient
             }
 
             return vehicle.Handle;
+        }
+
+        private static async Task<T> WaitForVehicleIdentity<T>(Task<T> request, T fallback, string operation)
+        {
+            // The bridge catches export failures, including late failures after this
+            // timeout. CAD is optional and must not hold the shared spawn gate forever.
+            if (request.IsCompleted || await Task.WhenAny(request, Delay(VehicleIdentityTimeoutMilliseconds)) == request)
+            {
+                return await request;
+            }
+
+            Debug.WriteLine($"[vMenu] Vehicle identity {operation} timed out; continuing vehicle spawn without a CAD response.");
+            return fallback;
         }
 
         private static async Task ApplyRespawnSpeedDebuff(Vehicle vehicle)
@@ -2005,9 +2027,18 @@ namespace vMenuClient
             {
                 // Load the model.
                 RequestModel(modelHash);
+                var startedAt = unchecked((uint)GetGameTimer());
                 // Wait until it's loaded.
                 while (!HasModelLoaded(modelHash))
                 {
+                    if (unchecked((uint)GetGameTimer() - startedAt) >= VehicleModelLoadTimeoutMilliseconds)
+                    {
+                        // Return through the gate's finally block. Never unlock the
+                        // gate around a still-running spawn that could create later.
+                        SetModelAsNoLongerNeeded(modelHash);
+                        Debug.WriteLine($"[vMenu] Vehicle model {modelHash} did not load within {VehicleModelLoadTimeoutMilliseconds}ms; spawn cancelled.");
+                        return false;
+                    }
                     await Delay(0);
                 }
                 // Model is loaded, return true.
