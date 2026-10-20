@@ -1474,10 +1474,10 @@ namespace vMenuClient
 
             // Get the heading & position for where the vehicle should be spawned.
             var pos = new Vector3(x, y, z);
-            if (pos.IsZero)
+            var usePlayerPosition = pos.IsZero;
+            if (usePlayerPosition)
             {
                 pos = spawnInside ? GetEntityCoords(Game.PlayerPed.Handle, true) : GetOffsetFromEntityInWorldCoords(Game.PlayerPed.Handle, 0f, 8f, 0f);
-                pos += new Vector3(0f, 0f, 1f);
             }
 
             heading = heading == -1 ? GetEntityHeading(Game.PlayerPed.Handle) + (spawnInside ? 0f : 90f) : heading;
@@ -1534,14 +1534,25 @@ namespace vMenuClient
                 _previousVehicle.PreviouslyOwnedByPlayer = false;
             }
 
-            if (Game.PlayerPed.IsInVehicle() && x == 0f && y == 0f && z == 0f)
+            if (Game.PlayerPed.IsInVehicle() && usePlayerPosition)
             {
-                pos = GetOffsetFromEntityInWorldCoords(Game.PlayerPed.Handle, 0, 8f, 0.1f) + new Vector3(0f, 0f, 1f);
+                pos = GetOffsetFromEntityInWorldCoords(Game.PlayerPed.Handle, 0, 8f, 0.1f);
             }
 
             // Identity ticket is scoped to this character, model and a newly created entity.
             var identityTicket = await WaitForVehicleIdentity(
                 IdentityBridge.BeginVehicleIdentity(vehicleHash, vehicleInfo.cadSaveToken), "", "begin");
+
+            // Explicit coordinates belong to the entity-placement tool. Boats and
+            // trains must retain their water/track placement instead of tracing terrain.
+            var groundedPosition = usePlayerPosition && modelClass != (int)VehicleClass.Boats && modelClass != (int)VehicleClass.Trains
+                ? await VehicleSpawnPlacement.FindGroundedPositionAsync(vehicleHash, pos, Game.PlayerPed.Handle)
+                : (Vector3?)null;
+            if (groundedPosition.HasValue)
+            {
+                pos = groundedPosition.Value;
+            }
+
             // Create the new vehicle and remove the need to hotwire the car.
             var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
             {
@@ -1552,8 +1563,13 @@ namespace vMenuClient
                 IsWanted = false
             };
 
-            Log($"New vehicle, hash:{vehicleHash}, handle:{vehicle.Handle}, force-re-save-name:{saveName ?? "NONE"}, created at x:{pos.X} y:{pos.Y} z:{pos.Z + 1f} " +
+            Log($"New vehicle, hash:{vehicleHash}, handle:{vehicle.Handle}, force-re-save-name:{saveName ?? "NONE"}, created at x:{pos.X} y:{pos.Y} z:{pos.Z} " +
                 $"heading:{heading}");
+
+            if (groundedPosition.HasValue)
+            {
+                VehicleSpawnPlacement.PlaceOnFloor(vehicle, groundedPosition.Value);
+            }
 
             // If spawnInside is true
             if (spawnInside)
@@ -1568,11 +1584,6 @@ namespace vMenuClient
                 if (vehicle.ClassType == VehicleClass.Helicopters && GetEntityHeightAboveGround(Game.PlayerPed.Handle) > 10.0f)
                 {
                     SetHeliBladesFullSpeed(vehicle.Handle);
-                }
-                // If it's not a helicopter or the player is not in the air, set the vehicle on the ground properly.
-                else
-                {
-                    vehicle.PlaceOnGround();
                 }
             }
 

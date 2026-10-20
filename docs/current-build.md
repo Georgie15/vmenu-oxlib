@@ -1,6 +1,6 @@
 # Current build and branch handoff
 
-Updated October 6, 2026. Initial combined snapshot: September 27, 2026.
+Updated October 20, 2026. Initial combined snapshot: September 27, 2026.
 
 `main` records the combined local vMenu source and the `build/vMenu` package
 that was in the primary checkout when this branch was created. This includes
@@ -114,3 +114,39 @@ immediately. With CAD responses delayed/lost, spawning should finish using the
 optional identity fallback, then allow the next spawn after the configured
 cooldown. Confirm normal CAD plate/identity behavior with healthy responses and
 check F8 for the timeout stage if a reported stall recurs.
+
+## October 20, 2026: garage vehicle spawn placement (client only)
+
+The shared vehicle spawner now traces nearby floor collision at the original
+spawn height, removes the unconditional one-metre lift, and finishes placement
+before seating the player. GTA's wheel alignment is retained only if it stays
+near the detected floor; failed or distant placement is rolled back immediately.
+Missing collision has a one-second deadline and preserves the requested altitude
+without a global ground search. Normal menu vehicles, spawn-by-name and saved
+vehicles share the fix. See [vehicle-spawn-placement.md](vehicle-spawn-placement.md)
+for behavior, exclusions and runtime acceptance checks.
+
+This client was built from the latest fetched `georgie/main` (`16fbd80`) plus
+the garage fix, retaining the previous permission retry, outfit/hair, cooldown
+and model/CAD timeout work.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `586cff071970fafce2287690ee097a1a7044dd991c255ccfd3b24f5eddb33bc4` |
+| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (unchanged) |
+
+Validation: production placement helper and actual spawn core pass the simulated
+garage/collision regression harness. The pre-fix core at `16fbd80` fails the first
+wrong-floor case in the same harness. Existing spawn cooldown/model/CAD timeout
+regressions pass. Client Release build succeeded with zero warnings/errors using
+a temporary output directory; only the client DLL was copied into the package.
+All other packaged files were preserved.
+
+**Deploy:** replace only `build/vMenu/vMenuClient.net.dll` in the installed
+resource after verifying its current client matches the previous recorded
+package (`25718294c3ee119f199a7741a7c5aed47c43e72c9653b8d695b0d5f6cd719170`).
+If it differs, reconcile the installed build first. Restart the resource and
+perform the garage/ramp acceptance checks linked above. The existing server
+source/package mismatch remains; do not rebuild the server for this fix.
+No new configuration is required. No live server was changed and FiveM runtime
+testing remains outstanding.
