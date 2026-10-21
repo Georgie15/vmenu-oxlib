@@ -1,7 +1,16 @@
+-- Refuse requests while the feature is switched off (the callbacks are always registered).
+local function outfitCodesEnabled()
+    return GetConvarBool("vmenu_outfitcodes", false)
+end
+
 local userRequestCooldowns = {}
 lib.callback.register(
     "vMenu:Outfits:Request",
     function(source, id)
+
+        if not outfitCodesEnabled() then
+            return false, "Outfit codes are disabled on this server."
+        end
 
         if userRequestCooldowns[source] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam
@@ -41,6 +50,10 @@ local userGenerateCooldowns = {}
 lib.callback.register(
     "vMenu:Outfits:Generate",
     function(source, data)
+
+        if not outfitCodesEnabled() then
+            return false, "Outfit codes are disabled on this server."
+        end
 
         if userGenerateCooldowns[source] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam

@@ -201,18 +201,8 @@ AddEventHandler("EasyAdmin:FreezePlayer", function(toggle)
     isEasyAdminFrozen = toggle == true
 end)
 
-AddEventHandler("onResourceStart", function(resourceName)
-    if resourceName ~= GetCurrentResourceName() then
-        return
-    end
-
-    CreateThread(function()
-        TriggerServerEvent("chimera-staff-clockin:syncMe")
-        Wait(1000)
-        enforceOffIfDisallowed()
-    end)
-end)
-
+-- Runs on join and again on every vMenu restart (the script reloads), so no
+-- separate onResourceStart handler is needed; that one sent the sync twice.
 CreateThread(function()
     TriggerServerEvent("chimera-staff-clockin:syncMe")
     Wait(1000)

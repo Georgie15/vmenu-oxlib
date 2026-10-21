@@ -95,6 +95,9 @@ namespace vMenuClient
         {
         #region Variables
         private static readonly ExternalFunctions IdentityBridge = new ExternalFunctions();
+        // One shared bridge to the Lua exports (dialogs, notify, interaction checks); these used to
+        // create a new BaseScript on every call.
+        private static readonly ExternalFunctions External = new ExternalFunctions();
         private static string _currentScenario = "";
         private static Vehicle _previousVehicle;
         private static bool _respawnDebuffActive = false;
@@ -352,15 +355,6 @@ namespace vMenuClient
         }
         #endregion
 
-        #region GetVehicleModel (uint)(hash) from Entity/Vehicle (int)
-        /// <summary>
-        /// Get the vehicle model hash (as uint) from the specified (int) entity/vehicle.
-        /// </summary>
-        /// <param name="vehicle">Entity/vehicle.</param>
-        /// <returns>Returns the (uint) model hash from a (vehicle) entity.</returns>
-        public static uint GetVehicleModel(int vehicle) => (uint)GetHashKey(GetEntityModel(vehicle).ToString());
-        #endregion
-
         #region Is ped pointing
         /// <summary>
         /// Is ped pointing function returns true if the ped is currently pointing their finger.
@@ -539,142 +533,50 @@ namespace vMenuClient
         }
         #endregion
 
-        #region Teleport to player (or teleport into the player's vehicle)
-        /// <summary>
-        /// Teleport to the specified player id. (Optionally teleport into their vehicle).
-        /// </summary>
-        /// <param name="playerId"></param>
-        /// <param name="inVehicle"></param>
-        public static async Task TeleportToPlayer(IPlayer player, bool inVehicle = false)
-        {
-            // If the player exists.
-            if (player.IsActive || player is InfinityPlayer)
-            {
-                Vector3 playerPos;
-                var wasActive = true;
-
-                if (player.IsActive)
-                {
-                    var playerPedObj = player.Character;
-                    if (Game.PlayerPed == playerPedObj)
-                    {
-                        Notify.Error("Sorry, you can ~r~~h~not~h~ ~s~teleport to yourself!");
-                        return;
-                    }
-
-                    // Get the coords of the other player.
-                    playerPos = GetEntityCoords(playerPedObj.Handle, true);
-                }
-                else
-                {
-                    playerPos = await MainMenu.RequestPlayerCoordinates(player.ServerId);
-                    wasActive = false;
-                }
-
-                // Then await the proper loading/teleporting.
-                await TeleportToCoords(playerPos);
-
-                // Wait until the player has been created.
-                while (player.Character == null)
-                {
-                    await Delay(0);
-                }
-
-                var playerId = player.Handle;
-                var playerPed = player.Character.Handle;
-
-                // If the player should be teleported inside the other player's vehcile.
-                if (inVehicle)
-                {
-                    // Wait until the target player vehicle has loaded, if they weren't active beforehand.
-                    if (!wasActive)
-                    {
-                        var startWait = GetGameTimer();
-
-                        while (!IsPedInAnyVehicle(playerPed, false))
-                        {
-                            await Delay(0);
-
-                            if ((GetGameTimer() - startWait) > 1500)
-                            {
-                                break;
-                            }
-                        }
-                    }
-
-                    // Is the other player inside a vehicle?
-                    if (IsPedInAnyVehicle(playerPed, false))
-                    {
-                        // Get the vehicle of the specified player.
-                        var vehicle = GetVehicle(new Player(playerId), false);
-                        if (vehicle != null)
-                        {
-                            var totalVehicleSeats = GetVehicleModelNumberOfSeats(GetVehicleModel(vehicle: vehicle.Handle));
-
-                            // Does the vehicle exist? Is it NOT dead/broken? Are there enough vehicle seats empty?
-                            if (vehicle.Exists() && !vehicle.IsDead && IsAnyVehicleSeatEmpty(vehicle.Handle))
-                            {
-                                TaskWarpPedIntoVehicle(Game.PlayerPed.Handle, vehicle.Handle, (int)VehicleSeat.Any);
-                                Notify.Success("Teleported into ~g~" + GetPlayerName(playerId) + "'s ~s~vehicle.");
-                            }
-                            // If there are not enough empty vehicle seats or the vehicle doesn't exist/is dead then notify the user.
-                            else
-                            {
-                                // If there's only one seat on this vehicle, tell them that it's a one-seater.
-                                if (totalVehicleSeats == 1)
-                                {
-                                    Notify.Error("This vehicle only has room for 1 player!");
-                                }
-                                // Otherwise, tell them there's not enough empty seats remaining.
-                                else
-                                {
-                                    Notify.Error("Not enough empty vehicle seats remaining!");
-                                }
-                            }
-                        }
-                    }
-                }
-                // The player is not being teleported into the vehicle, so the teleporting is successfull.
-                // Notify the user.
-                else
-                {
-                    Notify.Success("Teleported to ~y~" + GetPlayerName(playerId) + "~s~.");
-                }
-            }
-            // The specified playerId does not exist, notify the user of the error.
-            else
-            {
-                Notify.Error(CommonErrors.PlayerNotFound, placeholderValue: "So the teleport has been cancelled.");
-            }
-        }
-        #endregion
-
         #region Teleport To Coords
+        private static int _teleportGeneration;
+
+        private static async void ClearVMenuTeleportFlag(int generation)
+        {
+            try
+            {
+                await BaseScript.Delay(3000);
+                // A later teleport owns the flag now; its own timer clears it.
+                if (generation == _teleportGeneration)
+                {
+                    Game.Player.State.Set("vmenu_teleporting", false, true);
+                }
+            }
+            catch { }
+        }
+
         /// <summary>
         /// Teleport to the specified <see cref="pos"/>.
         /// </summary>
         /// <param name="pos"></param>
         /// <param name="safeModeDisabled"></param>
         /// <returns></returns>
-        private static async void ClearVMenuTeleportFlag()
-        {
-            try
-            {
-                await BaseScript.Delay(3000);
-                Game.Player.State.Set("vmenu_teleporting", false, true);
-            }
-            catch { }
-        }
-
         public static async Task TeleportToCoords(Vector3 pos, bool safeModeDisabled = false)
         {
             // Tell server integrity monitoring (psrp_telemetry) that this position
             // jump is a sanctioned vMenu teleport. The server still verifies a vMenu
-            // teleport ace, so a spoofed statebag alone grants nothing. Cleared after
-            // 3s so the server's ~1s movement sample is covered.
+            // teleport ace, so a spoofed statebag alone grants nothing. Cleared 3s
+            // after the teleport finishes, however long the ground search took, so
+            // the server's ~1s movement sample is covered.
+            var generation = ++_teleportGeneration;
             Game.Player.State.Set("vmenu_teleporting", true, true);
-            ClearVMenuTeleportFlag();
+            try
+            {
+                await TeleportToCoordsCore(pos, safeModeDisabled);
+            }
+            finally
+            {
+                ClearVMenuTeleportFlag(generation);
+            }
+        }
 
+        private static async Task TeleportToCoordsCore(Vector3 pos, bool safeModeDisabled)
+        {
             if (!safeModeDisabled)
             {
                 // Is player in a vehicle and the driver? Then we'll use that to teleport.
@@ -897,119 +799,7 @@ namespace vMenuClient
         }
         #endregion
 
-        #region Kick Player
-        /// <summary>
-        /// Kick a user with the provided kick reason. Or ask the current player to provide a reason.
-        /// </summary>
-        /// <param name="player"></param>
-        /// <param name="askUserForReason"></param>
-        /// <param name="providedReason"></param>
-        public static async void KickPlayer(IPlayer player, bool askUserForReason, string providedReason = "You have been kicked.")
-        {
-            if (player != null)
-            {
-                // Default kick reason.
-                var defaultReason = "You have been kicked.";
-                // If we need to ask for the user's input and the default reason is the same as the provided reason, get the user input..
-                if (askUserForReason && providedReason == defaultReason)
-                {
-                    var userInput = await GetUserInput(windowTitle: "Enter Kick Message", maxInputLength: 100);
-                    // If the input is not invalid, set the kick reason to the user's custom message.
-                    if (!string.IsNullOrEmpty(userInput))
-                    {
-                        defaultReason += $" Reason: {userInput}";
-                    }
-                    else
-                    {
-                        Notify.Error("An invalid kick reason was provided. Action cancelled.");
-                        return;
-                    }
-                }
-                // Kick the player using the specified reason.
-                TriggerServerEvent("vMenu:KickPlayer", player.ServerId, defaultReason);
-                Log($"Attempting to kick player {player.Name} (server id: {player.ServerId}, client id: {player.Handle}).");
-            }
-            else
-            {
-                Notify.Error("The selected player is somehow invalid, action aborted.");
-            }
-        }
-        #endregion
-
-        #region (Temp) Ban Player
-        /// <summary>
-        /// Bans the specified player.
-        /// </summary>
-        /// <param name="player">Player to ban.</param>
-        /// <param name="forever">Ban forever or ban temporarily.</param>
-        public static async void BanPlayer(IPlayer player, bool forever)
-        {
-            var banReason = await GetUserInput(windowTitle: "Enter Ban Reason", defaultText: "Banned by staff.", maxInputLength: 200);
-            if (!string.IsNullOrEmpty(banReason) && banReason.Length > 1)
-            {
-                if (forever)
-                {
-                    TriggerServerEvent("vMenu:PermBanPlayer", player.ServerId, banReason);
-                }
-                else
-                {
-                    var banDurationHours = await GetUserInput(windowTitle: "Ban Duration (in hours) - Max: 720 (1 month)", defaultText: "1.5", maxInputLength: 10);
-                    if (!string.IsNullOrEmpty(banDurationHours))
-                    {
-                        if (double.TryParse(banDurationHours, out var banHours))
-                        {
-                            if (banHours > 0.0)
-                            {
-                                TriggerServerEvent("vMenu:TempBanPlayer", player.ServerId, banHours, banReason);
-                            }
-                            else
-                            {
-                                Notify.Error("You need to enter a ban duration, enter a value ~h~between~h~ 1 and 720!");
-                            }
-                        }
-                        else
-                        {
-                            if (int.TryParse(banDurationHours, out var banHoursInt))
-                            {
-                                if ((double)banHoursInt > 0.0)
-                                {
-                                    TriggerServerEvent("vMenu:TempBanPlayer", player.ServerId, (double)banHoursInt, banReason);
-                                }
-                                else
-                                {
-                                    Notify.Error("You need to enter a ban duration, enter a value ~h~between~h~ 1 and 720!");
-                                }
-                            }
-                            else
-                            {
-                                Notify.Error(CommonErrors.InvalidInput);
-                                TriggerEvent("chatMessage", $"[vMenu] The input is invalid or you cancelled the action, please try again.");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        Notify.Error(CommonErrors.InvalidInput);
-                        TriggerEvent("chatMessage", $"[vMenu] The input is invalid or you cancelled the action, please try again.");
-                    }
-
-                }
-            }
-            else
-            {
-                Notify.Error(CommonErrors.InvalidInput);
-                TriggerEvent("chatMessage", $"[vMenu] The input is invalid or you cancelled the action, please try again.");
-            }
-        }
-        #endregion
-
-        #region Kill Player/commit suicide options
-        /// <summary>
-        /// Kill player
-        /// </summary>
-        /// <param name="player"></param>
-        public static void KillPlayer(IPlayer player) => TriggerServerEvent("vMenu:KillPlayer", player.ServerId);
-
+        #region Commit suicide
         /// <summary>
         /// Kill yourself.
         /// </summary>
@@ -1115,159 +905,6 @@ namespace vMenuClient
             }
 
 
-        }
-        #endregion
-
-        #region Summon Player
-        /// <summary>
-        /// Summon player.
-        /// </summary>
-        /// <param name="player"></param>
-        public static void SummonPlayer(IPlayer player)
-        {
-            Vehicle currentVehicle = GetVehicle();
-            int numberOfSeats = currentVehicle is not null ? GetVehicleModelNumberOfSeats(currentVehicle.Model) : 0;
-
-            TriggerServerEvent("vMenu:SummonPlayer", player.ServerId, numberOfSeats);
-        }
-        #endregion
-
-        #region Spectate function
-        private static int currentlySpectatingPlayer = -1;
-        public static async void SpectatePlayer(IPlayer player, bool forceDisable = false)
-        {
-            if (forceDisable)
-            {
-                NetworkSetInSpectatorMode(false, 0); // disable spectating.
-            }
-            else
-            {
-                Camera camera = null;
-
-                if (!player.IsActive)
-                {
-                    // get the player position and make a cam to ensure they load in
-                    var playerPos = await MainMenu.RequestPlayerCoordinates(player.ServerId);
-
-                    DoScreenFadeOut(500);
-                    while (IsScreenFadingOut())
-                    {
-                        await Delay(0);
-                    }
-
-                    camera = new Camera(CreateCam("DEFAULT_SCRIPTED_CAMERA", false))
-                    {
-                        Position = playerPos + new Vector3(0, -5, 0)
-                    };
-                    camera.PointAt(playerPos);
-                    World.RenderingCamera = camera;
-
-                    // wait for the player to become active
-                    var timeout = GetGameTimer() + 1000;
-                    while (!player.IsActive || player.Character == null)
-                    {
-                        await Delay(0);
-                        World.RenderingCamera = camera;
-
-                        if (GetGameTimer() > timeout)
-                        {
-                            break;
-                        }
-                    }
-
-                    // fade back in if the player wasn't active
-                    if (!player.IsActive)
-                    {
-                        DoScreenFadeIn(500);
-                    }
-                }
-
-                if (player.Handle == Game.Player.Handle)
-                {
-                    if (NetworkIsInSpectatorMode())
-                    {
-                        DoScreenFadeOut(500);
-                        while (IsScreenFadingOut())
-                        {
-                            await Delay(0);
-                        }
-
-                        NetworkSetInSpectatorMode(false, 0); // disable spectating.
-                        DoScreenFadeIn(500);
-                        Notify.Success("Stopped spectating.", false, true);
-                        currentlySpectatingPlayer = -1;
-                    }
-                    else
-                    {
-                        Notify.Error("You can't spectate yourself.", false, true);
-                    }
-                }
-                else
-                {
-                    if (NetworkIsInSpectatorMode())
-                    {
-                        if (currentlySpectatingPlayer != player.Handle && player.Character != null)
-                        {
-                            DoScreenFadeOut(500);
-                            while (IsScreenFadingOut())
-                            {
-                                await Delay(0);
-                            }
-
-                            if (player.Character != null)
-                            {
-                                NetworkSetInSpectatorMode(false, 0);
-                                NetworkSetInSpectatorMode(true, player.Character.Handle);
-                            }
-
-                            DoScreenFadeIn(500);
-                            Notify.Success($"You are now spectating ~g~{GetSafePlayerName(player.Name)}~s~.", false, true);
-                            currentlySpectatingPlayer = player.Handle;
-                        }
-                        else
-                        {
-                            DoScreenFadeOut(500);
-                            while (IsScreenFadingOut())
-                            {
-                                await Delay(0);
-                            }
-
-                            NetworkSetInSpectatorMode(false, 0); // disable spectating.
-                            DoScreenFadeIn(500);
-                            Notify.Success("Stopped spectating.", false, true);
-                            currentlySpectatingPlayer = -1;
-                        }
-                    }
-                    else
-                    {
-                        if (player.Character != null)
-                        {
-                            DoScreenFadeOut(500);
-                            while (IsScreenFadingOut())
-                            {
-                                await Delay(0);
-                            }
-
-                            if (player.Character != null)
-                            {
-                                NetworkSetInSpectatorMode(false, 0);
-                                NetworkSetInSpectatorMode(true, player.Character.Handle);
-                            }
-
-                            DoScreenFadeIn(500);
-                            Notify.Success($"You are now spectating ~g~{GetSafePlayerName(player.Name)}~s~.", false, true);
-                            currentlySpectatingPlayer = player.Handle;
-                        }
-                    }
-                }
-
-                if (camera != null)
-                {
-                    // unset the camera
-                    camera.Delete();
-                    World.RenderingCamera = null;
-                }
-            }
         }
         #endregion
 
@@ -1662,6 +1299,25 @@ namespace vMenuClient
         }
 
         /// <summary>
+        /// Whether a saved vehicle's primary/secondary colour (<paramref name="prefix"/> "customPrimary" or
+        /// "customSecondary") was a custom RGB paint.
+        /// </summary>
+        internal static bool IsSavedColourCustom(Dictionary<string, int> colors, string prefix)
+        {
+            // Saves made since build-2026-10-21 say so explicitly, so custom black (0,0,0) or
+            // pure red (255,0,0) is restored as painted.
+            if (colors.TryGetValue(prefix, out var isCustom))
+            {
+                return isCustom == 1;
+            }
+
+            // Older saves: some stored -1 for "not custom", the oldest stored the game's RGB for
+            // every paint. Keep the old rule for them so existing saves spawn as before.
+            return colors.TryGetValue(prefix + "R", out var r) && colors.TryGetValue(prefix + "G", out var g)
+                && colors.TryGetValue(prefix + "B", out var b) && r > 0 && g > 0 && b > 0;
+        }
+
+        /// <summary>
         /// Waits for the given delay before applying the vehicle mods
         /// </summary>
         /// <param name="vehicle"></param>
@@ -1692,8 +1348,7 @@ namespace vMenuClient
                 ToggleVehicleMod(vehicle.Handle, 22, vehicleInfo.xenonHeadlights);
                 SetVehicleLivery(vehicle.Handle, vehicleInfo.livery);
 
-                bool useCustomRgbPrimary = vehicleInfo.colors.ContainsKey("customPrimaryR") && vehicleInfo.colors.ContainsKey("customPrimaryG") && vehicleInfo.colors.ContainsKey("customPrimaryB");
-                if (useCustomRgbPrimary && vehicleInfo.colors["customPrimaryR"] > 0 && vehicleInfo.colors["customPrimaryG"] > 0 && vehicleInfo.colors["customPrimaryB"] > 0)
+                if (IsSavedColourCustom(vehicleInfo.colors, "customPrimary"))
                 {
                     vehicle.Mods.CustomPrimaryColor = System.Drawing.Color.FromArgb(255, vehicleInfo.colors["customPrimaryR"], vehicleInfo.colors["customPrimaryG"], vehicleInfo.colors["customPrimaryB"]);
                 }
@@ -1702,8 +1357,7 @@ namespace vMenuClient
                     vehicle.Mods.PrimaryColor = (VehicleColor)vehicleInfo.colors["primary"];
                 }
 
-                bool useCustomRgbSecondary = vehicleInfo.colors.ContainsKey("customSecondaryR") && vehicleInfo.colors.ContainsKey("customSecondaryG") && vehicleInfo.colors.ContainsKey("customSecondaryB");
-                if (useCustomRgbSecondary && vehicleInfo.colors["customSecondaryR"] > 0 && vehicleInfo.colors["customSecondaryG"] > 0 && vehicleInfo.colors["customSecondaryB"] > 0)
+                if (IsSavedColourCustom(vehicleInfo.colors, "customSecondary"))
                 {
                     vehicle.Mods.CustomSecondaryColor = System.Drawing.Color.FromArgb(255, vehicleInfo.colors["customSecondaryR"], vehicleInfo.colors["customSecondaryG"], vehicleInfo.colors["customSecondaryB"]);
                 }
@@ -1871,6 +1525,7 @@ namespace vMenuClient
                     colors.Add("customPrimaryR", customPrimaryR);
                     colors.Add("customPrimaryG", customPrimaryG);
                     colors.Add("customPrimaryB", customPrimaryB);
+                    colors.Add("customPrimary", primaryColorIsCustom ? 1 : 0);
                     int customSecondaryR = -1;
                     int customSecondaryG = -1;
                     int customSecondaryB = -1;
@@ -1884,6 +1539,7 @@ namespace vMenuClient
                     colors.Add("customSecondaryR", customSecondaryR);
                     colors.Add("customSecondaryG", customSecondaryG);
                     colors.Add("customSecondaryB", customSecondaryB);
+                    colors.Add("customSecondary", secondaryColorIsCustom ? 1 : 0);
                     #endregion
 
                     var extras = new Dictionary<int, bool>();
@@ -2105,18 +1761,15 @@ namespace vMenuClient
         /// <returns></returns>
         public static async Task<string> GetUserInput(string windowTitle, string defaultText, int maxInputLength)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.GetCustomInput(windowTitle, defaultText, maxInputLength);
+            return await External.GetCustomInput(windowTitle, defaultText, maxInputLength);
         }
         public static async Task<string> GetUserColourInput(int type)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.GetCustomColourInput(type);
+            return await External.GetCustomColourInput(type);
         }
         public static void CopyToClipboard(string text)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            ExternalFunctions.SetPlayerClipboard(text);
+            External.SetPlayerClipboard(text);
         }
         public static void SendNotification(string message, string ntype = "warning")
         {
@@ -2130,8 +1783,7 @@ namespace vMenuClient
                     ["position"] = "center-right",
                     ["duration"] = 6500
                 };
-                var ext = new ExternalFunctions();
-                ext.NotifyViaOxLib(data);
+                External.NotifyViaOxLib(data);
             }
             catch
             {
@@ -2140,28 +1792,23 @@ namespace vMenuClient
         }
         public static bool CanDoInteraction(string type)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return ExternalFunctions.CanDoInteraction(type);
+            return External.CanDoInteraction(type);
         }
         public static async Task<bool> LoadSharedOutfit(string outfitName)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.LoadSharedOutfit(outfitName);
+            return await External.LoadSharedOutfit(outfitName);
         }
         public static async Task<bool> LoadSharedVehicle()
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.LoadSharedVehicle();
+            return await External.LoadSharedVehicle();
         }
         public static async Task<bool> GetUserConfirmation(string windowTitle, string description)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.GetUserConfirmation(windowTitle, description);
+            return await External.GetUserConfirmation(windowTitle, description);
         }
         public static async Task<bool> IsVehicleInPsrpCad(string plate, string model, string saveToken = null)
         {
-            var ExternalFunctions = new ExternalFunctions();
-            return await ExternalFunctions.IsVehicleInPsrpCad(plate, model, saveToken);
+            return await External.IsVehicleInPsrpCad(plate, model, saveToken);
         }
         #endregion
 
@@ -3911,65 +3558,6 @@ namespace vMenuClient
         public static double Map(double value, double min_in, double max_in, double min_out, double max_out)
         {
             return ((value - min_in) * (max_out - min_out) / (max_in - min_in)) + min_out;
-        }
-        #endregion
-
-        #region Private message notification
-        public static void PrivateMessage(string source, string message) => PrivateMessage(source, message, false);
-        public static async void PrivateMessage(string source, string message, bool sent)
-        {
-            MainMenu.PlayersList.RequestPlayerList();
-            await MainMenu.PlayersList.WaitRequested();
-
-            var name = MainMenu.PlayersList.ToList()
-                .Find(plr => plr.ServerId.ToString() == source)?.Name ?? "**Invalid**";
-
-            if (MainMenu.MiscSettingsMenu == null || MainMenu.MiscSettingsMenu.MiscDisablePrivateMessages)
-            {
-                return;
-            }
-
-            var sourcePlayer = new Player(GetPlayerFromServerId(int.Parse(source)));
-            if (sourcePlayer != null)
-            {
-                var headshotHandle = RegisterPedheadshot(sourcePlayer.Character.Handle);
-                var timer = GetGameTimer();
-                var tookTooLong = false;
-                while (!IsPedheadshotReady(headshotHandle) || !IsPedheadshotValid(headshotHandle))
-                {
-                    await Delay(0);
-                    if (GetGameTimer() - timer > 2000)
-                    {
-                        // took too long.
-                        tookTooLong = true;
-                        break;
-                    }
-                }
-                if (!tookTooLong)
-                {
-                    var headshotTxd = GetPedheadshotTxdString(headshotHandle);
-                    if (sent)
-                    {
-                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"{GetSafePlayerName(name)}", "Message Sent", true, 1);
-                    }
-                    else
-                    {
-                        Notify.CustomImage(headshotTxd, headshotTxd, message, $"{GetSafePlayerName(name)}", "Message Received", true, 1);
-                    }
-                }
-                else
-                {
-                    if (sent)
-                    {
-                        Notify.Custom($"PM From: ~y~{GetSafePlayerName(name)}~s~. Message: {message}");
-                    }
-                    else
-                    {
-                        Notify.Custom($"PM To: ~y~{GetSafePlayerName(name)}~s~. Message: {message}");
-                    }
-                }
-                UnregisterPedheadshot(headshotHandle);
-            }
         }
         #endregion
 

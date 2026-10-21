@@ -411,7 +411,11 @@ namespace vMenuShared
         /// <returns></returns>
         public static bool IsAllowed(Permission permission, bool checkAnyway = false) => IsAllowedClient(permission, checkAnyway);
 
-        private static readonly Dictionary<Permission, bool> allowedPerms = new();
+        // The answer for every permission, built once in SetPermissions. IsAllowed runs dozens of
+        // times per frame; it used to read the staff-only convar and re-check the parent
+        // permissions on every call (denied answers were never cached).
+        private static bool[] effectivePermissions = new bool[0];
+
         /// <summary>
         /// Private function that handles client side permission requests.
         /// </summary>
@@ -421,37 +425,35 @@ namespace vMenuShared
         {
             if (ArePermissionsSetup || checkAnyway)
             {
-                var staffPermissionAllowed = (
-                    Permissions.ContainsKey(Permission.Staff) && Permissions[Permission.Staff]
-                ) || (
-                    Permissions.ContainsKey(Permission.Everything) && Permissions[Permission.Everything]
-                );
-                // Return false immediately if the staff only convar is set and the user is not a staff member.
-                if (ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_menu_staff_only) && !staffPermissionAllowed)
-                {
-                    return false;
-                }
-
-                if (allowedPerms.ContainsKey(permission) && allowedPerms[permission])
-                {
-                    return true;
-                }
-                else if (!allowedPerms.ContainsKey(permission))
-                {
-                    allowedPerms[permission] = false;
-                }
-
-                // Get a list of all permissions that are (parents) of the current permission, including the current permission.
-                var permissionsToCheck = GetPermissionAndParentPermissions(permission);
-
-                // Check if any of those permissions is allowed, if so, return true.
-                if (permissionsToCheck.Any(p => Permissions.ContainsKey(p) && Permissions[p]))
-                {
-                    allowedPerms[permission] = true;
-                    return true;
-                }
+                var index = (int)permission;
+                return index >= 0 && index < effectivePermissions.Length && effectivePermissions[index];
             }
             return false;
+        }
+
+        /// <summary>
+        /// A permission is allowed if it, its category's "All" permission or Everything is granted.
+        /// With the staff only convar set, nothing is allowed unless Staff or Everything is granted.
+        /// </summary>
+        internal static bool[] BuildEffectivePermissions(Dictionary<Permission, bool> permissions, bool staffOnly)
+        {
+            bool Granted(Permission p) => permissions != null && permissions.TryGetValue(p, out var allowed) && allowed;
+
+            var values = (Permission[])Enum.GetValues(typeof(Permission));
+            var table = new bool[values.Max(p => (int)p) + 1];
+
+            // Return all false if the staff only convar is set and the user is not a staff member.
+            if (staffOnly && !Granted(Permission.Staff) && !Granted(Permission.Everything))
+            {
+                return table;
+            }
+
+            foreach (var permission in values)
+            {
+                // The permission itself or any of its parents.
+                table[(int)permission] = GetPermissionAndParentPermissions(permission).Any(Granted);
+            }
+            return table;
         }
 #endif
 #if SERVER
@@ -748,6 +750,7 @@ namespace vMenuShared
         public static void SetPermissions(string permissions)
         {
             Permissions = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<Permission, bool>>(permissions);
+            effectivePermissions = BuildEffectivePermissions(Permissions, ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_menu_staff_only));
             // if debug logging.
             if (GetResourceMetadata(GetCurrentResourceName(), "client_debug_mode", 0) == "true")
             {

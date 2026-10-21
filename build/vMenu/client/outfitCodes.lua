@@ -1,6 +1,6 @@
 local Cooldown = false
 local GenerateCooldown = false
-format = string.format
+local format = string.format
 
 ---@class loadSharedOutfit
 ---@param name string

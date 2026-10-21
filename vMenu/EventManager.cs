@@ -39,15 +39,12 @@ namespace vMenuClient
             EventHandlers.Add("vMenu:SetAddons", new Action(SetConfigOptions)); // backward-compatible
             EventHandlers.Add("vMenu:SetConfigOptions", new Action(SetConfigOptions));
             EventHandlers.Add("vMenu:SetPermissions", new Action<string>(MainMenu.SetPermissions));
-            EventHandlers.Add("vMenu:KillMe", new Action<string>(KillMe));
             EventHandlers.Add("vMenu:Notify", new Action<string>(NotifyPlayer));
             EventHandlers.Add("vMenu:SetClouds", new Action<float, string>(SetClouds));
             EventHandlers.Add("vMenu:GoodBye", new Action(GoodBye));
-            EventHandlers.Add("vMenu:SetBanList", new Action<string>(UpdateBanList));
             EventHandlers.Add("vMenu:ClearArea", new Action<Vector3>(ClearAreaNearPos));
             EventHandlers.Add("vMenu:updatePedDecors", new Action(UpdatePedDecors));
             EventHandlers.Add("playerSpawned", new Action(SetAppearanceOnFirstSpawn));
-            EventHandlers.Add("vMenu:PrivateMessage", new Action<string, string>(PrivateMessage));
             EventHandlers.Add("vMenu:UpdateTeleportLocations", new Action<string>(UpdateTeleportLocations));
             EventHandlers.Add("dpclothing:vmenu:setDeathAppearancePatch", new Action<string>(SetDpClothingDeathAppearancePatchCache));
             EventHandlers.Add("dpclothing:vmenu:clearDeathAppearancePatch", new Action(ClearDpClothingDeathAppearancePatchCache));
@@ -254,15 +251,6 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// Update ban list.
-        /// </summary>
-        /// <param name="list"></param>
-        private void UpdateBanList(string list)
-        {
-            MainMenu.BannedPlayersMenu?.UpdateBanList(list);
-        }
-
-        /// <summary>
         /// Used for cheaters.
         /// </summary>
         private void GoodBye()
@@ -402,17 +390,9 @@ namespace vMenuClient
             if (usingCustomNotifications)
             {
                 TriggerEvent("vMenu:CustomNotify", message, "inform");
+                return;
             }
             Notify.Custom(message, true, true);
-        }
-
-        /// <summary>
-        /// Kill this player, poor thing, someone wants you dead... R.I.P.
-        /// </summary>
-        private void KillMe(string sourceName)
-        {
-            Notify.Alert($"You have been killed by ~r~{GetSafePlayerName(sourceName)}~s~ using the ~r~Kill Player~s~ option in vMenu.");
-            SetEntityHealth(Game.PlayerPed.Handle, 0);
         }
 
         /// <summary>

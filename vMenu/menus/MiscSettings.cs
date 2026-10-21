@@ -60,16 +60,6 @@ namespace vMenuClient.menus
         public bool RestorePlayerWeapons { get; private set; } = UserDefaults.MiscRestorePlayerWeapons;
         public bool DrawTimeOnScreen { get; internal set; } = UserDefaults.MiscShowTime;
         public bool MiscRightAlignMenu { get; private set; } = UserDefaults.MiscRightAlignMenu;
-        private bool _disablePrivateMessages;
-        public bool MiscDisablePrivateMessages
-        {
-            get => _disablePrivateMessages;
-            private set
-            {
-                _disablePrivateMessages = value;
-                Game.Player.State.Set("vmenu_pms_disabled", value, true);
-            }
-        }
         public bool MiscDisableControllerSupport { get; private set; } = UserDefaults.MiscDisableControllerSupport;
 
         internal bool TimecycleEnabled { get; private set; } = false;
@@ -97,7 +87,6 @@ namespace vMenuClient.menus
         {
             Instance = this;
             // Ensure statebags reflect local preference on startup.
-            MiscDisablePrivateMessages = UserDefaults.MiscDisablePrivateMessages;
             MiscShowOverheadNames = UserDefaults.MiscShowOverheadNames;
         }
 
@@ -145,7 +134,6 @@ namespace vMenuClient.menus
 
             // Create the menu items.
             var rightAlignMenu = new MenuCheckboxItem("Right Align Menu", "If you want vMenu to appear on the left side of your screen, disable this option. This option will be saved immediately. You don't need to click save preferences.", MiscRightAlignMenu);
-            var disablePms = new MenuCheckboxItem("Disable Private Messages", "Prevent others from sending you a private message via the Online Players menu. This also prevents you from sending messages to other players.", MiscDisablePrivateMessages);
             var disableControllerKey = new MenuCheckboxItem("Disable Controller Support", "This disables the controller menu toggle key. This does NOT disable the navigation buttons.", MiscDisableControllerSupport);
             var speedKmh = new MenuCheckboxItem("Show Speed KM/H", "Show a speedometer on your screen indicating your speed in KM/h.", ShowSpeedoKmh);
             var speedMph = new MenuCheckboxItem("Show Speed MPH", "Show a speedometer on your screen indicating your speed in MPH.", ShowSpeedoMph);
@@ -656,7 +644,6 @@ namespace vMenuClient.menus
 
             // Always allowed
             menu.AddMenuItem(rightAlignMenu);
-            menu.AddMenuItem(disablePms);
             menu.AddMenuItem(disableControllerKey);
             menu.AddMenuItem(speedKmh);
             menu.AddMenuItem(speedMph);
@@ -772,10 +759,6 @@ namespace vMenuClient.menus
                         UserDefaults.MiscRightAlignMenu = false;
                     }
 
-                }
-                else if (item == disablePms)
-                {
-                    MiscDisablePrivateMessages = _checked;
                 }
                 else if (item == disableControllerKey)
                 {

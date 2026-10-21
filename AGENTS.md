@@ -40,6 +40,9 @@ dotnet run --project tests/permission-bootstrap-retry
 dotnet run --project tests/face-selection/FaceSelection.Tests.csproj -c Release
 python tests/face-selection/test_editor_errors.py
 python integrations/psrp-cad-vehicle-identity/test_saved_tokens.py
+dotnet run --project tests/override-latch
+python tests/permission-table/test_permission_table.py
+python tests/saved-vehicle-colours/test_custom_colours.py
 ```
 
 They need Python and the .NET 9 SDK. None of them run FiveM, so runtime checks

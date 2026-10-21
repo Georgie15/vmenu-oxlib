@@ -36,6 +36,8 @@ namespace vMenuClient.menus
         public static Dictionary<uint, Dictionary<int, string>> VehicleExtras;
 
         // Public variables (getters only), return the private variables.
+        // The vehicle "Toggle Vehicle Visibility" hid; made visible again when the player leaves it.
+        internal static int HiddenVehicle { get; set; } = 0;
         public bool VehicleGodMode { get; private set; } = UserDefaults.VehicleGodMode;
         public bool VehicleGodInvincible { get; private set; } = UserDefaults.VehicleGodInvincible;
         public bool VehicleGodEngine { get; private set; } = UserDefaults.VehicleGodEngine;
@@ -562,6 +564,7 @@ namespace vMenuClient.menus
 
                                 // Set the vehicle invisible or invincivble.
                                 vehicle.IsVisible = !vehicle.IsVisible;
+                                HiddenVehicle = vehicle.Handle;
 
                                 // Restore visibility for each ped.
                                 foreach (var pe in visiblePeds)
@@ -573,6 +576,7 @@ namespace vMenuClient.menus
                             {
                                 // Set the vehicle invisible or invincivble.
                                 vehicle.IsVisible = !vehicle.IsVisible;
+                                HiddenVehicle = 0;
                             }
                         }
                         // Destroy vehicle engine

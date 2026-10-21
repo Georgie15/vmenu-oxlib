@@ -19,7 +19,8 @@ Config = {
                     }
                 },
                 icon = 'ban',
-                iconColor = '#C53030'
+                iconColor = '#C53030',
+                duration = time
             })
         elseif ntype == "alert" then
             lib.notify({
@@ -34,7 +35,8 @@ Config = {
                     }
                 },
                 icon = "fa-solid fa-triangle-exclamation",
-                iconColor = "#C53030"
+                iconColor = "#C53030",
+                duration = time
             })
         else
             lib.notify({

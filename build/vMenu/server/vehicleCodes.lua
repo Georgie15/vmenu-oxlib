@@ -1,7 +1,16 @@
+-- Refuse requests while the feature is switched off (the callbacks are always registered).
+local function vehicleCodesEnabled()
+    return GetConvarBool("vmenu_vehiclecodes", false)
+end
+
 local userRequestCooldowns = {}
 lib.callback.register(
     "vMenu:Vehicles:Request",
     function(source, id)
+
+        if not vehicleCodesEnabled() then
+            return false, "Vehicle codes are disabled on this server."
+        end
 
         if userRequestCooldowns[source] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam
@@ -42,6 +51,10 @@ local userGenerateCooldowns = {}
 lib.callback.register(
     "vMenu:Vehicles:Generate",
     function(source, data)
+
+        if not vehicleCodesEnabled() then
+            return false, "Vehicle codes are disabled on this server."
+        end
 
         if userGenerateCooldowns[source] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam

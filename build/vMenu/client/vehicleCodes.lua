@@ -1,5 +1,6 @@
 local Cooldown = false
 local GenerateCooldown = false
+local format = string.format
 
 ---@class loadSharedVehicle
 exports("loadSharedVehicle", function()
@@ -44,16 +45,22 @@ exports("loadSharedVehicle", function()
     local vehicleClassLabel = "Not Found"
     if IsModelInCdimage(decoded.model) and IsModelValid(decoded.model) then
         -- in case this vehicle save is for a car that is disabled / not being streamed currently
-        vehicleClassLabel = GetFilenameForAudioConversation(format("VEH_CLASS_%s", vehicleClass))
+        vehicleClassLabel = GetLabelText(format("VEH_CLASS_%s", vehicleClass))
     end
 
+    -- fix json fuckery from db: empty dictionaries come back as [], which vMenu can't read
     if json.encode(decoded.extras) == "[]" then
-        -- fix json fuckery from db
         decoded.extras = json.decode("{}")
-        Valid = json.encode(decoded)
+    end
+    if json.encode(decoded.mods) == "[]" then
+        decoded.mods = json.decode("{}")
     end
 
-    SetResourceKvp(format("veh_%s", newName), Valid)
+    -- Older codes still carry the sharer's CAD save token. Drop it so this save gets
+    -- its own token the first time vMenu reads it, like any new vehicle.
+    decoded.cadSaveToken = nil
+
+    SetResourceKvp(format("veh_%s", newName), json.encode(decoded))
     Config.Notify("vMenu", format("Name: **%s** \n\n Category: **Uncategorized** \n\n Class: **%s**", newName, vehicleClassLabel), "success", 6500)
 
     return true
@@ -83,8 +90,9 @@ AddEventHandler("vMenu:Vehicles:GenerateCode", function(saveName)
 
     local decoded = json.decode(vehicleData)
     decoded.Category = "Uncategorized" -- We don't want to break something by having the origin user having a custom category name that doesnt exist on other clients
+    decoded.cadSaveToken = nil -- each importer gets their own CAD save token
 
-    local generated, error = lib.callback.await("vMenu:Vehicles:Generate", false, decoded)
+    local generated, errorMessage = lib.callback.await("vMenu:Vehicles:Generate", false, decoded)
     GenerateCooldown = true
     SetTimeout(15000, function()
         GenerateCooldown = false
@@ -92,7 +100,7 @@ AddEventHandler("vMenu:Vehicles:GenerateCode", function(saveName)
     end)
 
     if not generated then
-        Config.Notify("vMenu", error or "Failed to generate vehicle code.", "error", 6500)
+        Config.Notify("vMenu", errorMessage or "Failed to generate vehicle code.", "error", 6500)
         return false
     end
 

@@ -32,8 +32,6 @@ namespace vMenuClient
         public static Menu WorldSubmenu { get; private set; }
 
         public static PlayerOptions PlayerOptionsMenu { get; private set; }
-        public static OnlinePlayers OnlinePlayersMenu { get; private set; }
-        public static BannedPlayers BannedPlayersMenu { get; private set; }
         public static SavedVehicles SavedVehiclesMenu { get; private set; }
         public static PersonalVehicle PersonalVehicleMenu { get; private set; }
         public static VehicleOptions VehicleOptionsMenu { get; private set; }
@@ -378,37 +376,6 @@ namespace vMenuClient
             await Delay(wait);
         }
 
-        #region Infinity bits
-        [EventHandler("vMenu:ReceivePlayerList")]
-        public void ReceivedPlayerList(IList<object> players)
-        {
-            PlayersList?.ReceivedPlayerList(players);
-        }
-
-        public static async Task<Vector3> RequestPlayerCoordinates(int serverId)
-        {
-            var coords = Vector3.Zero;
-            var completed = false;
-
-            // TODO: replace with client<->server RPC once implemented in CitizenFX!
-            Func<Vector3, bool> CallbackFunction = (data) =>
-            {
-                coords = data;
-                completed = true;
-                return true;
-            };
-
-            TriggerServerEvent("vMenu:GetPlayerCoords", serverId, CallbackFunction);
-
-            while (!completed)
-            {
-                await Delay(0);
-            }
-
-            return coords;
-        }
-        #endregion
-
         #region Set Permissions function
         /// <summary>
         /// Set the permissions for this client.
@@ -674,46 +641,7 @@ namespace vMenuClient
         /// </summary>
         private static void CreateSubmenus()
         {
-            // Add the online players menu.
-            if (IsAllowed(Permission.OPMenu))
-            {
-                OnlinePlayersMenu = new OnlinePlayers();
-                var menu = OnlinePlayersMenu.GetMenu();
-                var button = new MenuItem("Online Players", "All currently connected players.")
-                {
-                    Label = "→→→"
-                };
-                AddMenu(Menu, menu, button);
-                Menu.OnItemSelect += async (sender, item, index) =>
-                {
-                    if (item == button)
-                    {
-                        PlayersList.RequestPlayerList();
-
-                        await OnlinePlayersMenu.UpdatePlayerlist();
-                        menu.RefreshIndex();
-                    }
-                };
-            }
-            if (IsAllowed(Permission.OPUnban) || IsAllowed(Permission.OPViewBannedPlayers))
-            {
-                BannedPlayersMenu = new BannedPlayers();
-                var menu = BannedPlayersMenu.GetMenu();
-                var button = new MenuItem("Banned Players", "View and manage all banned players in this menu.")
-                {
-                    Label = "→→→"
-                };
-                AddMenu(Menu, menu, button);
-                Menu.OnItemSelect += (sender, item, index) =>
-                {
-                    if (item == button)
-                    {
-                        TriggerServerEvent("vMenu:RequestBanList", Game.Player.Handle);
-                        menu.RefreshIndex();
-                    }
-                };
-            }
-
+            // Online Players and Banned Players were removed: unused, and staff actions are handled by EasyAdmin.
             var playerSubmenuBtn = new MenuItem("Player Related Options", "Open this submenu for player related subcategories.") { Label = "→→→" };
             Menu.AddMenuItem(playerSubmenuBtn);
 

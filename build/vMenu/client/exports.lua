@@ -20,7 +20,9 @@ exports(
 	end
 )
 
-function rgbToHex(r, g, b)
+local format = string.format
+
+local function rgbToHex(r, g, b)
 	-- Ensure values are within RGB bounds (0-255)
 	r = math.max(0, math.min(255, r))
 	g = math.max(0, math.min(255, g))
@@ -68,11 +70,14 @@ CreateThread(function()
 	-- setr keep_player_head_props false (this is configured in your permissions.cfg)
 
 	-- this is just to replace needing to run a constant thread loop on the client
-	if GetConvar("keep_player_head_props", "false") == "false" then
-		lib.onCache("ped", function(value)
-			SetPedCanLosePropsOnDamage(value, false, 0)
-			SetPedConfigFlag(value, 427, true)
-		end)
+	if GetConvar("keep_player_head_props", "false") == "true" then
+		local function keepHeadProps(ped)
+			SetPedCanLosePropsOnDamage(ped, false, 0)
+			SetPedConfigFlag(ped, 427, true)
+		end
+		-- onCache only fires when the ped changes, so cover the current ped as well.
+		keepHeadProps(cache.ped)
+		lib.onCache("ped", keepHeadProps)
 	end
 
 	-- keep vehicle lights enabled during blackout when configured

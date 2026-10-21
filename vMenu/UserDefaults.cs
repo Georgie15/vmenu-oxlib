@@ -294,12 +294,6 @@ namespace vMenuClient
             set { SetSavedSettingsBool("miscRightAlignMenu", value); }
         }
 
-        public static bool MiscDisablePrivateMessages
-        {
-            get { return GetSettingsBool("miscDisablePrivateMessages"); }
-            set { SetSavedSettingsBool("miscDisablePrivateMessages", value); }
-        }
-
         public static bool MiscDisableControllerSupport
         {
             get { return GetSettingsBool("miscDisableControllerSupport"); }
@@ -585,9 +579,6 @@ namespace vMenuClient
 
                 MiscRightAlignMenu = MainMenu.MiscSettingsMenu.MiscRightAlignMenu;
                 prefs.Add("miscRightAlignMenu", MiscRightAlignMenu);
-
-                MiscDisablePrivateMessages = MainMenu.MiscSettingsMenu.MiscDisablePrivateMessages;
-                prefs.Add("miscDisablePrivateMessages", MiscDisablePrivateMessages);
 
                 MiscDisableControllerSupport = MainMenu.MiscSettingsMenu.MiscDisableControllerSupport;
                 prefs.Add("miscDisableControllerSupport", MiscDisableControllerSupport);

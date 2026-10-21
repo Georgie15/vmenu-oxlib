@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 20, 2026: garage vehicle spawn placement (tag `build-2026-10-20`) |
-| `build/vMenu/vMenuClient.net.dll` | `586cff071970fafce2287690ee097a1a7044dd991c255ccfd3b24f5eddb33bc4` |
+| Latest change | October 21, 2026: client fixes release A (tag `build-2026-10-21`) |
+| `build/vMenu/vMenuClient.net.dll` | `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf` |
 | `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (not built from `main`'s server source; see September 30) |
 
 Check a checkout with
@@ -166,3 +166,126 @@ perform the garage/ramp acceptance checks linked above. The existing server
 source/package mismatch remains; do not rebuild the server for this fix.
 No new configuration is required. No live server was changed and FiveM runtime
 testing remains outstanding.
+
+## October 21, 2026: client fixes release A (client DLL, Lua, config)
+
+First of two releases from the October 21 code review. This one needs no server
+rebuild. Release B (server rebuild: make `main`'s server source reproduce the
+packaged DLL, then remove the player-identifier and ban-list leaks) comes after
+this has run fine on live.
+
+**vMenu no longer overwrites other scripts every frame.** For every player it used
+to write player invincibility, ragdoll, drag-out/shot-in-vehicle/knock-off-bike,
+the vehicle god-mode proofs (bullet/fire/explosion/collision/melee, visual damage,
+engine wear, wheels/axles, doors, ramp damage), the helmet setting and, on each
+vehicle switch, power multiplier, siren, plane/heli turbulence and boat anchor.
+This undid PSRP scripts that set the same things. Now, through
+`vMenu/OverrideLatch.cs`:
+- A vMenu option that is on is still enforced exactly as before.
+- When it is turned off, or the ped/vehicle changes, vMenu restores the default
+  once on the entity it changed, and then leaves it alone.
+- If a player never uses the option, vMenu never touches the setting.
+
+Two visible differences for option users:
+- Vehicle god mode now comes off the previous vehicle when you enter another one.
+  Before, that vehicle stayed protected for whoever drove it next.
+- A parked vehicle keeps god mode until you turn the option off or enter another
+  vehicle.
+
+"Toggle Vehicle Visibility" only re-shows a vehicle vMenu hid. Before, it made
+your last vehicle visible every frame, whatever had hidden it.
+
+**Bug fixes:**
+- **Saved custom paint:** custom black, pure red and other colours with a 0
+  channel are restored. New saves store an explicit `customPrimary` /
+  `customSecondary` flag. Saves made before this keep the old rule, so they spawn
+  exactly as before. A custom colour with a 0 channel saved before this release
+  needs re-saving once.
+- **Server messages** (`vMenu:Notify`) show once in ox_lib instead of ox_lib plus
+  the GTA feed.
+- **Teleport flag:** `vmenu_teleporting` is cleared 3 s after a teleport
+  finishes, instead of 3 s after it starts. Long ground searches are no longer
+  outside the window psrp_telemetry checks.
+- **Death notifications** no longer stop at the first player already reported
+  dead.
+- **Hats and glasses:** the `keep_player_head_props` logic was inverted. The
+  code now matches the config comment (true = props stay on), and the config is
+  set to `false` in both copies. Behaviour is unchanged: hats and glasses can
+  still be knocked off.
+- **Shared vehicle codes** no longer carry the sharer's CAD `cadSaveToken`. It is
+  stripped when a code is generated and when one is imported, so each importer
+  gets their own token on first read. Imports also repair an empty `mods` list
+  the same way `extras` already was.
+- **Player blips** are now removed when toggled off for staff without the Online
+  Players menu. A check on that menu skipped the removal.
+
+**Removed (unused):**
+- The Online Players and Banned Players menus, with their client code: teleport
+  to/summon/spectate/kill/kick/ban, private messages, GPS-to-player, "Disable
+  Private Messages" and the ban list.
+- The packaged server DLL still has the matching handlers. Release B removes
+  them; that is what closes the server-side leaks.
+
+**Performance:**
+- The forced `GC.Collect()` every 60 s is gone.
+- Client permission checks use a table built once in `SetPermissions`. They no
+  longer read the staff-only convar and re-check parent permissions on every
+  call; denied answers were never cached.
+- One shared `ExternalFunctions` bridge replaces a new script object per
+  dialog/notification/interaction check.
+
+**Lua and config:**
+- `format` is local in each client file (it was a global defined only in
+  outfitCodes.lua), and `rgbToHex` is local.
+- Error and alert notifications honour the duration.
+- The clock-in sync is sent once at start, not twice.
+- `lib.versionCheck` against the upstream Gravxd fork is removed.
+- The outfit/vehicle code server callbacks refuse requests while their convar is
+  off.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf` |
+| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (unchanged) |
+
+**Validation:**
+- All nine tests in AGENTS.md pass. Three are new:
+  - `tests/override-latch`: latch behaviour, plus a check that the old
+    unconditional writes are gone.
+  - `tests/permission-table`: the table matches the old `IsAllowed` logic for
+    every permission, with staff-only on and off, over fixed and 500 random
+    permission sets. Breaking the staff-only rule makes it fail.
+  - `tests/saved-vehicle-colours`: the paint rule for new, -1-marked and oldest
+    saves.
+- The client Release build had 0 warnings and 0 errors. It was built into a
+  temporary folder, and only the client DLL was copied into the package.
+- No FiveM runtime testing was done.
+
+**Deploy:**
+1. Hash the live `vMenuClient.net.dll` and confirm it is the previous package
+   (`586cff071970fafce2287690ee097a1a7044dd991c255ccfd3b24f5eddb33bc4`). If it
+   differs, stop and reconcile first.
+2. Copy:
+   - `vMenuClient.net.dll`
+   - `client/exports.lua`, `client/integrations.lua`, `client/outfitCodes.lua`,
+     `client/vehicleCodes.lua`
+   - `config/config_client.lua`
+   - `server/oufitCodes.lua`, `server/vehicleCodes.lua`, `server/versionCheck.lua`
+3. In the live `permissions.cfg`, change only the line
+   `setr keep_player_head_props true` to `false`. Deploy it together with
+   `client/exports.lua`: the new Lua with the old `true` would stop hats falling
+   off.
+4. Restart the resource.
+
+**Runtime acceptance:**
+- F1 and noclip open.
+- God mode, no-ragdoll and vehicle god mode still work when switched on and off.
+- Another script's invincibility or no-ragdoll survives while vMenu god mode is
+  off.
+- A newly saved vehicle with custom black paint spawns black.
+- A server notification shows once.
+- A staff teleport-to-waypoint isn't flagged by psrp_telemetry.
+- Hats can still be knocked off.
+- An imported share code gets its own CAD token.
+- Online Players and Banned Players are gone.
+- `vmenuclient dump` lists the same permissions as before.

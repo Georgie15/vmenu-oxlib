@@ -39,7 +39,6 @@ namespace vMenuClient
         private string streetDisplay = "";
         private string headingDisplay = "";
 
-        private readonly List<int> waypointPlayerIdsToRemove = new();
         private int voiceTimer = 0;
         private int voiceCycle = 1;
         private const float voiceIndicatorWidth = 0.02f;
@@ -61,7 +60,45 @@ namespace vMenuClient
         private List<Vehicle> vehicles = new();
         private List<Ped> peds = new();
 
+        // Settings other resources also write. See OverrideLatch.
+        private readonly OverrideLatch godModeLatch = new();
+        private readonly OverrideLatch noRagdollLatch = new();
+        private readonly OverrideLatch dragOutLatch = new();
+        private readonly OverrideLatch shotInVehicleLatch = new();
+        private readonly OverrideLatch knockOffBikeLatch = new();
+        private readonly OverrideLatch rampGodLatch = new();
+        private readonly OverrideLatch visualGodLatch = new();
+        private readonly OverrideLatch engineGodLatch = new();
+        private readonly OverrideLatch strongWheelsGodLatch = new();
+        private readonly OverrideLatch invincibleGodLatch = new();
+        private readonly OverrideLatch noHelmetLatch = new();
+        private readonly OverrideLatch powerMultiplierLatch = new();
+        private readonly OverrideLatch noSirenLatch = new();
+        private readonly OverrideLatch planeTurbulenceLatch = new();
+        private readonly OverrideLatch heliTurbulenceLatch = new();
+        // The boat vMenu anchored, so entering other boats never releases someone else's anchor.
+        private int anchoredBoat = 0;
+        private Menu[] vehicleOnlyMenus;
+
         public FunctionsController() { }
+
+        /// <summary>
+        /// Applies a vMenu override through its latch: enforced on <paramref name="target"/> while
+        /// <paramref name="enabled"/>, and the entity vMenu last changed is restored once when the
+        /// option goes off or the target changes. Settings vMenu never changed are left alone.
+        /// </summary>
+        private static void ApplyOverride(OverrideLatch latch, bool enabled, int target, Action<int> apply, Action<int> restore)
+        {
+            var applyNow = latch.Update(enabled, target, out var previous);
+            if (previous != 0 && DoesEntityExist(previous))
+            {
+                restore(previous);
+            }
+            if (applyNow)
+            {
+                apply(target);
+            }
+        }
 
         /// <summary>
         /// Setup the required tick functions
@@ -75,7 +112,6 @@ namespace vMenuClient
             Tick += MiscRecordingKeybinds;
             Tick += MiscSettings;
             Tick += GeneralTasks;
-            Tick += GcTick;
 
             // Configuration and permissions based
             if (IsAllowed(Permission.WOMenu) && GetSettingsBool(Setting.vmenu_enable_weather_sync))
@@ -120,10 +156,6 @@ namespace vMenuClient
             {
                 Tick += WeaponOptions;
             }
-            if (IsAllowed(Permission.OPMenu))
-            {
-                Tick += OnlinePlayersTasks;
-            }
             if (IsAllowed(Permission.MSDeathNotifs))
             {
                 Tick += DeathNotifications;
@@ -165,32 +197,9 @@ namespace vMenuClient
             {
                 Tick += AnimalPedCameraChangeBlocker;
             }
-            if (IsAllowed(Permission.OPSpectate))
-            {
-                Tick += SpectateHandling;
-            }
         }
 
         /// Task related
-        #region gc thread
-        int gcTimer = GetGameTimer();
-        /// <summary>
-        /// Task for clearing unused memory periodically.
-        /// </summary>
-        /// <returns></returns>
-        private async Task GcTick()
-        {
-            if (GetGameTimer() - gcTimer > 60000)
-            {
-                gcTimer = GetGameTimer();
-                GC.Collect();
-                Log($"[vMenu] GC at {GetGameTimer()} ({GetTimeAsString(GetGameTimer())}).");
-
-            }
-            await Delay(1000);
-        }
-        #endregion
-
         #region General Tasks
         /// <summary>
         /// All general tasks that run every 1 game ticks (and are not (sub)menu specific).
@@ -246,7 +255,8 @@ namespace vMenuClient
                 }
                 if (!IsMpPedCreatorOpen())
                 {
-                    SetEntityInvincible(Game.PlayerPed.Handle, MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed);
+                    ApplyOverride(godModeLatch, MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed, Game.PlayerPed.Handle,
+                        ped => SetEntityInvincible(ped, true), ped => SetEntityInvincible(ped, false));
                 }
             }
 
@@ -263,8 +273,8 @@ namespace vMenuClient
             }
 
             // Manage PlayerNoRagdoll
-            SetPedCanRagdoll(Game.PlayerPed.Handle, (!MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed) ||
-                (!noRagdollAllowed));
+            ApplyOverride(noRagdollLatch, MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed, Game.PlayerPed.Handle,
+                ped => SetPedCanRagdoll(ped, false), ped => SetPedCanRagdoll(ped, true));
 
 
             // Manage never wanted.
@@ -328,20 +338,70 @@ namespace vMenuClient
             var cantBeDraggedOut = god || vehGod || ignored || stayInVeh;
             var cantBeShotInVehicle = god || vehGod;
 
-            Game.PlayerPed.CanBeDraggedOutOfVehicle = !cantBeDraggedOut;
-            Game.PlayerPed.CanBeShotInVehicle = !cantBeShotInVehicle;
-            Game.PlayerPed.CanBeKnockedOffBike = !cantBeKnockedOff;
+            var playerPed = Game.PlayerPed.Handle;
+            ApplyOverride(dragOutLatch, cantBeDraggedOut, playerPed,
+                ped => new Ped(ped).CanBeDraggedOutOfVehicle = false, ped => new Ped(ped).CanBeDraggedOutOfVehicle = true);
+            ApplyOverride(shotInVehicleLatch, cantBeShotInVehicle, playerPed,
+                ped => new Ped(ped).CanBeShotInVehicle = false, ped => new Ped(ped).CanBeShotInVehicle = true);
+            ApplyOverride(knockOffBikeLatch, cantBeKnockedOff, playerPed,
+                ped => new Ped(ped).CanBeKnockedOffBike = false, ped => new Ped(ped).CanBeKnockedOffBike = true);
             await Delay(1000);
         }
         #endregion
 
         #region Vehicle Options Tasks
         /// <summary>
+        /// Vehicle god mode settings. <paramref name="vehicle"/> is 0 while on foot, which keeps
+        /// god mode on the last vehicle until the option is turned off or another vehicle is entered.
+        /// </summary>
+        private void UpdateVehicleGodOverrides(int vehicle)
+        {
+            var god = MainMenu.VehicleOptionsMenu.VehicleGodMode && IsAllowed(Permission.VOGod);
+
+            ApplyOverride(rampGodLatch, MainMenu.VehicleOptionsMenu.VehicleGodRamp && god, vehicle,
+                veh => SetRampVehicleReceivesRampDamage(veh, false), veh => SetRampVehicleReceivesRampDamage(veh, true));
+            ApplyOverride(visualGodLatch, MainMenu.VehicleOptionsMenu.VehicleGodVisual && god, vehicle,
+                veh => new Vehicle(veh).CanBeVisiblyDamaged = false, veh => new Vehicle(veh).CanBeVisiblyDamaged = true);
+            ApplyOverride(engineGodLatch, MainMenu.VehicleOptionsMenu.VehicleGodEngine && god, vehicle,
+                veh => new Vehicle(veh).CanEngineDegrade = false, veh => new Vehicle(veh).CanEngineDegrade = true);
+            ApplyOverride(strongWheelsGodLatch, MainMenu.VehicleOptionsMenu.VehicleGodStrongWheels && god, vehicle,
+                veh => SetVehicleGodStrongWheels(new Vehicle(veh), true), veh => SetVehicleGodStrongWheels(new Vehicle(veh), false));
+            ApplyOverride(invincibleGodLatch, MainMenu.VehicleOptionsMenu.VehicleGodInvincible && god, vehicle,
+                veh => SetVehicleGodInvincible(new Vehicle(veh), true), veh => SetVehicleGodInvincible(new Vehicle(veh), false));
+        }
+
+        private static void SetVehicleGodStrongWheels(Vehicle vehicle, bool strong)
+        {
+            vehicle.CanWheelsBreak = !strong;
+            vehicle.IsAxlesStrong = strong;
+        }
+
+        private static void SetVehicleGodInvincible(Vehicle vehicle, bool invincible)
+        {
+            vehicle.IsBulletProof = invincible;
+            vehicle.IsCollisionProof = invincible;
+            vehicle.IsExplosionProof = invincible;
+            vehicle.IsFireProof = invincible;
+            vehicle.IsInvincible = invincible;
+            vehicle.IsMeleeProof = invincible;
+
+            foreach (var vehicleDoor in vehicle.Doors.GetAll())
+            {
+                vehicleDoor.CanBeBroken = !invincible;
+            }
+        }
+
+        /// <summary>
         /// Manage all vehicle related tasks.
         /// </summary>
         /// <returns></returns>
         private async Task VehicleOptions()
         {
+            // No helmet applies to the ped, so it is kept up to date on foot too.
+            var noHelmet = MainMenu.VehicleOptionsMenu.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet);
+            ApplyOverride(noHelmetLatch, noHelmet, Game.PlayerPed.Handle,
+                ped => new Ped(ped).CanWearHelmet = false, ped => new Ped(ped).CanWearHelmet = true);
+
             // When the player is in a valid vehicle:
             if (IsPedInAnyVehicle(Game.PlayerPed.Handle, true))
             {
@@ -350,14 +410,11 @@ namespace vMenuClient
                 {
                     // God mode
                     var god = MainMenu.VehicleOptionsMenu.VehicleGodMode && IsAllowed(Permission.VOGod);
-                    var invincibleGod = MainMenu.VehicleOptionsMenu.VehicleGodInvincible && god;
                     var visualGod = MainMenu.VehicleOptionsMenu.VehicleGodVisual && god;
                     var engineGod = MainMenu.VehicleOptionsMenu.VehicleGodEngine && god;
-                    var strongWheelsGod = MainMenu.VehicleOptionsMenu.VehicleGodStrongWheels && god;
                     var autoRepairGod = MainMenu.VehicleOptionsMenu.VehicleGodAutoRepair && god;
-                    var rampGod = MainMenu.VehicleOptionsMenu.VehicleGodRamp && god;
 
-                    SetRampVehicleReceivesRampDamage(veh.Handle, !rampGod);
+                    UpdateVehicleGodOverrides(veh.Handle);
 
                     if (visualGod && IsVehicleDamaged(veh.Handle))
                     {
@@ -369,27 +426,9 @@ namespace vMenuClient
                         veh.Repair();
                     }
 
-                    veh.CanBeVisiblyDamaged = !visualGod;
-
-                    veh.CanEngineDegrade = !engineGod;
                     if (engineGod && veh.EngineHealth < 1000f)
                     {
                         veh.EngineHealth = 1000f;
-                    }
-
-                    veh.CanWheelsBreak = !strongWheelsGod;
-                    veh.IsAxlesStrong = strongWheelsGod;
-
-                    veh.IsBulletProof = invincibleGod;
-                    veh.IsCollisionProof = invincibleGod;
-                    veh.IsExplosionProof = invincibleGod;
-                    veh.IsFireProof = invincibleGod;
-                    veh.IsInvincible = invincibleGod;
-                    veh.IsMeleeProof = invincibleGod;
-
-                    foreach (var vehicleDoor in veh.Doors.GetAll())
-                    {
-                        vehicleDoor.CanBeBroken = !invincibleGod;
                     }
 
                     // Freeze Vehicle Position (if enabled).
@@ -468,51 +507,24 @@ namespace vMenuClient
                             }
                         }
 
-                        // Vehicle engine power multiplier. Enable it once the player switched vehicles.
-                        // Only do this if the option is enabled AND the player has permissions for it.
-                        if (MainMenu.VehicleOptionsMenu.VehiclePowerMultiplier && IsAllowed(Permission.VOPowerMultiplier))
-                        {
-                            SetVehicleEnginePowerMultiplier(veh.Handle, MainMenu.VehicleOptionsMenu.VehiclePowerMultiplierAmount);
-                        }
-                        // If the player switched vehicles and the option is turned off or the player has no permissions for it
-                        // Then reset the power multiplier ONCE.
-                        else
-                        {
-                            SetVehicleEnginePowerMultiplier(veh.Handle, 1f);
-                        }
+                        // Vehicle engine power multiplier. Set once the player switched vehicles.
+                        // Only vehicles vMenu boosted are reset, so other resources' multipliers are kept.
+                        ApplyOverride(powerMultiplierLatch, MainMenu.VehicleOptionsMenu.VehiclePowerMultiplier && IsAllowed(Permission.VOPowerMultiplier), veh.Handle,
+                            v => SetVehicleEnginePowerMultiplier(v, MainMenu.VehicleOptionsMenu.VehiclePowerMultiplierAmount), v => SetVehicleEnginePowerMultiplier(v, 1f));
 
                         // disable this if els compatibility is turned on.
                         if (!GetSettingsBool(Setting.vmenu_use_els_compatibility_mode))
                         {
                             // No Siren Toggle
-                            veh.IsSirenSilent = MainMenu.VehicleOptionsMenu.VehicleNoSiren && IsAllowed(Permission.VONoSiren);
+                            ApplyOverride(noSirenLatch, MainMenu.VehicleOptionsMenu.VehicleNoSiren && IsAllowed(Permission.VONoSiren), veh.Handle,
+                                v => new Vehicle(v).IsSirenSilent = true, v => new Vehicle(v).IsSirenSilent = false);
                         }
 
-                        // Set the plane turbulence multiplier in case the vehicle was changed:
-                        if (veh.Model.IsPlane)
-                        {
-                            if (MainMenu.VehicleOptionsMenu.DisablePlaneTurbulence && IsAllowed(Permission.VODisableTurbulence))
-                            {
-                                SetPlaneTurbulenceMultiplier(veh.Handle, 0f);
-                            }
-                            else
-                            {
-                                SetPlaneTurbulenceMultiplier(veh.Handle, 1.0f);
-                            }
-                        }
-
-                        // Set the helicopter turbulence multiplier in case the vehicle was changed:
-                        if (veh.Model.IsHelicopter)
-                        {
-                            if (MainMenu.VehicleOptionsMenu.DisableHelicopterTurbulence && IsAllowed(Permission.VODisableTurbulence))
-                            {
-                                SetHeliTurbulenceScalar(veh.Handle, 0f);
-                            }
-                            else
-                            {
-                                SetHeliTurbulenceScalar(veh.Handle, 1.0f);
-                            }
-                        }
+                        // Set the plane / helicopter turbulence in case the vehicle was changed:
+                        ApplyOverride(planeTurbulenceLatch, MainMenu.VehicleOptionsMenu.DisablePlaneTurbulence && IsAllowed(Permission.VODisableTurbulence), veh.Model.IsPlane ? veh.Handle : 0,
+                            v => SetPlaneTurbulenceMultiplier(v, 0f), v => SetPlaneTurbulenceMultiplier(v, 1.0f));
+                        ApplyOverride(heliTurbulenceLatch, MainMenu.VehicleOptionsMenu.DisableHelicopterTurbulence && IsAllowed(Permission.VODisableTurbulence), veh.Model.IsHelicopter ? veh.Handle : 0,
+                            v => SetHeliTurbulenceScalar(v, 0f), v => SetHeliTurbulenceScalar(v, 1.0f));
 
                         if (veh.Model.IsBoat)
                         {
@@ -521,30 +533,22 @@ namespace vMenuClient
                                 SetBoatAnchor(veh.Handle, true);
                                 SetBoatFrozenWhenAnchored(veh.Handle, true);
                                 SetForcedBoatLocationWhenAnchored(veh.Handle, true);
+                                anchoredBoat = veh.Handle;
                             }
-                            else
+                            // Only release an anchor vMenu set.
+                            else if (veh.Handle == anchoredBoat)
                             {
                                 SetBoatAnchor(veh.Handle, false);
                                 SetBoatFrozenWhenAnchored(veh.Handle, false);
                                 SetForcedBoatLocationWhenAnchored(veh.Handle, false);
+                                anchoredBoat = 0;
                             }
                         }
                     }
 
-                    // Manage "no helmet"
-                    var ped = Game.PlayerPed;
-                    // If the no helmet feature is turned on, disalbe "ped can wear helmet"
-                    if (MainMenu.VehicleOptionsMenu.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet))
-                    {
-                        ped.CanWearHelmet = false;
-                    }
-                    // otherwise, allow helmets.
-                    else if (!MainMenu.VehicleOptionsMenu.VehicleNoBikeHelemet || !IsAllowed(Permission.VONoHelmet))
-                    {
-                        ped.CanWearHelmet = true;
-                    }
                     // If the player is still wearing a helmet, even if the option is set to: no helmet, then remove the helmet.
-                    if (ped.IsWearingHelmet && MainMenu.VehicleOptionsMenu.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet))
+                    var ped = Game.PlayerPed;
+                    if (ped.IsWearingHelmet && noHelmet)
                     {
                         ped.RemoveHelmet(true);
                     }
@@ -573,16 +577,20 @@ namespace vMenuClient
             // When the player is not inside a vehicle:
             else
             {
+                UpdateVehicleGodOverrides(0);
+
+                // Make the vehicle visible again if vMenu hid it, otherwise you could not get back in.
                 var lastVehicle = GetVehicle(true);
-                if (lastVehicle != null && lastVehicle.Exists())
+                if (lastVehicle != null && lastVehicle.Exists() && lastVehicle.Handle == menus.VehicleOptions.HiddenVehicle)
                 {
                     if (!lastVehicle.IsVisible)
                     {
                         lastVehicle.IsVisible = true;
                     }
+                    menus.VehicleOptions.HiddenVehicle = 0;
                 }
 
-                var subMenus = new List<Menu>()
+                vehicleOnlyMenus ??= new[]
                     {
                         MainMenu.VehicleOptionsMenu.DeleteConfirmMenu,
                         MainMenu.VehicleOptionsMenu.VehicleColorsMenu,
@@ -593,7 +601,7 @@ namespace vMenuClient
                         MainMenu.VehicleOptionsMenu.VehicleUnderglowMenu,
                         MainMenu.VehicleOptionsMenu.VehicleWindowsMenu,
                     };
-                foreach (var m in subMenus)
+                foreach (var m in vehicleOnlyMenus)
                 {
                     if (m.Visible)
                     {
@@ -1239,7 +1247,7 @@ namespace vMenuClient
                     tmpiterator++;
                     if (p.IsDead)
                     {
-                        if (deadPlayers.Contains(p.Handle)) { return; }
+                        if (deadPlayers.Contains(p.Handle)) { continue; }
                         var killer = p.Character.GetKiller();
                         if (killer != null)
                         {
@@ -1467,39 +1475,6 @@ namespace vMenuClient
                 }
             }
             await Task.FromResult(0);
-        }
-        #endregion
-
-        #region Spectate Handling Tasks
-        /// <summary>
-        /// OnTick runs every game tick.
-        /// Used here for the spectating feature.
-        /// </summary>
-        /// <returns></returns>
-        private async Task SpectateHandling()
-        {
-            if (MainMenu.PermissionsSetupComplete && MainMenu.OnlinePlayersMenu != null && IsAllowed(Permission.OPMenu) && IsAllowed(Permission.OPSpectate))
-            {
-                // When the player dies while spectating, cancel the spectating to prevent an infinite black loading screen.
-                if (GetEntityHealth(Game.PlayerPed.Handle) < 1 && NetworkIsInSpectatorMode())
-                {
-                    DoScreenFadeOut(50);
-                    await Delay(50);
-                    NetworkSetInSpectatorMode(true, Game.PlayerPed.Handle);
-                    NetworkSetInSpectatorMode(false, Game.PlayerPed.Handle);
-
-                    await Delay(50);
-                    DoScreenFadeIn(50);
-                    while (GetEntityHealth(Game.PlayerPed.Handle) < 1)
-                    {
-                        await Delay(0);
-                    }
-                }
-            }
-            else
-            {
-                await Delay(0);
-            }
         }
         #endregion
 
@@ -2195,11 +2170,6 @@ namespace vMenuClient
         private int ownedPlayerBlipsPrunedAt;
         private const int OwnedPlayerBlipsPruneMs = 100;
 
-        private static bool HasGpsRoute(int serverId)
-        {
-            return MainMenu.OnlinePlayersMenu != null && MainMenu.OnlinePlayersMenu.PlayersWaypointList.Contains(serverId);
-        }
-
         /// <summary>
         /// Removes the blip vMenu created for this player, if any. Blips from other resources are never touched.
         /// </summary>
@@ -2309,13 +2279,10 @@ namespace vMenuClient
                                 {
                                     var ped = p.Character.Handle;
 
-                                    // the duty blip already covers this player, so drop our own blip (unless it is carrying a GPS route).
+                                    // the duty blip already covers this player, so drop our own blip.
                                     if (externalBlipPlayers.Contains(p.ServerId))
                                     {
-                                        if (!HasGpsRoute(p.ServerId))
-                                        {
-                                            RemoveOwnedPlayerBlip(p.ServerId);
-                                        }
+                                        RemoveOwnedPlayerBlip(p.ServerId);
                                         continue;
                                     }
 
@@ -2334,8 +2301,8 @@ namespace vMenuClient
                                             blip = AddBlipForEntity(ped);
                                             ownedPlayerBlips[p.ServerId] = blip;
                                         }
-                                        // a blip from another resource is on this player; don't restyle it (GPS routes are the exception).
-                                        else if (!HasGpsRoute(p.ServerId))
+                                        // a blip from another resource is on this player; don't restyle it.
+                                        else
                                         {
                                             continue;
                                         }
@@ -2407,10 +2374,7 @@ namespace vMenuClient
                             else // blips are not enabled.
                             {
                                 // remove the player blip we created. Blips from other resources (like the duty blip) are left alone.
-                                if (MainMenu.OnlinePlayersMenu != null && !HasGpsRoute(p.ServerId))
-                                {
-                                    RemoveOwnedPlayerBlip(p.ServerId);
-                                }
+                                RemoveOwnedPlayerBlip(p.ServerId);
                             }
                         }
                     }
@@ -2506,65 +2470,6 @@ namespace vMenuClient
                         }
                     }
                 }
-            }
-        }
-        #endregion
-
-        #region Online Player Options Tasks
-        /// <summary>
-        /// Manages online players tasks.
-        /// </summary>
-        /// <returns></returns>
-        private async Task OnlinePlayersTasks()
-        {
-            await Delay(500);
-            if (MainMenu.OnlinePlayersMenu.PlayersWaypointList.Count > 0)
-            {
-                foreach (var serverId in MainMenu.OnlinePlayersMenu.PlayersWaypointList)
-                {
-                    var player = MainMenu.PlayersList.FirstOrDefault(a => a.ServerId == serverId);
-
-                    if (player == null)
-                    {
-                        waypointPlayerIdsToRemove.Add(serverId);
-                    }
-                    else if (player.Character != null)
-                    {
-                        var playerId = player.Handle;
-                        var pos1 = GetEntityCoords(GetPlayerPed(playerId), true);
-                        var pos2 = Game.PlayerPed.Position;
-                        if (Vdist2(pos1.X, pos1.Y, pos1.Z, pos2.X, pos2.Y, pos2.Z) < 20f)
-                        {
-                            var blip = GetBlipFromEntity(GetPlayerPed(playerId));
-                            if (DoesBlipExist(blip))
-                            {
-                                SetBlipRoute(blip, false);
-                                RemoveBlip(ref blip);
-                                waypointPlayerIdsToRemove.Add(playerId);
-                                Notify.Custom($"~g~You've reached ~s~{GetPlayerName(playerId)}'s~g~ location, disabling GPS route.");
-                            }
-                        }
-                    }
-                    await Delay(10);
-                }
-                if (waypointPlayerIdsToRemove.Count > 0)
-                {
-                    foreach (var id in waypointPlayerIdsToRemove)
-                    {
-                        if (MainMenu.OnlinePlayersMenu.PlayerCoordWaypoints.TryGetValue(id, out var blip))
-                        {
-                            if (DoesBlipExist(blip))
-                            {
-                                SetBlipRoute(blip, false);
-                                RemoveBlip(ref blip);
-                            }
-                        }
-
-                        MainMenu.OnlinePlayersMenu.PlayersWaypointList.Remove(id);
-                    }
-                    await Delay(10);
-                }
-                waypointPlayerIdsToRemove.Clear();
             }
         }
         #endregion
