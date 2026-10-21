@@ -40,6 +40,10 @@ namespace vMenuClient
         static void ApplyVehicleModsDelayed(Vehicle vehicle, VehicleInfo info, int delay) { ModsApplied++; }
         static Task ApplyRespawnSpeedDebuff(Vehicle vehicle) => Task.CompletedTask;
         static Task Delay(int milliseconds) => BaseScript.Delay(milliseconds);
+        // Spawn provenance events, with the number of vehicles that existed when each fired.
+        static readonly List<string> Events = new List<string>();
+        static void TriggerEvent(string name, params object[] args)
+            => Events.Add($"{name}({string.Join(",", args)})@{Positions.Count}");
         internal static void Check(bool condition, string description)
         {
             if (!condition) throw new Exception(description);
@@ -49,6 +53,7 @@ namespace vMenuClient
         {
             ResetWorld(playerZ);
             _previousVehicle = null;
+            Events.Clear();
         }
         static Task<int> Spawn(bool inside = true, bool replace = true, string save = null,
             float x = 0, float y = 0, float z = 0)
@@ -157,6 +162,14 @@ namespace vMenuClient
             Reset(100); ModelClass = (int)VehicleClass.Helicopters; Surfaces.Add(new Surface(0));
             await Spawn(); Check(HeliBlades && PlaceCalls == 0, "airborne helicopter retains full-speed blades");
             Console.WriteLine("PASS: traffic, object floors, model dimensions, outside spawn, replacement, explicit coords, boats/trains and helicopter");
+
+            Reset(); Surfaces.Add(new Surface(-20));
+            var tracked = await Spawn();
+            Check(Events.Count == 2
+                && Events[0] == "vMenu:telemetry:queueVehicleSpawn()@0"
+                && Events[1] == $"vMenu:telemetry:vehicleSpawned({tracked})@1",
+                "telemetry ticket requested once before the vehicle exists, then handed the new vehicle: " + string.Join(" | ", Events));
+            Console.WriteLine("PASS: spawn provenance asked once before creation and given the created vehicle");
         }
     }
 }

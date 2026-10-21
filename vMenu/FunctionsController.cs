@@ -737,7 +737,7 @@ namespace vMenuClient
         /// <summary>
         /// Draws various misc settings menu text items, like coordinates, location time and speed.
         /// </summary>
-        private async void DrawMiscSettingsText()
+        private void DrawMiscSettingsText()
         {
             // draw coordinates
             if (MainMenu.MiscSettingsMenu.ShowCoordinates && IsAllowed(Permission.MSShowCoordinates))
@@ -780,7 +780,6 @@ namespace vMenuClient
             {
                 ShowSpeedMph();
             }
-            await Task.FromResult(0);
         }
         #endregion
 
@@ -998,13 +997,9 @@ namespace vMenuClient
                     }
                     else
                     {
-                        if (!HasAnimDictLoaded("anim@mp_point"))
+                        if (!await LoadAnimDictAsync("anim@mp_point"))
                         {
-                            RequestAnimDict("anim@mp_point");
-                        }
-                        while (!HasAnimDictLoaded("anim@mp_point"))
-                        {
-                            await Delay(0);
+                            return;
                         }
                         TaskMoveNetwork(Game.PlayerPed.Handle, "task_mp_pointing", 0.5f, false, "anim@mp_point", 24);
                         RemoveAnimDict("anim@mp_point");
@@ -1598,14 +1593,8 @@ namespace vMenuClient
 
             if (IsMpCharEditorOpen())
             {
-                if (!HasAnimDictLoaded("anim@random@shop_clothes@watches"))
-                {
-                    RequestAnimDict("anim@random@shop_clothes@watches");
-                }
-                while (!HasAnimDictLoaded("anim@random@shop_clothes@watches"))
-                {
-                    await Delay(0);
-                }
+                // Only used for the watch pose; the editor still works if it fails to load.
+                await LoadAnimDictAsync("anim@random@shop_clothes@watches");
 
                 while (IsMpCharEditorOpen())
                 {
@@ -2041,6 +2030,29 @@ namespace vMenuClient
         #endregion
 
         #region Player clothing animations controller.
+        // Static glow (0 = on, 1 = off) last applied per ped. This loop runs every 25 ms over every
+        // player; static modes used to be re-applied each time, and our own decorator written twice.
+        private readonly Dictionary<int, int> appliedStaticGlow = new();
+        private readonly HashSet<int> glowPedsSeen = new();
+        private int ownGlowDecorPed;
+        private int ownGlowDecorValue = int.MinValue;
+
+        /// <summary>
+        /// Writes our clothing animation decorator only when our ped or the chosen mode changed.
+        /// </summary>
+        private void SetOwnClothingAnimationDecor()
+        {
+            var ped = Game.PlayerPed.Handle;
+            var value = PlayerAppearance.ClothingAnimationType;
+            if (ped == ownGlowDecorPed && value == ownGlowDecorValue)
+            {
+                return;
+            }
+            DecorSetInt(ped, clothingAnimationDecor, value);
+            ownGlowDecorPed = ped;
+            ownGlowDecorValue = value;
+        }
+
         private async Task PlayerClothingAnimationsController()
         {
             if (!DecorIsRegisteredAsType(clothingAnimationDecor, 3))
@@ -2064,7 +2076,7 @@ namespace vMenuClient
             {
                 try
                 {
-                    DecorSetInt(Game.PlayerPed.Handle, clothingAnimationDecor, PlayerAppearance.ClothingAnimationType);
+                    SetOwnClothingAnimationDecor();
                 }
                 catch (Exception e)
                 {
@@ -2072,6 +2084,7 @@ namespace vMenuClient
                     Debug.WriteLine($"Error Location: {e.StackTrace}\nError info: {e.Message}");
                     await Delay(1000);
                 }
+                glowPedsSeen.Clear();
                 foreach (var player in Players)
                 {
                     var p = player.Character;
@@ -2080,15 +2093,18 @@ namespace vMenuClient
                         if (DecorExistOn(p.Handle, clothingAnimationDecor))
                         {
                             var decorVal = DecorGetInt(p.Handle, clothingAnimationDecor);
-                            if (decorVal == 0) // on solid/no animation.
+                            glowPedsSeen.Add(p.Handle);
+                            if (decorVal is 0 or 1) // 0 = on solid/no animation, 1 = off.
                             {
-                                SetPedIlluminatedClothingGlowIntensity(p.Handle, 1f);
+                                if (!appliedStaticGlow.TryGetValue(p.Handle, out var applied) || applied != decorVal)
+                                {
+                                    SetPedIlluminatedClothingGlowIntensity(p.Handle, decorVal == 0 ? 1f : 0f);
+                                    appliedStaticGlow[p.Handle] = decorVal;
+                                }
+                                continue;
                             }
-                            else if (decorVal == 1) // off.
-                            {
-                                SetPedIlluminatedClothingGlowIntensity(p.Handle, 0f);
-                            }
-                            else if (decorVal == 2) // fade.
+                            appliedStaticGlow.Remove(p.Handle);
+                            if (decorVal == 2) // fade.
                             {
                                 SetPedIlluminatedClothingGlowIntensity(p.Handle, clothingOpacity);
                             }
@@ -2112,6 +2128,14 @@ namespace vMenuClient
                                 SetPedIlluminatedClothingGlowIntensity(p.Handle, result);
                             }
                         }
+                    }
+                }
+                // Forget peds that left, died or respawned.
+                if (appliedStaticGlow.Count > glowPedsSeen.Count)
+                {
+                    foreach (var ped in appliedStaticGlow.Keys.Where(ped => !glowPedsSeen.Contains(ped)).ToList())
+                    {
+                        appliedStaticGlow.Remove(ped);
                     }
                 }
                 if (clothingAnimationReverse)
@@ -2140,7 +2164,7 @@ namespace vMenuClient
             }
             try
             {
-                DecorSetInt(Game.PlayerPed.Handle, clothingAnimationDecor, PlayerAppearance.ClothingAnimationType);
+                SetOwnClothingAnimationDecor();
             }
             catch (Exception e)
             {
@@ -2170,11 +2194,22 @@ namespace vMenuClient
         private int ownedPlayerBlipsPrunedAt;
         private const int OwnedPlayerBlipsPruneMs = 100;
 
+        // What we last applied to each player's blip (server id -> style).
+        private sealed class BlipStyle
+        {
+            public int Blip;
+            public int Sprite = -1;
+            public bool? Heading;
+            public int Display = -1;
+        }
+        private readonly Dictionary<int, BlipStyle> blipStyles = new();
+
         /// <summary>
         /// Removes the blip vMenu created for this player, if any. Blips from other resources are never touched.
         /// </summary>
         private void RemoveOwnedPlayerBlip(int serverId)
         {
+            blipStyles.Remove(serverId);
             if (ownedPlayerBlips.TryGetValue(serverId, out var blip))
             {
                 ownedPlayerBlips.Remove(serverId);
@@ -2215,6 +2250,7 @@ namespace vMenuClient
             foreach (var serverId in ownedPlayerBlips.Where(entry => !DoesBlipExist(entry.Value)).Select(entry => entry.Key).ToList())
             {
                 ownedPlayerBlips.Remove(serverId);
+                blipStyles.Remove(serverId);
             }
 
             // stop trusting a list the duty script has stopped refreshing.
@@ -2308,66 +2344,76 @@ namespace vMenuClient
                                         }
                                     }
 
+                                    // Colour, name and category used to be set on every blip every frame. They are
+                                    // now set when the blip (or its sprite) is new; sprite, heading indicator and
+                                    // display only when they change. Rotation still follows the player every frame.
+                                    if (!blipStyles.TryGetValue(p.ServerId, out var style) || style.Blip != blip)
+                                    {
+                                        style = new BlipStyle { Blip = blip };
+                                        blipStyles[p.ServerId] = style;
+                                    }
+
                                     // only manage the blip for this player if the player is nearby
+                                    int blipDisplay;
                                     if (p.Character.Position.DistanceToSquared2D(Game.PlayerPed.Position) < 500000 || Game.IsPaused)
                                     {
-                                        // (re)set the blip color in case something changed it.
-                                        SetBlipColour(blip, 0);
-
+                                        int blipSprite;
+                                        bool showHeading;
+                                        bool rotateBlip;
                                         // if the decorator exists on this player, use the decorator value to determine what the blip sprite should be.
                                         if (DecorExistOn(p.Character.Handle, "vmenu_player_blip_sprite_id"))
                                         {
-                                            var decorSprite = DecorGetInt(p.Character.Handle, "vmenu_player_blip_sprite_id");
-                                            // set the sprite according to the decorator value.
-                                            SetBlipSprite(blip, decorSprite);
-
+                                            blipSprite = DecorGetInt(p.Character.Handle, "vmenu_player_blip_sprite_id");
                                             // show heading on blip only if the player is on foot (blip sprite 1)
-                                            ShowHeadingIndicatorOnBlip(blip, decorSprite == 1);
-
+                                            showHeading = blipSprite == 1;
                                             // set the blip rotation if the player is not in a helicopter (sprite 422).
-                                            if (decorSprite != 422)
-                                            {
-                                                SetBlipRotation(blip, (int)GetEntityHeading(ped));
-                                            }
+                                            rotateBlip = blipSprite != 422;
                                         }
                                         else // backup method for when the decorator value is not found.
                                         {
-                                            // set the blip sprite using the backup method in case decorators failed.
-                                            SetCorrectBlipSprite(ped, blip);
-
+                                            var inVehicle = IsPedInAnyVehicle(ped, false);
+                                            blipSprite = inVehicle ? BlipInfo.GetBlipSpriteForVehicle(GetVehiclePedIsIn(ped, false)) : 1;
                                             // only show the heading indicator if the player is NOT in a vehicle.
-                                            if (!IsPedInAnyVehicle(ped, false))
-                                            {
-                                                ShowHeadingIndicatorOnBlip(blip, true);
-                                            }
-                                            else
-                                            {
-                                                ShowHeadingIndicatorOnBlip(blip, false);
-
-                                                // If the player is not in a helicopter, set the blip rotation.
-                                                if (!p.Character.IsInHeli)
-                                                {
-                                                    SetBlipRotation(blip, (int)GetEntityHeading(ped));
-                                                }
-                                            }
+                                            showHeading = !inVehicle;
+                                            // If the player is in a vehicle that is not a helicopter, set the blip rotation.
+                                            rotateBlip = inVehicle && !p.Character.IsInHeli;
                                         }
 
-                                        // set the player name.
-                                        SetBlipNameToPlayerName(blip, p.Handle);
+                                        if (style.Sprite != blipSprite)
+                                        {
+                                            SetBlipSprite(blip, blipSprite);
+                                            style.Sprite = blipSprite;
 
-                                        // thanks lambda menu for hiding this great feature in their source code!
-                                        // sets the blip category to 7, which makes the blips group under "Other Players:"
-                                        SetBlipCategory(blip, 7);
+                                            // (re)set the colour and name in case the sprite change reset them.
+                                            SetBlipColour(blip, 0);
+                                            SetBlipNameToPlayerName(blip, p.Handle);
 
-                                        // ShowHeightOnBlip(blip, false); // See if we need this or not
+                                            // thanks lambda menu for hiding this great feature in their source code!
+                                            // sets the blip category to 7, which makes the blips group under "Other Players:"
+                                            SetBlipCategory(blip, 7);
+                                        }
+                                        if (style.Heading != showHeading)
+                                        {
+                                            ShowHeadingIndicatorOnBlip(blip, showHeading);
+                                            style.Heading = showHeading;
+                                        }
+                                        if (rotateBlip)
+                                        {
+                                            SetBlipRotation(blip, (int)GetEntityHeading(ped));
+                                        }
 
                                         // display on minimap and main map.
-                                        SetBlipDisplay(blip, 6);
+                                        blipDisplay = 6;
                                     }
                                     else
                                     {
                                         // hide it from the minimap.
-                                        SetBlipDisplay(blip, 3);
+                                        blipDisplay = 3;
+                                    }
+                                    if (style.Display != blipDisplay)
+                                    {
+                                        SetBlipDisplay(blip, blipDisplay);
+                                        style.Display = blipDisplay;
                                     }
                                 }
                             }
@@ -2406,8 +2452,9 @@ namespace vMenuClient
         #endregion
 
         #region player overhead names
-        private readonly Dictionary<Player, int> gamerTags = new();
+        private readonly OverheadNameTags gamerTags = new();
 
+        // Compared with the squared distance, so 500 means about 22 m.
         private readonly float playerNamesDistance = GetSettingsFloat(Setting.vmenu_player_names_distance) > 10f ? GetSettingsFloat(Setting.vmenu_player_names_distance) : 500f;
 
 
@@ -2424,51 +2471,36 @@ namespace vMenuClient
                 var enabled = MainMenu.MiscSettingsMenu.MiscShowOverheadNames;
                 if (!enabled)
                 {
-                    foreach (var gamerTag in gamerTags)
-                    {
-                        RemoveMpGamerTag(gamerTag.Value);
-                    }
-                    gamerTags.Clear();
+                    gamerTags.Clear(tag => RemoveMpGamerTag(tag));
                 }
                 else
                 {
+                    gamerTags.BeginUpdate();
                     foreach (var p in Players)
                     {
-                        if (p != Game.Player)
+                        if (p != Game.Player && p.Character != null && p.Character.Exists())
                         {
                             var dist = p.Character.Position.DistanceToSquared(Game.PlayerPed.Position);
                             var closeEnough = dist < playerNamesDistance;
-                            if (gamerTags.ContainsKey(p))
+                            var tag = gamerTags.Visit(p.ServerId, closeEnough, IsMpGamerTagActive,
+                                () => CreateMpGamerTag(p.Character.Handle, p.Name + $" [{p.ServerId}]", false, false, "", 0),
+                                RemoveMpGamerTag);
+                            if (tag != -1)
                             {
-                                if (!closeEnough)
-                                {
-                                    RemoveMpGamerTag(gamerTags[p]);
-                                    gamerTags.Remove(p);
-                                }
-                                else
-                                {
-                                    gamerTags[p] = CreateMpGamerTag(p.Character.Handle, p.Name + $" [{p.ServerId}]", false, false, "", 0);
-                                }
-                            }
-                            else if (closeEnough)
-                            {
-                                gamerTags.Add(p, CreateMpGamerTag(p.Character.Handle, p.Name + $" [{p.ServerId}]", false, false, "", 0));
-                            }
-                            if (closeEnough && gamerTags.ContainsKey(p))
-                            {
-                                SetMpGamerTagVisibility(gamerTags[p], 2, true); // healthArmor
+                                SetMpGamerTagVisibility(tag, 2, true); // healthArmor
                                 if (p.WantedLevel > 0)
                                 {
-                                    SetMpGamerTagVisibility(gamerTags[p], 7, true); // wantedStars
-                                    SetMpGamerTagWantedLevel(gamerTags[p], GetPlayerWantedLevel(p.Handle));
+                                    SetMpGamerTagVisibility(tag, 7, true); // wantedStars
+                                    SetMpGamerTagWantedLevel(tag, GetPlayerWantedLevel(p.Handle));
                                 }
                                 else
                                 {
-                                    SetMpGamerTagVisibility(gamerTags[p], 7, false); // wantedStars
+                                    SetMpGamerTagVisibility(tag, 7, false); // wantedStars
                                 }
                             }
                         }
                     }
+                    gamerTags.EndUpdate(RemoveMpGamerTag);
                 }
             }
         }
@@ -3097,13 +3129,9 @@ namespace vMenuClient
                             }
                         }
                     }
-                    if (!HasAnimDictLoaded(animDict))
+                    if (!await LoadAnimDictAsync(animDict))
                     {
-                        RequestAnimDict(animDict);
-                        while (!HasAnimDictLoaded(animDict))
-                        {
-                            await Delay(0);
-                        }
+                        return;
                     }
                     if (animName.StartsWith("pov_") && animDict != "anim@mp_helmets@on_foot")
                     {
@@ -3159,13 +3187,9 @@ namespace vMenuClient
                 if (GetAmmoInPedWeapon(Game.PlayerPed.Handle, snowball_hash) < maxAmmo)
                 {
                     SetPedCurrentWeaponVisible(Game.PlayerPed.Handle, false, true, false, false);
-                    if (!HasAnimDictLoaded(snowball_anim_dict))
+                    if (!await LoadAnimDictAsync(snowball_anim_dict))
                     {
-                        RequestAnimDict(snowball_anim_dict);
-                        while (!HasAnimDictLoaded(snowball_anim_dict))
-                        {
-                            await Delay(0);
-                        }
+                        return;
                     }
                     TaskPlayAnim(Game.PlayerPed.Handle, snowball_anim_dict, snowball_anim_name, 8f, 1f, -1, 0, 0f, false, false, false);
                     var fired = false;

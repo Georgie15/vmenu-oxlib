@@ -621,6 +621,19 @@ namespace vMenuClient
                 // Bool used to determine if the groundz coord could be found.
                 var found = false;
 
+                // Load the destination once. This used to restart the same scene load (always at pos)
+                // for every height below, waiting up to 3 s each time: up to ~2 minutes of black screen.
+                SetFocusPosAndVel(pos.X, pos.Y, pos.Z, 0, 0, 0);
+                NewLoadSceneStart(pos.X, pos.Y, pos.Z, pos.X, pos.Y, pos.Z, 50f, 0);
+                tempTimer = GetGameTimer();
+                while (!IsNewLoadSceneLoaded() && GetGameTimer() - tempTimer < 3000)
+                {
+                    await BaseScript.Delay(0);
+                }
+
+                // Important! Not stopping the scene load leaves areas outside it unrendered ("city mud").
+                NewLoadSceneStop();
+
                 // Loop from 950 to 0 for the ground z coord, and take away 25 each time.
                 for (var zz = 950.0f; zz >= 0f; zz -= 25f)
                 {
@@ -638,27 +651,6 @@ namespace vMenuClient
                     // It doesn't matter to get the ground z coord, and neither does it actually prevent entities from falling through the map, nor does
                     // it seem to load the world ANY faster than without, but whatever.
                     RequestCollisionAtCoord(pos.X, pos.Y, z);
-
-                    // Set focus for that area.
-                    SetFocusPosAndVel(pos.X, pos.Y, pos.Z, 0, 0, 0);
-
-                    // Start to load the scene.
-                    NewLoadSceneStart(pos.X, pos.Y, pos.Z, pos.X, pos.Y, pos.Z, 50f, 0);
-
-                    // Reset the timer.
-                    tempTimer = GetGameTimer();
-
-                    // Wait for the scene to be loaded with a timeout.
-                    while (!IsNewLoadSceneLoaded() && Game.GameTime - tempTimer < 3000)
-                    {
-                        await BaseScript.Delay(0);
-                    }
-
-                    // Clear the focus for that area.
-                    ClearFocus();
-
-                    // Important! This step was missing before, not setting this would cause areas outside the scene to become unrendered aka "city mud" would appear.
-                    NewLoadSceneStop();
 
                     // If the player is in a vehicle, teleport the vehicle to this new position.
                     if (inVehicle())
@@ -713,6 +705,9 @@ namespace vMenuClient
                     // Wait 10ms before trying the next location.
                     await Delay(10);
                 }
+
+                // Clear the focus for that area.
+                ClearFocus();
 
                 // If the loop ends but the ground z coord has not been found yet, then get the nearest vehicle node as a fail-safe coord.
                 if (!found)
@@ -808,10 +803,9 @@ namespace vMenuClient
             if (!Game.PlayerPed.IsInVehicle())
             {
                 // Get the suicide animations ready.
-                RequestAnimDict("mp_suicide");
-                while (!HasAnimDictLoaded("mp_suicide"))
+                if (!await LoadAnimDictAsync("mp_suicide"))
                 {
-                    await Delay(0);
+                    return;
                 }
                 // Decide if the death should be using a pill or a gun (randomly).
                 uint? weaponHash = null;
@@ -1190,6 +1184,11 @@ namespace vMenuClient
                 pos = groundedPosition.Value;
             }
 
+            // Spawn provenance (client/spawnProvenance.lua): ask for the telemetry ticket once, right
+            // before creating, then hand over the new vehicle itself. The Lua side used to be started
+            // from inside canDoInteraction (twice per spawn) and then scanned every vehicle for 3 s.
+            TriggerEvent("vMenu:telemetry:queueVehicleSpawn");
+
             // Create the new vehicle and remove the need to hotwire the car.
             var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
             {
@@ -1199,6 +1198,7 @@ namespace vMenuClient
                 IsStolen = false,
                 IsWanted = false
             };
+            TriggerEvent("vMenu:telemetry:vehicleSpawned", vehicle.Handle);
 
             Log($"New vehicle, hash:{vehicleHash}, handle:{vehicle.Handle}, force-re-save-name:{saveName ?? "NONE"}, created at x:{pos.X} y:{pos.Y} z:{pos.Z} " +
                 $"heading:{heading}");
@@ -1718,6 +1718,40 @@ namespace vMenuClient
                 return false;
             }
         }
+        #endregion
+
+        #region Load streamed assets with a timeout
+        /// <summary>
+        /// Requests a streamed asset and waits for it for at most <paramref name="timeoutMs"/>.
+        /// Returns false when it never loaded; these waits used to loop forever and could leave the
+        /// player stuck (for example changing ped with a model that fails to stream).
+        /// </summary>
+        internal static async Task<bool> WaitForStreamingAsync(Func<bool> isLoaded, Action request, string name, int timeoutMs)
+        {
+            if (isLoaded())
+            {
+                return true;
+            }
+
+            request();
+            var startedAt = GetGameTimer();
+            while (!isLoaded())
+            {
+                if (GetGameTimer() - startedAt >= timeoutMs)
+                {
+                    Debug.WriteLine($"[vMenu] {name} did not load within {timeoutMs}ms; skipped.");
+                    return false;
+                }
+                await Delay(0);
+            }
+            return true;
+        }
+
+        internal static Task<bool> LoadAnimDictAsync(string dict, int timeoutMs = 5000)
+            => WaitForStreamingAsync(() => HasAnimDictLoaded(dict), () => RequestAnimDict(dict), $"Animation dictionary {dict}", timeoutMs);
+
+        internal static Task<bool> LoadModelAsync(uint model, int timeoutMs = 15000)
+            => WaitForStreamingAsync(() => HasModelLoaded(model), () => RequestModel(model), $"Model {model}", timeoutMs);
         #endregion
 
         #region GetUserInput
@@ -2427,17 +2461,18 @@ namespace vMenuClient
             }
             if (IsModelInCdimage(modelHash))
             {
+                // Load first: if the model never streams in, nothing about the ped changes.
+                if (!await LoadModelAsync(modelHash))
+                {
+                    Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "this ped model");
+                    return;
+                }
                 if (keepWeapons)
                 {
                     TriggerEvent("vMenu:PedChange:Before");
                     await Delay(0); // yield so external Lua handlers can save addon weapons
                     SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
                     Log("saved from SetPlayerSkin()");
-                }
-                RequestModel(modelHash);
-                while (!HasModelLoaded(modelHash))
-                {
-                    await Delay(0);
                 }
 
                 if ((uint)GetEntityModel(Game.PlayerPed.Handle) != modelHash) // only change skins if the player is not yet using the new skin.
@@ -2975,7 +3010,10 @@ namespace vMenuClient
                                 ammo = w.GetMaxAmmo;
                             }
                             var doIt = false;
-                            while (GetAmmoInPedWeapon(Game.PlayerPed.Handle, w.Hash) != ammo && w.CurrentAmmo != -1)
+                            // Weapons sharing an ammo type can make the count never match exactly; stop after 1s.
+                            var ammoTimer = GetGameTimer();
+                            while (GetAmmoInPedWeapon(Game.PlayerPed.Handle, w.Hash) != ammo && w.CurrentAmmo != -1
+                                && GetGameTimer() - ammoTimer < 1000)
                             {
                                 if (doIt)
                                 {
@@ -3127,13 +3165,9 @@ namespace vMenuClient
                 }
                 if (animDict != null)
                 {
-                    if (!HasAnimDictLoaded(animDict))
+                    if (!await LoadAnimDictAsync(animDict))
                     {
-                        RequestAnimDict(animDict);
-                        while (!HasAnimDictLoaded(animDict))
-                        {
-                            await Delay(0);
-                        }
+                        return;
                     }
                     SetPedAlternateMovementAnim(Game.PlayerPed.Handle, 0, animDict, "idle", 1f, true);
                     SetPedAlternateMovementAnim(Game.PlayerPed.Handle, 1, animDict, "walk", 1f, true);
@@ -3497,10 +3531,11 @@ namespace vMenuClient
             if (player != null && !player.IsDead && !player.Character.IsInVehicle())
             {
                 var KeyFobHashKey = (uint)GetHashKey("p_car_keys_01");
-                RequestModel(KeyFobHashKey);
-                while (!HasModelLoaded(KeyFobHashKey))
+                var animDict = "anim@mp_player_intmenu@key_fob@";
+                // Both are only cosmetic: skip the animation rather than wait forever.
+                if (!await LoadModelAsync(KeyFobHashKey, 5000) || !await LoadAnimDictAsync(animDict))
                 {
-                    await Delay(0);
+                    return;
                 }
 
                 var KeyFobObject = CreateObject((int)KeyFobHashKey, 0, 0, 0, true, true, true);
@@ -3533,12 +3568,6 @@ namespace vMenuClient
                     TaskTurnPedToFaceEntity(player.Character.Handle, veh.Handle, 500);
                 }
 
-                var animDict = "anim@mp_player_intmenu@key_fob@";
-                RequestAnimDict(animDict);
-                while (!HasAnimDictLoaded(animDict))
-                {
-                    await Delay(0);
-                }
                 player.Character.Task.PlayAnimation(animDict, "fob_click", 3f, 1000, AnimationFlags.UpperBodyOnly);
                 PlaySoundFromEntity(-1, "Remote_Control_Fob", player.Character.Handle, "PI_Menu_Sounds", true, 0);
 

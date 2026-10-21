@@ -45,10 +45,13 @@ dotnet run --project tests/override-latch
 python tests/permission-table/test_permission_table.py
 python tests/saved-vehicle-colours/test_custom_colours.py
 dotnet run --project tests/personal-vehicle-registry
+dotnet run --project tests/overhead-name-tags
+python tests/client-fixes/test_client_fixes.py
+lua tests/spawn-provenance/test_spawn_provenance.lua
 ```
 
-They need Python and the .NET 9 SDK. None of them run FiveM, so runtime checks
-remain manual.
+They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so
+runtime checks remain manual.
 
 ## Shipping a change
 

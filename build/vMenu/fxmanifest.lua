@@ -2,9 +2,9 @@
 fx_version 'bodacious'
 games { 'gta5' }
 
-description 'vMenu Fork - github.com/Gravxd/vMenu-ox'
-version '2.0.0'
-author 'Tom Grobbe (vMenu), Gravxd (vMenu-ox)'
+description 'vMenu, PSRP build - github.com/Georgie15/vmenu-oxlib (based on Gravxd/vMenu-ox)'
+version '2.0.0-psrp'
+author 'Tom Grobbe (vMenu), Gravxd (vMenu-ox), Paradise State RP'
 ui_page 'storage.html'
 
 lua54 "yes"

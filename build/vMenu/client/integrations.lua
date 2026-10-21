@@ -413,7 +413,6 @@ exports("canDoInteraction", function(action)
             notifyVehicleSpawnBlocked(blockReason)
             return false
         end
-        TriggerEvent("vMenu:telemetry:queueVehicleSpawn")
     elseif action == "changepedmodel" then
         local context = getVMenuBlockContext()
         if context == "death" then

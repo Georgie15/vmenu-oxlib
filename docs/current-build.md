@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: server security release B |
-| `build/vMenu/vMenuClient.net.dll` | `27dcac3a54d0063a49b1fb95a985382e512e977f05f9f21fa7bcd23bd18a4630` |
+| Latest change | October 21, 2026: bugs and performance release C |
+| `build/vMenu/vMenuClient.net.dll` | `1bc1f3e6916fbd062665c67befd603c7943febfdb98cec98b7206b859ae37d09` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -458,3 +458,104 @@ Nothing to deploy. The DLLs and every file in `build/vMenu/` are unchanged.
 
 Proof: `tools/ilcompare` with `ILCOMPARE_RAW=1` shows 0 differences for both
 DLLs against the release B package (only the git hash differs).
+
+## October 21, 2026: bugs and performance release C (client DLL, Lua)
+
+Built on the local `next` branch after release B, and merged into `main` only
+after release B was confirmed on live. Client only: the server DLL is release B's.
+
+**Bugs fixed:**
+- **Vehicle Extras "Go Back".** Every open of the Extras menu added another Go
+  Back handler, so after a few opens Go Back jumped several menus. It is now
+  registered once.
+- **Overhead names.** A tag was re-created every 500 ms for every nearby player
+  and never removed when that player left. Tags are now kept per server ID,
+  created only when the player has no active tag, and removed when the player
+  moves away, leaves, or names are turned off. The distance is unchanged.
+- **Teleport black screen.** Finding the ground loaded the scene again at every
+  height it tried, up to 3 s each (up to about 2 minutes in the worst case). It
+  now loads the area once (at most 3 s), then probes heights.
+- **Hangs on assets that never load.** Changing ped (Player Appearance, MP
+  characters), walking styles, suicide, the key-fob animation, pointing, the
+  helmet visor, snowballs and the watch animation all waited forever for a model
+  or animation. They now give up after 15 s (models) or 5 s (animations). A ped
+  change that fails shows "could not load" and leaves you as you were, instead
+  of stripping your weapons first.
+- **Weapon loadout ammo.** Restoring a loadout waited forever for each weapon's
+  ammo to apply. It now waits at most 1 s per weapon.
+- **Spawn tracking for psrp_telemetry.**
+  - The ticket was requested from inside `canDoInteraction`, which runs twice
+    per spawn and can be called by other scripts, and the new vehicle was found
+    by scanning every vehicle in the world for up to 3 s.
+  - `SpawnVehicleCore` now asks for the ticket once, right before
+    `CreateVehicle`, and passes the new vehicle straight to
+    `client/spawnProvenance.lua`.
+  - The events psrp_telemetry receives (`vMenu:telemetry:beginVehicleSpawn`,
+    `psrp_telemetry:sv:claimVehicleSpawn`, the version 2 ready handshake) are
+    unchanged.
+
+**Performance:**
+- **Clothing glow.** Every 25 ms the glow loop re-applied every player's static
+  glow and rewrote your own decorator. Static glows are now applied only when a
+  player's mode changes, and your decorator only when yours changes.
+- **Staff blips.** Sprite, colour, name and category were set on every blip
+  every frame. They are now set when the blip's sprite changes; heading and
+  display only on change. Rotation is still per frame.
+- **Vehicle spawner.** About 800 vehicle entries were built at startup. Each
+  class is now filled the first time you open it.
+- **Small items.** The misc-settings text (coordinates, time, speed) is no
+  longer an `async void` started every frame, and the animal-ped check uses a
+  `HashSet`.
+
+**Manifest.** `fxmanifest.lua` now names this PSRP build in its description,
+version (`2.0.0-psrp`) and author. `fx_version` is unchanged.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `1bc1f3e6916fbd062665c67befd603c7943febfdb98cec98b7206b859ae37d09` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release B's client DLL shows only the members
+  above: the load helpers, the changed call sites, `OverheadNameTags`,
+  `BlipStyle`, the glow fields, the Extras handler and the spawner's deferred
+  build, plus renumbered compiler-generated local functions.
+- New tests:
+  - `dotnet run --project tests/overhead-name-tags`: tag bookkeeping (no
+    re-creation, removal on leave, away and off) and the FunctionsController
+    wiring.
+  - `python tests/client-fixes/test_client_fixes.py`: compiles the real load
+    helper against fake natives (timeout, late load, already loaded) and checks
+    each fixed call site.
+  - `lua tests/spawn-provenance/test_spawn_provenance.lua`: the new script
+    claims the ticket for the vehicle it was given, once, and ignores failed
+    spawns and late tickets. It fails against the old script.
+- `tests/vehicle-spawn-placement` now also checks that the ticket is requested
+  once before `CreateVehicle` and the vehicle reported once after it.
+- All thirteen tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy:**
+1. Hash the live `vMenuClient.net.dll`. It must be release B's
+   (`27dcac3a54d0063a49b1fb95a985382e512e977f05f9f21fa7bcd23bd18a4630`). If it
+   differs, stop.
+2. Copy `vMenuClient.net.dll`, `client/integrations.lua`,
+   `client/spawnProvenance.lua` and `fxmanifest.lua`. Copy the DLL and both Lua
+   files together: the new DLL reports spawns that only the new
+   `spawnProvenance.lua` understands, and the old `integrations.lua` would ask
+   for a second ticket per spawn.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- Open Vehicle Options > Vehicle Extras several times, then Go Back: it goes
+  back one menu.
+- Overhead names show above nearby players and disappear when they walk away or
+  leave.
+- Teleport to a waypoint far away: the screen is black for a few seconds at
+  most, and you land on the ground.
+- Change ped, MP character and walking style; restore a weapon loadout.
+- Spawn a car from the spawner and by name: psrp_telemetry records it as a vMenu
+  spawn, exactly once.
+- Open a few vehicle classes in the spawner: each lists its vehicles.
+- Staff blips still show the right sprite, colour, name and heading.
+- `resmon`: vMenu's client time is no higher than on release B.

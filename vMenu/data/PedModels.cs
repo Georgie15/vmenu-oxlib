@@ -6,7 +6,8 @@ namespace vMenuClient.data
 {
     public static class PedModels
     {
-        public static List<uint> AnimalHashes = new()
+        // Checked every frame while the animal ped option is on, so a set rather than a list.
+        public static HashSet<uint> AnimalHashes = new()
         {
             (uint)GetHashKey("a_c_boar"),
             (uint)GetHashKey("a_c_boar_02"), // mp2023_01

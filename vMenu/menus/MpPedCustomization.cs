@@ -1985,13 +1985,10 @@ namespace vMenuClient.menus
                 {
                     var model = (uint)GetHashKey("mp_m_freemode_01");
 
-                    if (!HasModelLoaded(model))
+                    if (!await LoadModelAsync(model))
                     {
-                        RequestModel(model);
-                        while (!HasModelLoaded(model))
-                        {
-                            await BaseScript.Delay(0);
-                        }
+                        Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
+                        return;
                     }
 
                     var maxHealth = Game.PlayerPed.MaxHealth;
@@ -2020,13 +2017,10 @@ namespace vMenuClient.menus
                 {
                     var model = (uint)GetHashKey("mp_f_freemode_01");
 
-                    if (!HasModelLoaded(model))
+                    if (!await LoadModelAsync(model))
                     {
-                        RequestModel(model);
-                        while (!HasModelLoaded(model))
-                        {
-                            await BaseScript.Delay(0);
-                        }
+                        Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
+                        return;
                     }
 
                     var maxHealth = Game.PlayerPed.MaxHealth;
@@ -2199,13 +2193,10 @@ namespace vMenuClient.menus
             }
             if (IsModelInCdimage(currentCharacter.ModelHash))
             {
-                if (!HasModelLoaded(currentCharacter.ModelHash))
+                if (!await LoadModelAsync(currentCharacter.ModelHash))
                 {
-                    RequestModel(currentCharacter.ModelHash);
-                    while (!HasModelLoaded(currentCharacter.ModelHash))
-                    {
-                        await BaseScript.Delay(0);
-                    }
+                    Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
+                    return;
                 }
                 var maxHealth = Game.PlayerPed.MaxHealth;
                 var maxArmour = Game.Player.MaxArmor;
@@ -2803,13 +2794,10 @@ namespace vMenuClient.menus
 
                 MultiplayerPedData character = StorageManager.GetSavedMpCharacterData(newItem.Text);
 
-                if (!HasModelLoaded(character.ModelHash))
+                if (!await LoadModelAsync(character.ModelHash))
                 {
-                    RequestModel(character.ModelHash);
-                    while (!HasModelLoaded(character.ModelHash))
-                    {
-                        await Delay(0);
-                    }
+                    Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
+                    return;
                 }
 
                 Ped playerPed = Game.PlayerPed;

@@ -64,6 +64,8 @@ namespace vMenuClient.menus
         public float VehiclePowerMultiplierAmount { get; private set; } = 2f;
 
         private readonly Dictionary<MenuItem, int> vehicleExtras = new();
+        // The extras menu is rebuilt on every open; its Go Back item is handled by one handler.
+        private MenuItem extrasBackButton;
         #endregion
 
         #region CreateMenu()
@@ -1777,30 +1779,30 @@ namespace vMenuClient.menus
 
                         if (vehicleExtras.Count > 0)
                         {
-                            var backBtn = new MenuItem("Go Back", "Go back to the Vehicle Options menu.");
-                            VehicleComponentsMenu.AddMenuItem(backBtn);
-                            VehicleComponentsMenu.OnItemSelect += (sender3, item3, index3) =>
-                            {
-                                VehicleComponentsMenu.GoBack();
-                            };
+                            extrasBackButton = new MenuItem("Go Back", "Go back to the Vehicle Options menu.");
                         }
                         else
                         {
-                            var backBtn = new MenuItem("No Extras Available :(", "Go back to the Vehicle Options menu.")
+                            extrasBackButton = new MenuItem("No Extras Available :(", "Go back to the Vehicle Options menu.")
                             {
                                 Label = "Go Back"
                             };
-                            VehicleComponentsMenu.AddMenuItem(backBtn);
-                            VehicleComponentsMenu.OnItemSelect += (sender3, item3, index3) =>
-                            {
-                                VehicleComponentsMenu.GoBack();
-                            };
                         }
+                        VehicleComponentsMenu.AddMenuItem(extrasBackButton);
                         // And update the submenu to prevent weird glitches.
                         VehicleComponentsMenu.RefreshIndex();
                         //VehicleComponentsMenu.UpdateScaleform();
 
                     }
+                }
+            };
+
+            // Registered once: this used to be added on every open, so Go Back went back several menus.
+            VehicleComponentsMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item == extrasBackButton)
+                {
+                    VehicleComponentsMenu.GoBack();
                 }
             };
 
