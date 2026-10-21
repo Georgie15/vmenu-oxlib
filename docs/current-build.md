@@ -1,11 +1,30 @@
 # Current build and branch handoff
 
-Updated October 20, 2026. Initial combined snapshot: September 27, 2026.
+## Current package
+
+`main` is the only live branch, and its `build/vMenu/` folder is the latest
+PSRP vMenu package. Start every change from an up-to-date `main`. Agent and
+build rules are in [AGENTS.md](../AGENTS.md).
+
+| | |
+| --- | --- |
+| Latest change | October 20, 2026: garage vehicle spawn placement (tag `build-2026-10-20`) |
+| `build/vMenu/vMenuClient.net.dll` | `586cff071970fafce2287690ee097a1a7044dd991c255ccfd3b24f5eddb33bc4` |
+| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (not built from `main`'s server source; see September 30) |
+
+Check a checkout with
+`sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
+When the package changes, update this table, add a dated section below and tag
+the commit `build-YYYY-MM-DD`.
+
+This repository identifies the package. It does not establish which copy is
+installed on a server; hash the installed files before deploying.
+
+## September 27, 2026: combined snapshot
 
 `main` records the combined local vMenu source and the `build/vMenu` package
 that was in the primary checkout when this branch was created. This includes
 the earlier unpublished PSRP work and the local ONX face selector integration.
-Use `main` as the base for future changes to this build.
 
 The packaged DLLs were committed as found, without rebuilding them during
 the branch change:
@@ -15,15 +34,12 @@ the branch change:
 | `build/vMenu/vMenuClient.net.dll` | `cacfbdbec147b5c70269dda5a9c121c643a7416f2a85a8a4f0af61f9428ba600` |
 | `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` |
 
-The fork's older `dev` and `master` branches remain available. `master` has a
-separate RVF vehicle repair event change at `52b59cb`; that source change was
-not folded into this snapshot, so the packaged build stayed as it was. The
-isolated `codex/onx-face-selector` branch contains a different DLL built from
-an earlier baseline; use the combined build on `main` for this project.
-
-This Git snapshot identifies the local package. It does not establish which
-copy is installed on a server. For future edits, make changes from `main`,
-build the intended source, and compare the resulting package before deployment.
+The older `master`, `dev` and `codex/*` branches were retired on October 21,
+2026. Their work is in `main`: the ONX face selector, outfit/hair fix, CAD
+vehicle identity and the RVF `vehiclerepair` event from `master` (`52b59cb`),
+which every client DLL committed on `main` includes. `dev`
+was an unmodified copy of the upstream fork's `dev`, which is still available
+from the `upstream` remote.
 
 ## September 30, 2026: permission request retry (client only)
 

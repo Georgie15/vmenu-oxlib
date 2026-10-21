@@ -117,12 +117,9 @@ source and packaged build were subsequently saved on `main`; see
 [`current-build.md`](current-build.md) for the current branch and build hashes.
 
 The main checkout already contains extensive unpublished PSRP source changes.
-They were preserved. The feature is published separately on
-`codex/onx-face-selector`, based on `6310688`, in the managed worktree
-`C:/Users/Georgie/.codex/worktrees/onx-face-selector/vMenu-ox`.
-That branch includes the feature's source, tests, documentation and its matching
-client DLL built from the committed baseline. It does not include unrelated local
-PSRP changes; do not overwrite the PSRP deployment with that branch's DLL.
+They were preserved. The feature was first published separately on
+`codex/onx-face-selector`, based on `6310688`. That branch was retired on
+October 21, 2026; its work is in `main`, and its DLL must not be deployed.
 
 The ready local combined client is:
 `C:/Users/Georgie/source/repos/vMenu-ox/build/vMenu/vMenuClient.net.dll`.
