@@ -39,6 +39,9 @@ namespace vMenuClient
         static void Log(string text) { }
         static void ApplyVehicleModsDelayed(Vehicle vehicle, VehicleInfo info, int delay) { ModsApplied++; }
         static Task ApplyRespawnSpeedDebuff(Vehicle vehicle) => Task.CompletedTask;
+        // Vehicles the player's model preset was applied to.
+        static readonly List<int> PresetsApplied = new List<int>();
+        static bool ApplyVehiclePreset(int vehicle) { PresetsApplied.Add(vehicle); return true; }
         static Task Delay(int milliseconds) => BaseScript.Delay(milliseconds);
         // Spawn provenance events, with the number of vehicles that existed when each fired.
         static readonly List<string> Events = new List<string>();
@@ -54,6 +57,7 @@ namespace vMenuClient
             ResetWorld(playerZ);
             _previousVehicle = null;
             Events.Clear();
+            PresetsApplied.Clear();
         }
         static Task<int> Spawn(bool inside = true, bool replace = true, string save = null,
             float x = 0, float y = 0, float z = 0)
@@ -170,6 +174,12 @@ namespace vMenuClient
                 && Events[1] == $"vMenu:telemetry:vehicleSpawned({tracked})@1",
                 "telemetry ticket requested once before the vehicle exists, then handed the new vehicle: " + string.Join(" | ", Events));
             Console.WriteLine("PASS: spawn provenance asked once before creation and given the created vehicle");
+
+            Check(PresetsApplied.Count == 1 && PresetsApplied[0] == tracked, "a fresh spawn gets the player's preset for its model");
+            Reset(); Surfaces.Add(new Surface(-20));
+            await Spawn(save: "saved");
+            Check(PresetsApplied.Count == 0 && ModsApplied == 1, "a saved vehicle keeps its own setup, not the preset");
+            Console.WriteLine("PASS: model presets apply to fresh spawns only");
         }
     }
 }

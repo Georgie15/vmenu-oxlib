@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -27,6 +28,10 @@ namespace vMenuClient
         public async Task<string> GetCustomColourInput(int type)
         {
             return await Exports["vMenu"].colourDialog(type);
+        }
+        public async Task<string> GetCoordsInput()
+        {
+            return await Exports["vMenu"].coordsDialog();
         }
         public void SetPlayerClipboard(string text)
         {
@@ -1230,6 +1235,11 @@ namespace vMenuClient
                 ApplyVehicleModsDelayed(vehicle, vehicleInfo, 500);
                 await BaseScript.Delay(650);
             }
+            else
+            {
+                // A fresh spawn of this model: use the player's own extras and livery, if saved.
+                ApplyVehiclePreset(vehicle.Handle);
+            }
 
             await WaitForVehicleIdentity(
                 IdentityBridge.ClaimVehicleIdentity(identityTicket, vehicle.Handle, vehicleInfo.cadSaveToken), false, "claim");
@@ -1315,6 +1325,27 @@ namespace vMenuClient
             // every paint. Keep the old rule for them so existing saves spawn as before.
             return colors.TryGetValue(prefix + "R", out var r) && colors.TryGetValue(prefix + "G", out var g)
                 && colors.TryGetValue(prefix + "B", out var b) && r > 0 && g > 0 && b > 0;
+        }
+
+        /// <summary>
+        /// Applies the player's preset for this vehicle's model (Vehicle Extras > Save As My Preset).
+        /// Returns false if they have none.
+        /// </summary>
+        internal static bool ApplyVehiclePreset(int vehicle)
+        {
+            var preset = VehiclePreset.Parse(GetResourceKvpString(VehiclePreset.KeyFor((uint)GetEntityModel(vehicle))));
+            if (preset == null || preset.IsEmpty)
+            {
+                return false;
+            }
+
+            SetVehicleModKit(vehicle, 0);
+            preset.Apply(
+                extra => DoesExtraExist(vehicle, extra),
+                (extra, on) => SetVehicleExtra(vehicle, extra, !on),
+                GetVehicleLiveryCount(vehicle), livery => SetVehicleLivery(vehicle, livery),
+                GetNumVehicleMods(vehicle, 48), livery => SetVehicleMod(vehicle, 48, livery, false));
+            return true;
         }
 
         /// <summary>
@@ -1836,6 +1867,22 @@ namespace vMenuClient
         {
             return await External.LoadSharedVehicle();
         }
+        /// <summary>
+        /// Asks for X, Y and Z in one dialog, filled in with the player's position. Null if cancelled.
+        /// </summary>
+        public static async Task<Vector3?> GetUserCoords()
+        {
+            var parts = (await External.GetCoordsInput() ?? "").Split(',');
+            if (parts.Length == 3
+                && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+                && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
+                && float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
+            {
+                return new Vector3(x, y, z);
+            }
+            return null;
+        }
+
         public static async Task<bool> GetUserConfirmation(string windowTitle, string description)
         {
             return await External.GetUserConfirmation(windowTitle, description);

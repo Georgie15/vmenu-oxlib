@@ -28,6 +28,16 @@ build = block(r'^        internal static bool\[\] BuildEffectivePermissions\(.*?
 client_is_allowed = block(r'^        private static bool IsAllowedClient\(.*?^        }$')
 assert 'GetSettingsBool' not in client_is_allowed, 'IsAllowed must not read a convar per call'
 assert 'GetPermissionAndParentPermissions' not in client_is_allowed, 'IsAllowed must not re-check parents per call'
+
+# The packaged permissions.cfg: every grant says allow or deny (anything else isn't a valid
+# grant, like the old `... God" true`), and none is repeated.
+aces = [line.strip() for line in (root / 'build/vMenu/config/permissions.cfg').read_text(encoding='utf-8').splitlines()
+        if line.strip().startswith('add_ace ')]
+invalid = [line for line in aces if line.split('#')[0].split()[-1] not in ('allow', 'deny')]
+assert not invalid, f'add_ace without allow/deny: {invalid}'
+repeated = sorted({line for line in aces if aces.count(line) > 1})
+assert not repeated, f'repeated grants: {repeated}'
+print(f'PASS: permissions.cfg has {len(aces)} grants, each allow or deny, none repeated')
 assert 'effectivePermissions = BuildEffectivePermissions(Permissions, ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_menu_staff_only));' in source
 
 program = r'''

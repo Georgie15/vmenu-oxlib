@@ -2870,6 +2870,8 @@ namespace vMenuClient
                 return;
             }
 
+            personalVehicleMenu.LastKnownPosition = personalVehicle.Position;
+
             var driver = personalVehicle.Driver;
             var hasDriver = driver != null && driver.Exists();
             if (hasDriver)

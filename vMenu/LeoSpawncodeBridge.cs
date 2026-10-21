@@ -3,6 +3,7 @@ using System;
 using CitizenFX.Core;
 
 using static CitizenFX.Core.Native.API;
+using static vMenuClient.CommonFunctions;
 
 namespace vMenuClient
 {
@@ -20,11 +21,15 @@ namespace vMenuClient
                 return;
             }
 
-            for (var extra = 0; extra < 20; extra++)
+            // The player's own preset for this model replaces "every extra on".
+            if (!ApplyVehiclePreset(vehicleHandle))
             {
-                if (DoesExtraExist(vehicleHandle, extra))
+                for (var extra = 0; extra < 20; extra++)
                 {
-                    SetVehicleExtra(vehicleHandle, extra, false);
+                    if (DoesExtraExist(vehicleHandle, extra))
+                    {
+                        SetVehicleExtra(vehicleHandle, extra, false);
+                    }
                 }
             }
 

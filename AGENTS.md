@@ -48,6 +48,9 @@ dotnet run --project tests/personal-vehicle-registry
 dotnet run --project tests/overhead-name-tags
 python tests/client-fixes/test_client_fixes.py
 lua tests/spawn-provenance/test_spawn_provenance.lua
+dotnet run --project tests/vehicle-presets
+lua tests/save-backups/test_backups.lua
+python tests/client-features/test_client_features.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

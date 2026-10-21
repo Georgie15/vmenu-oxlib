@@ -4,9 +4,10 @@ using System.Threading.Tasks;
 
 using CitizenFX.Core;
 
+using MenuAPI;
+
 using static CitizenFX.Core.Native.API;
 
-using static vMenuShared.ConfigManager;
 using static vMenuClient.CommonFunctions;
 
 namespace vMenuClient
@@ -17,6 +18,8 @@ namespace vMenuClient
         private static int MovingSpeed { get; set; } = 0;
         private static int Scale = -1;
         private static bool FollowCamMode { get; set; } = true;
+        // What the help panel last showed; it is rebuilt only when this changes.
+        private static int helpPanelState = -1;
 
 
         private readonly List<string> speeds = new()
@@ -68,35 +71,37 @@ namespace vMenuClient
         {
             return NoclipActive;
         }
-        static string JOAAT(string command)
+        // How a key mapping's current key is shown in instructional buttons.
+        private static string KeyMappingButton(string command) => $"~INPUT_{(uint)GetHashKey(command) | 0x80000000:X}~";
+
+        private static void AddHelpButton(int slot, string button, string label)
         {
-            uint hash = 0;
-            string str = command.ToLower();
-
-            for (int i = 0; i < str.Length; i++)
-            {
-                uint letter = (uint)str[i];
-                hash += letter;
-                hash += (hash << 10);
-                hash ^= (hash >> 6);
-            }
-
-            hash += (hash << 3);
-            if (hash < 0)
-            {
-                hash = (uint)((int)hash);
-            }
-
-            hash ^= (hash >> 11);
-            hash += (hash << 15);
-
-            if (hash < 0)
-            {
-                hash = (uint)((int)hash);
-            }
-
-            return hash.ToString("X");
+            BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
+            ScaleformMovieMethodAddParamInt(slot);
+            PushScaleformMovieMethodParameterString(button);
+            PushScaleformMovieMethodParameterString(label);
+            EndScaleformMovieMethod();
         }
+
+        private void BuildHelpPanel()
+        {
+            BeginScaleformMovieMethod(Scale, "CLEAR_ALL");
+            EndScaleformMovieMethod();
+
+            AddHelpButton(0, "~INPUT_SPRINT~", $"Change Speed ({speeds[MovingSpeed]})");
+            AddHelpButton(1, "~INPUT_CURSOR_SCROLL_UP~", "Faster / Slower");
+            AddHelpButton(2, "~INPUT_MOVE_LR~", FollowCamMode ? "Strafe Left/Right" : "Turn Left/Right");
+            AddHelpButton(3, "~INPUT_MOVE_UD~", "Move");
+            AddHelpButton(4, "~INPUT_MULTIPLAYER_INFO~", "Down");
+            AddHelpButton(5, "~INPUT_COVER~", "Up");
+            AddHelpButton(6, "~INPUT_VEH_HEADLIGHT~", "Cam Mode");
+            AddHelpButton(7, KeyMappingButton($"vMenu:{MainMenu.GetKeyMappingId()}:NoClip"), "Toggle NoClip");
+
+            BeginScaleformMovieMethod(Scale, "DRAW_INSTRUCTIONAL_BUTTONS");
+            ScaleformMovieMethodAddParamInt(0);
+            EndScaleformMovieMethod();
+        }
+
         private async Task NoClipHandler()
         {
             if (NoclipActive)
@@ -108,61 +113,18 @@ namespace vMenuClient
                 }
 
                 DrawScaleformMovieFullscreen(Scale, 255, 255, 255, 0, 0);
+                helpPanelState = -1;
             }
             while (NoclipActive)
             {
                 if (!IsHudHidden())
                 {
-                    BeginScaleformMovieMethod(Scale, "CLEAR_ALL");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(0);
-                    PushScaleformMovieMethodParameterString("~INPUT_SPRINT~");
-                    PushScaleformMovieMethodParameterString($"Change Speed ({speeds[MovingSpeed]})");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(1);
-                    PushScaleformMovieMethodParameterString("~INPUT_MOVE_LR~");
-                    PushScaleformMovieMethodParameterString($"Turn Left/Right");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(2);
-                    PushScaleformMovieMethodParameterString("~INPUT_MOVE_UD~");
-                    PushScaleformMovieMethodParameterString($"Move");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(3);
-                    PushScaleformMovieMethodParameterString("~INPUT_MULTIPLAYER_INFO~");
-                    PushScaleformMovieMethodParameterString($"Down");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(4);
-                    PushScaleformMovieMethodParameterString("~INPUT_COVER~");
-                    PushScaleformMovieMethodParameterString($"Up");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(5);
-                    PushScaleformMovieMethodParameterString("~INPUT_VEH_HEADLIGHT~");
-                    PushScaleformMovieMethodParameterString($"Cam Mode");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "SET_DATA_SLOT");
-                    ScaleformMovieMethodAddParamInt(6);
-                    string KeyMappingID = String.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
-                    PushScaleformMovieMethodParameterString($"~INPUT_{JOAAT($"vMenu:{KeyMappingID}:NoClip")}~");
-                    PushScaleformMovieMethodParameterString($"Toggle NoClip");
-                    EndScaleformMovieMethod();
-
-                    BeginScaleformMovieMethod(Scale, "DRAW_INSTRUCTIONAL_BUTTONS");
-                    ScaleformMovieMethodAddParamInt(0);
-                    EndScaleformMovieMethod();
-
+                    var panelState = MovingSpeed * 2 + (FollowCamMode ? 1 : 0);
+                    if (panelState != helpPanelState)
+                    {
+                        helpPanelState = panelState;
+                        BuildHelpPanel();
+                    }
                     DrawScaleformMovieFullscreen(Scale, 255, 255, 255, 255, 0);
                 }
 
@@ -185,11 +147,19 @@ namespace vMenuClient
                 Game.DisableControlThisFrame(0, Control.Cover);
                 Game.DisableControlThisFrame(0, Control.MultiplayerInfo);
                 Game.DisableControlThisFrame(0, Control.VehicleHeadlight);
+                // The mouse wheel changes speed, not weapons.
+                Game.DisableControlThisFrame(0, Control.WeaponWheelNext);
+                Game.DisableControlThisFrame(0, Control.WeaponWheelPrev);
+                Game.DisableControlThisFrame(0, Control.SelectNextWeapon);
+                Game.DisableControlThisFrame(0, Control.SelectPrevWeapon);
                 if (Game.PlayerPed.IsInVehicle())
                 {
                     Game.DisableControlThisFrame(0, Control.VehicleRadioWheel);
+                    Game.DisableControlThisFrame(0, Control.VehicleSelectNextWeapon);
+                    Game.DisableControlThisFrame(0, Control.VehicleSelectPrevWeapon);
                 }
 
+                var xoff = 0.0f;
                 var yoff = 0.0f;
                 var zoff = 0.0f;
 
@@ -204,6 +174,18 @@ namespace vMenuClient
                         }
                     }
 
+                    if (!MenuController.IsAnyMenuOpen())
+                    {
+                        if (Game.IsDisabledControlJustPressed(0, Control.CursorScrollUp))
+                        {
+                            MovingSpeed = Math.Min(MovingSpeed + 1, speeds.Count - 1);
+                        }
+                        else if (Game.IsDisabledControlJustPressed(0, Control.CursorScrollDown))
+                        {
+                            MovingSpeed = Math.Max(MovingSpeed - 1, 0);
+                        }
+                    }
+
                     if (Game.IsDisabledControlPressed(0, Control.MoveUpOnly))
                     {
                         yoff = 0.5f;
@@ -212,13 +194,28 @@ namespace vMenuClient
                     {
                         yoff = -0.5f;
                     }
-                    if (!FollowCamMode && Game.IsDisabledControlPressed(0, Control.MoveLeftOnly))
+                    // Follow-cam: A/D strafe. Otherwise they turn.
+                    if (Game.IsDisabledControlPressed(0, Control.MoveLeftOnly))
                     {
-                        SetEntityHeading(Game.PlayerPed.Handle, GetEntityHeading(Game.PlayerPed.Handle) + 3f);
+                        if (FollowCamMode)
+                        {
+                            xoff = -0.5f;
+                        }
+                        else
+                        {
+                            SetEntityHeading(Game.PlayerPed.Handle, GetEntityHeading(Game.PlayerPed.Handle) + 3f);
+                        }
                     }
-                    if (!FollowCamMode && Game.IsDisabledControlPressed(0, Control.MoveRightOnly))
+                    if (Game.IsDisabledControlPressed(0, Control.MoveRightOnly))
                     {
-                        SetEntityHeading(Game.PlayerPed.Handle, GetEntityHeading(Game.PlayerPed.Handle) - 3f);
+                        if (FollowCamMode)
+                        {
+                            xoff = 0.5f;
+                        }
+                        else
+                        {
+                            SetEntityHeading(Game.PlayerPed.Handle, GetEntityHeading(Game.PlayerPed.Handle) - 3f);
+                        }
                     }
                     if (Game.IsDisabledControlPressed(0, Control.Cover))
                     {
@@ -239,7 +236,7 @@ namespace vMenuClient
                     moveSpeed *= 1.8f;
                 }
                 moveSpeed = moveSpeed / (1f / GetFrameTime()) * 60;
-                newPos = GetOffsetFromEntityInWorldCoords(noclipEntity, 0f, yoff * (moveSpeed + 0.3f), zoff * (moveSpeed + 0.3f));
+                newPos = GetOffsetFromEntityInWorldCoords(noclipEntity, xoff * (moveSpeed + 0.3f), yoff * (moveSpeed + 0.3f), zoff * (moveSpeed + 0.3f));
 
                 var heading = GetEntityHeading(noclipEntity);
                 SetEntityVelocity(noclipEntity, 0f, 0f, 0f);

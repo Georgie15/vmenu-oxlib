@@ -55,6 +55,22 @@ exports("getUserConfirmation", function(title, description)
 	return confirmed and confirmed == "confirm" or false
 end)
 
+---@class coordsDialog
+---@return string "x,y,z", or "" if cancelled
+exports("coordsDialog", function()
+	local coords = GetEntityCoords(cache.ped)
+	local function field(label, value)
+		return { type = "number", label = label, default = math.floor(value * 100 + 0.5) / 100, precision = 2, required = true }
+	end
+	local input = lib.inputDialog("Teleport To Coords", {
+		field("X", coords.x),
+		field("Y", coords.y),
+		field("Z", coords.z),
+	})
+	if not input or not input[1] or not input[2] or not input[3] then return "" end
+	return format("%.3f,%.3f,%.3f", input[1], input[2], input[3])
+end)
+
 ---@class copyToClipboard
 ---@param text string
 exports("copyToClipboard", function(text)

@@ -148,7 +148,8 @@ namespace vMenuClient.menus
             {
                 RightIcon = MenuItem.Icon.TICK
             };
-            var exportData = new MenuItem("Export/Import Data", "Coming soon (TM): the ability to import and export your saved data.");
+            var backupSaves = new MenuItem("Back Up My Saves", "Copies your saved vehicles, peds, MP characters, weapon loadouts and vehicle presets to the server, replacing your previous backup. Restore them after clearing your game cache or on another PC.");
+            var restoreSaves = new MenuItem("Restore My Saves", "Adds the saves from your server backup. Saves you already have with the same name are kept as they are.");
             var joinQuitNotifs = new MenuCheckboxItem("Join / Quit Notifications", "Receive notifications when someone joins or leaves the server.", JoinQuitNotifications);
             var deathNotifs = new MenuCheckboxItem("Death Notifications", "Receive notifications when someone dies or gets killed.", DeathNotifications);
             var nightVision = new MenuCheckboxItem("Toggle Night Vision", "Enable or disable night vision.", false);
@@ -309,64 +310,15 @@ namespace vMenuClient.menus
                     }
                     else if (item == tpToCoord)
                     {
-                        var x = await GetUserInput("Enter X coordinate.");
-                        if (string.IsNullOrEmpty(x))
-                        {
-                            Notify.Error(CommonErrors.InvalidInput);
-                            return;
-                        }
-                        var y = await GetUserInput("Enter Y coordinate.");
-                        if (string.IsNullOrEmpty(y))
-                        {
-                            Notify.Error(CommonErrors.InvalidInput);
-                            return;
-                        }
-                        var z = await GetUserInput("Enter Z coordinate.");
-                        if (string.IsNullOrEmpty(z))
+                        // One dialog for X, Y and Z, filled in with where you are now.
+                        var coords = await GetUserCoords();
+                        if (coords == null)
                         {
                             Notify.Error(CommonErrors.InvalidInput);
                             return;
                         }
 
-
-                        if (!float.TryParse(x, out var posX))
-                        {
-                            if (int.TryParse(x, out var intX))
-                            {
-                                posX = intX;
-                            }
-                            else
-                            {
-                                Notify.Error("You did not enter a valid X coordinate.");
-                                return;
-                            }
-                        }
-                        if (!float.TryParse(y, out var posY))
-                        {
-                            if (int.TryParse(y, out var intY))
-                            {
-                                posY = intY;
-                            }
-                            else
-                            {
-                                Notify.Error("You did not enter a valid Y coordinate.");
-                                return;
-                            }
-                        }
-                        if (!float.TryParse(z, out var posZ))
-                        {
-                            if (int.TryParse(z, out var intZ))
-                            {
-                                posZ = intZ;
-                            }
-                            else
-                            {
-                                Notify.Error("You did not enter a valid Z coordinate.");
-                                return;
-                            }
-                        }
-
-                        await TeleportToCoords(new Vector3(posX, posY, posZ), true);
+                        await TeleportToCoords(coords.Value, true);
                     }
                     else if (item == saveLocationBtn)
                     {
@@ -734,9 +686,11 @@ namespace vMenuClient.menus
                 menu.AddMenuItem(mpPedPreview);
             }
 
-            if (MainMenu.EnableExperimentalFeatures)
+            // client/backups.lua and server/backups.lua do the work; needs setr vmenu_backups true.
+            if (GetConvar("vmenu_backups", "false") == "true")
             {
-                menu.AddMenuItem(exportData);
+                menu.AddMenuItem(backupSaves);
+                menu.AddMenuItem(restoreSaves);
             }
             menu.AddMenuItem(saveSettings);
 
@@ -883,23 +837,10 @@ namespace vMenuClient.menus
             // Handle button presses.
             menu.OnItemSelect += (sender, item, index) =>
             {
-                // export data
-                if (item == exportData)
+                if (item == backupSaves || item == restoreSaves)
                 {
                     MenuController.CloseAllMenus();
-                    var vehicles = GetSavedVehicles();
-                    var normalPeds = StorageManager.GetSavedPeds();
-                    var mpPeds = StorageManager.GetSavedMpPeds();
-                    var weaponLoadouts = WeaponLoadouts.GetSavedWeapons();
-                    var data = JsonConvert.SerializeObject(new
-                    {
-                        saved_vehicles = vehicles,
-                        normal_peds = normalPeds,
-                        mp_characters = mpPeds,
-                        weapon_loadouts = weaponLoadouts
-                    });
-                    SendNuiMessage(data);
-                    SetNuiFocus(true, true);
+                    TriggerEvent(item == backupSaves ? "vMenu:backups:backup" : "vMenu:backups:restore");
                 }
                 // save settings
                 else if (item == saveSettings)

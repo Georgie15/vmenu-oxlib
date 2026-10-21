@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 using CitizenFX.Core;
 
@@ -27,6 +29,8 @@ namespace vMenuClient.menus
         // walks into an interior), so the network id is what actually
         // identifies the personal vehicle across its lifetime.
         public int CurrentPersonalVehicleNetId { get; private set; } = 0;
+        // Where the personal vehicle was last seen, for Set Waypoint To My Car once it's out of range.
+        public Vector3? LastKnownPosition { get; internal set; } = null;
 
         public Menu VehicleDoorsMenu { get; internal set; } = null;
 
@@ -41,6 +45,7 @@ namespace vMenuClient.menus
 
             // menu items
             currentVehicleInfoItem = new MenuItem("Current Personal Vehicle", "Drive a vehicle as the driver to set it as your personal vehicle.") { Label = "None", Enabled = false };
+            var waypointToVehicle = new MenuItem("Set Waypoint To My Car", "Sets a waypoint to your personal vehicle. If it is out of range, the waypoint shows where you last saw it.");
             var toggleEngine = new MenuItem("Toggle Engine", "Toggles the engine on or off, even when you're not inside of the vehicle. This does not work if someone else is currently using your vehicle.");
             var toggleLights = new MenuListItem("Set Vehicle Lights", new List<string>() { "Force On", "Force Off", "Reset" }, 0, "This will enable or disable your vehicle headlights, the engine of your vehicle needs to be running for this to work.");
             var toggleStance = new MenuListItem("Vehicle Stance", new List<string>() { "Default", "Lowered" }, 0, "Select stance for your Personal Vehicle.");
@@ -63,6 +68,20 @@ namespace vMenuClient.menus
 
             // This is always allowed if this submenu is created/allowed.
             menu.AddMenuItem(currentVehicleInfoItem);
+            menu.AddMenuItem(waypointToVehicle);
+
+            // Key bindings (Settings > Key Bindings > FiveM), unbound until the player picks a key.
+            var keyMappingId = MainMenu.GetKeyMappingId();
+            if (IsAllowed(Permission.PVLockDoors))
+            {
+                RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>((source, args, rawCommand) => ToggleLocksFromKey()), false);
+                RegisterKeyMapping($"vMenu:{keyMappingId}:PVLock", "vMenu PV Lock/Unlock", "keyboard", "");
+            }
+            if (IsAllowed(Permission.PVToggleEngine))
+            {
+                RegisterCommand($"vMenu:{keyMappingId}:PVEngine", new Action<int, List<object>, string>((source, args, rawCommand) => ToggleEngineFromKey()), false);
+                RegisterKeyMapping($"vMenu:{keyMappingId}:PVEngine", "vMenu PV Engine", "keyboard", "");
+            }
 
             // Add conditional features.
 
@@ -235,6 +254,13 @@ namespace vMenuClient.menus
             // Handle button presses.
             menu.OnItemSelect += async (sender, item, index) =>
             {
+                // Works out of range too, so it doesn't need the vehicle below.
+                if (item == waypointToVehicle)
+                {
+                    SetWaypointToPersonalVehicle();
+                    return;
+                }
+
                 if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
                 {
                     TryReacquireCurrentPersonalVehicle();
@@ -264,8 +290,7 @@ namespace vMenuClient.menus
 
                         if (item == toggleEngine)
                         {
-                            PressKeyFob(CurrentPersonalVehicle);
-                            SetVehicleEngineOn(CurrentPersonalVehicle.Handle, !CurrentPersonalVehicle.IsEngineRunning, true, true);
+                            ToggleEngine(CurrentPersonalVehicle);
                         }
 
                         else if (item == lockDoors || item == unlockDoors)
@@ -425,6 +450,81 @@ namespace vMenuClient.menus
             #endregion
         }
 
+        private const string NoPersonalVehicleMessage = "You have not yet selected a personal vehicle, or your vehicle has been deleted. Set a personal vehicle before you can use these options.";
+        private const string NoControlMessage = "You currently can't control this vehicle. Is someone else currently driving your car? Please try again after making sure other players are not controlling your vehicle.";
+
+        private static void ToggleEngine(Vehicle veh)
+        {
+            PressKeyFob(veh);
+            SetVehicleEngineOn(veh.Handle, !veh.IsEngineRunning, true, true);
+        }
+
+        /// <summary>
+        /// The personal vehicle, once it's in range and this client controls it; null (with a message)
+        /// otherwise. The key bindings check the same things as the menu items.
+        /// </summary>
+        private async Task<Vehicle> GetControlledPersonalVehicle()
+        {
+            if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
+            {
+                TryReacquireCurrentPersonalVehicle();
+            }
+            if (CurrentPersonalVehicle == null || !CurrentPersonalVehicle.Exists())
+            {
+                Notify.Error(NoPersonalVehicleMessage);
+                return null;
+            }
+            if (!await RequestEntityControl(CurrentPersonalVehicle.Handle))
+            {
+                Notify.Error(NoControlMessage);
+                return null;
+            }
+            return CurrentPersonalVehicle;
+        }
+
+        private async void ToggleEngineFromKey()
+        {
+            var veh = await GetControlledPersonalVehicle();
+            if (veh != null)
+            {
+                ToggleEngine(veh);
+            }
+        }
+
+        private async void ToggleLocksFromKey()
+        {
+            var veh = await GetControlledPersonalVehicle();
+            if (veh != null)
+            {
+                PressKeyFob(veh);
+                LockOrUnlockDoors(veh, !GetVehicleDoorsLockedForPlayer(veh.Handle, Game.PlayerPed.Handle));
+            }
+        }
+
+        private void SetWaypointToPersonalVehicle()
+        {
+            if (CurrentPersonalVehicle != null && !CurrentPersonalVehicle.Exists())
+            {
+                TryReacquireCurrentPersonalVehicle();
+            }
+
+            if (CurrentPersonalVehicle != null && CurrentPersonalVehicle.Exists())
+            {
+                var position = CurrentPersonalVehicle.Position;
+                SetNewWaypoint(position.X, position.Y);
+                Notify.Success("Waypoint set to your personal vehicle.");
+            }
+            else if (CurrentPersonalVehicle != null && LastKnownPosition.HasValue)
+            {
+                SetNewWaypoint(LastKnownPosition.Value.X, LastKnownPosition.Value.Y);
+                Notify.Info("Your personal vehicle is out of range. The waypoint shows where you last saw it.");
+            }
+            else
+            {
+                Notify.Error(NoPersonalVehicleMessage);
+            }
+        }
+
         private void UpdateCurrentVehicleLabel()
         {
             if (currentVehicleInfoItem == null)
@@ -490,6 +590,7 @@ namespace vMenuClient.menus
             }
 
             CurrentPersonalVehicle = vehicle;
+            LastKnownPosition = vehicle.Position;
             CurrentPersonalVehicle.PreviouslyOwnedByPlayer = true;
             CurrentPersonalVehicle.IsPersistent = true;
             CurrentPersonalVehicleNetId = NetworkGetEntityIsNetworked(vehicle.Handle) ? vehicle.NetworkId : 0;
@@ -524,6 +625,7 @@ namespace vMenuClient.menus
             }
             CurrentPersonalVehicle = null;
             CurrentPersonalVehicleNetId = 0;
+            LastKnownPosition = null;
             TriggerServerEvent("vMenu:SetPersonalVehicle", 0);
             UpdateCurrentVehicleLabel();
         }

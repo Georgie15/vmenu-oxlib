@@ -64,9 +64,44 @@ namespace vMenuClient.menus
         public float VehiclePowerMultiplierAmount { get; private set; } = 2f;
 
         private readonly Dictionary<MenuItem, int> vehicleExtras = new();
-        // The extras menu is rebuilt on every open; its Go Back item is handled by one handler.
+        // The extras menu is rebuilt on every open; its Go Back and preset items are handled by one handler.
         private MenuItem extrasBackButton;
+        private MenuItem savePresetButton;
+        private MenuItem clearPresetButton;
+        // Same for the Liveries menu.
+        private MenuListItem liveryListItem;
+        private MenuItem liveriesBackButton;
         #endregion
+
+        /// <summary>
+        /// Saves the current vehicle's extras and livery as the player's preset for its model.
+        /// </summary>
+        private void SaveVehiclePreset()
+        {
+            var veh = GetVehicle();
+            if (veh == null || !veh.Exists() || veh.Driver != Game.PlayerPed)
+            {
+                Notify.Error("You have to be the driver of a vehicle to save a preset.");
+                return;
+            }
+
+            SetVehicleModKit(veh.Handle, 0);
+            var preset = VehiclePreset.Capture(veh.ExtraExists, veh.IsExtraOn,
+                GetVehicleLiveryCount(veh.Handle) > 0 ? GetVehicleLivery(veh.Handle) : -1,
+                GetNumVehicleMods(veh.Handle, 48) > 0 ? GetVehicleMod(veh.Handle, 48) : -1);
+            SetResourceKvp(VehiclePreset.KeyFor((uint)veh.Model.Hash), preset.ToJson());
+            Notify.Success("Saved. This model now spawns with these extras and this livery.");
+
+            if (clearPresetButton == null)
+            {
+                clearPresetButton = new MenuItem("Clear My Preset", "Stops applying your saved extras and livery when you spawn this model.");
+                // Keep Go Back last.
+                VehicleComponentsMenu.RemoveMenuItem(extrasBackButton);
+                VehicleComponentsMenu.AddMenuItem(clearPresetButton);
+                VehicleComponentsMenu.AddMenuItem(extrasBackButton);
+                VehicleComponentsMenu.RefreshIndex();
+            }
+        }
 
         #region CreateMenu()
         /// <summary>
@@ -1638,6 +1673,8 @@ namespace vMenuClient.menus
                         if (veh.Driver == Game.PlayerPed)
                         {
                             VehicleLiveriesMenu.ClearMenuItems();
+                            liveryListItem = null;
+                            liveriesBackButton = null;
                             SetVehicleModKit(veh.Handle, 0);
                             var liveryCount = GetVehicleLiveryCount(veh.Handle);
 
@@ -1650,16 +1687,8 @@ namespace vMenuClient.menus
                                     livery = GetLabelText(livery) != "NULL" ? GetLabelText(livery) : $"Livery #{i}";
                                     liveryList.Add(livery);
                                 }
-                                var liveryListItem = new MenuListItem("Set Livery", liveryList, GetVehicleLivery(veh.Handle), "Choose a livery for this vehicle.");
+                                liveryListItem = new MenuListItem("Set Livery", liveryList, GetVehicleLivery(veh.Handle), "Choose a livery for this vehicle.");
                                 VehicleLiveriesMenu.AddMenuItem(liveryListItem);
-                                VehicleLiveriesMenu.OnListIndexChange += (_menu, listItem, oldIndex, newIndex, itemIndex) =>
-                                {
-                                    if (listItem == liveryListItem)
-                                    {
-                                        veh = GetVehicle();
-                                        SetVehicleLivery(veh.Handle, newIndex);
-                                    }
-                                };
                                 VehicleLiveriesMenu.RefreshIndex();
                                 //VehicleLiveriesMenu.UpdateScaleform();
                             }
@@ -1668,19 +1697,11 @@ namespace vMenuClient.menus
                                 Notify.Error("This vehicle does not have any liveries.");
                                 VehicleLiveriesMenu.CloseMenu();
                                 menu.OpenMenu();
-                                var backBtn = new MenuItem("No Liveries Available :(", "Click me to go back.")
+                                liveriesBackButton = new MenuItem("No Liveries Available :(", "Click me to go back.")
                                 {
                                     Label = "Go Back"
                                 };
-                                VehicleLiveriesMenu.AddMenuItem(backBtn);
-                                VehicleLiveriesMenu.OnItemSelect += (sender2, item2, index2) =>
-                                {
-                                    if (item2 == backBtn)
-                                    {
-                                        VehicleLiveriesMenu.GoBack();
-                                    }
-                                };
-
+                                VehicleLiveriesMenu.AddMenuItem(liveriesBackButton);
                                 VehicleLiveriesMenu.RefreshIndex();
                                 //VehicleLiveriesMenu.UpdateScaleform();
                             }
@@ -1694,6 +1715,26 @@ namespace vMenuClient.menus
                     {
                         Notify.Error("You have to be the driver of a vehicle to access this menu.");
                     }
+                }
+            };
+
+            // Registered once: these used to be added on every open of the Liveries menu.
+            VehicleLiveriesMenu.OnListIndexChange += (_menu, listItem, oldIndex, newIndex, itemIndex) =>
+            {
+                if (listItem == liveryListItem)
+                {
+                    var veh = GetVehicle();
+                    if (veh != null && veh.Exists())
+                    {
+                        SetVehicleLivery(veh.Handle, newIndex);
+                    }
+                }
+            };
+            VehicleLiveriesMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item == liveriesBackButton)
+                {
+                    VehicleLiveriesMenu.GoBack();
                 }
             };
             #endregion
@@ -1734,6 +1775,9 @@ namespace vMenuClient.menus
                         //VehicleComponentsMenu.UpdateScaleform();
                     }
 
+                    savePresetButton = null;
+                    clearPresetButton = null;
+
                     // Get the vehicle.
                     var veh = GetVehicle();
 
@@ -1750,8 +1794,8 @@ namespace vMenuClient.menus
                             extraLabels = new Dictionary<int, string>();
                         }
 
-                        // Loop through all possible extra ID's (AFAIK: 0-14).
-                        for (var extra = 0; extra < 14; extra++)
+                        // Extras 0-19, the range saved vehicles and presets store (this stopped at 13).
+                        for (var extra = 0; extra < VehiclePreset.ExtraCount; extra++)
                         {
                             // If this extra exists...
                             if (veh.ExtraExists(extra))
@@ -1774,6 +1818,18 @@ namespace vMenuClient.menus
 
                                 // Add it's ID to the dictionary.
                                 vehicleExtras[extraCheckbox] = extra;
+                            }
+                        }
+
+                        SetVehicleModKit(veh.Handle, 0);
+                        if (vehicleExtras.Count > 0 || GetVehicleLiveryCount(veh.Handle) > 0 || GetNumVehicleMods(veh.Handle, 48) > 0)
+                        {
+                            savePresetButton = new MenuItem("Save As My Preset", "Saves these extras and the current livery for this model. They are applied whenever you spawn it from the spawner or by name. Saved vehicles keep their own setup.");
+                            VehicleComponentsMenu.AddMenuItem(savePresetButton);
+                            if (!string.IsNullOrEmpty(GetResourceKvpString(VehiclePreset.KeyFor((uint)veh.Model.Hash))))
+                            {
+                                clearPresetButton = new MenuItem("Clear My Preset", "Stops applying your saved extras and livery when you spawn this model.");
+                                VehicleComponentsMenu.AddMenuItem(clearPresetButton);
                             }
                         }
 
@@ -1803,6 +1859,22 @@ namespace vMenuClient.menus
                 if (item == extrasBackButton)
                 {
                     VehicleComponentsMenu.GoBack();
+                }
+                else if (item == savePresetButton)
+                {
+                    SaveVehiclePreset();
+                }
+                else if (item == clearPresetButton)
+                {
+                    var veh = GetVehicle();
+                    if (veh != null && veh.Exists())
+                    {
+                        DeleteResourceKvp(VehiclePreset.KeyFor((uint)veh.Model.Hash));
+                        Notify.Success("Your preset for this model was cleared.");
+                    }
+                    VehicleComponentsMenu.RemoveMenuItem(clearPresetButton);
+                    clearPresetButton = null;
+                    VehicleComponentsMenu.RefreshIndex();
                 }
             };
 
@@ -1840,7 +1912,7 @@ namespace vMenuClient.menus
                             continue;
                         }
                     }
-                    else if (item.Text != "Go Back")
+                    else if (item.Text != "Go Back" && item != savePresetButton && item != clearPresetButton)
                     {
                         item.Enabled = !isTooDamaged;
                     }

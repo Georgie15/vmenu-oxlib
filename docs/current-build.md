@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: bugs and performance release C |
-| `build/vMenu/vMenuClient.net.dll` | `1bc1f3e6916fbd062665c67befd603c7943febfdb98cec98b7206b859ae37d09` |
+| Latest change | October 21, 2026: player features release D |
+| `build/vMenu/vMenuClient.net.dll` | `c84a9ae894dcde1b851ecc7287b0bb2286a0277f57edcf4302940be48abc9c00` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -559,3 +559,139 @@ version (`2.0.0-psrp`) and author. `fx_version` is unchanged.
 - Open a few vehicle classes in the spawner: each lists its vehicles.
 - Staff blips still show the right sprite, colour, name and heading.
 - `resmon`: vMenu's client time is no higher than on release B.
+
+## October 21, 2026: player features release D (client DLL, Lua, database, config)
+
+Built on the local `next` branch after release C, and merged into `main` only
+after release C was confirmed on live. Client only: the server DLL is release B's.
+The backup server code is Lua.
+
+**Back up and restore saves** (Misc Settings, replacing the hidden
+experimental "Export/Import Data" stub):
+- "Back Up My Saves" copies your saved vehicles and their categories, saved
+  peds, MP characters and their categories, weapon loadouts, default character
+  and loadout, and vehicle presets to the server. Menu settings and temporary
+  keys are not included. It shows how many saves it will send and which backup it
+  replaces, and asks first.
+- "Restore My Saves" adds every save from your backup that you don't have. A save
+  with the same name is never overwritten. It reports how many were added and
+  how many were kept. Reopen the menu to see them.
+- One backup per Rockstar `license`, in the new `vmenu_backups` table. Upload and
+  download use latent events.
+- The server only accepts known save keys with text values, at most 2 MB and
+  5000 saves, and logs a refused upload with the player's name. Limits: one
+  backup a minute and one restore every 30 s per license.
+- `client/backups.lua` and `server/backups.lua` do the work. The items only show
+  with `setr vmenu_backups true`.
+
+**Vehicle presets** (Vehicle Options > Vehicle Extras):
+- "Save As My Preset" stores the vehicle's extras, livery and mod-kit livery for
+  that model. "Clear My Preset" removes it.
+- The preset is applied whenever you spawn that model from the spawner or by
+  name. Saved vehicles keep their own setup.
+- LEO spawn codes (`vMenu:ApplyAllVehicleExtras`) use your preset instead of
+  "every extra on". The siren still comes on.
+- Extras the vehicle doesn't have, and liveries out of range, are skipped.
+- The Extras menu now lists extras 0-19, the range saves already store. It
+  stopped at 13, so extras 14-19 could not be changed.
+
+**Noclip:**
+- A/D strafe in follow-cam mode. They still turn in the other mode.
+- The mouse wheel raises and lowers the speed. Shift still cycles it. The wheel
+  no longer switches weapons while noclipping.
+- The help panel shows the real key for Toggle NoClip. The old hint left out
+  the key-mapping bit, so it didn't show your key.
+- The help panel is rebuilt only when the speed or camera mode changes, not
+  every frame.
+
+**Personal vehicle:**
+- New key bindings "vMenu PV Lock/Unlock" and "vMenu PV Engine", unbound by
+  default. Set them in Settings > Key Bindings > FiveM. They need the same
+  permissions as the menu items, and work while the vehicle is in range.
+- New item "Set Waypoint To My Car". Out of range, it marks where you last saw
+  the car.
+
+**Teleport To Coords** asks for X, Y and Z in one dialog, filled in with your
+current position (new `coordsDialog` export in `client/exports.lua`).
+
+**Vehicle Liveries menu.** It added another livery handler and another Go Back
+handler every time it opened. They are now registered once, like the Extras
+menu's in release C. Nothing visible changes.
+
+**`permissions.cfg`** (besides the new convar):
+- `add_ace group.communitymanager "vMenu.PlayerOptions.God" true` now says
+  `allow`. An ACE is `allow` or `deny`, so the line wasn't a valid grant.
+  vMenu already gave them God through `PlayerOptions.All`. Anything that checks
+  this exact permission (psrp_telemetry, perhaps) now sees it as allowed.
+- A repeated `add_ace group.georgiespecial "vMenu.WeaponOptions.Menu" allow` is
+  removed. No effect.
+- Left as they are, by the owner's choice: `group.weaponperms` (the Mk2
+  whitelist) has a member but no grants here, and `group.mod` has none either.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `c84a9ae894dcde1b851ecc7287b0bb2286a0277f57edcf4302940be48abc9c00` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release C's client DLL shows only the members above:
+  `VehiclePreset`, `ApplyVehiclePreset`, `GetUserCoords`, the noclip help panel
+  and handler, the personal-vehicle keys and waypoint, the Extras menu, and the
+  removed export stub. Against the first build of this release, the Liveries fix
+  changes only `VehicleOptions.CreateMenu` and its closures.
+- New tests:
+  - `lua tests/save-backups/test_backups.lua`: runs both backup scripts against
+    fake FiveM, ox_lib and oxmysql. Covers what goes into a backup, cancel, size
+    and count limits, every refusal, the rate limits, convar, missing license,
+    database errors, and that restoring never overwrites a save and ignores
+    non-save keys. Breaking the merge or the server key check makes it fail.
+  - `dotnet run --project tests/vehicle-presets`: capture, apply (missing extras,
+    livery range), storage round trip, and where presets are applied.
+  - `python tests/client-features/test_client_features.py`: compiles the noclip
+    key hint and the coordinates parser (checked under a comma-decimal locale),
+    and checks the noclip, key binding, waypoint, teleport, backup and Liveries
+    menu wiring.
+- `tests/vehicle-spawn-placement` now also checks that presets apply to fresh
+  spawns and not to saved vehicles.
+- `tests/permission-table` now also checks that every grant in the packaged
+  `permissions.cfg` says allow or deny and none is repeated. It fails on the old
+  `true` line.
+- All sixteen tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy:**
+1. Hash the live DLLs. The client must be release C's
+   (`1bc1f3e6916fbd062665c67befd603c7943febfdb98cec98b7206b859ae37d09`) and the
+   server release B's (`003e0932…`). If either differs, stop.
+2. Run the `vmenu_backups` statement from `database.sql` once. It only creates
+   the table if it is missing.
+3. Make three edits to the live `permissions.cfg` (the repo copy has them):
+   - Add, below `setr vmenu_vehiclecodes true`:
+     ```
+     setr vmenu_backups true
+     ```
+   - Change `add_ace group.communitymanager "vMenu.PlayerOptions.God" true` to
+     end in `allow`.
+   - Delete the second `add_ace group.georgiespecial "vMenu.WeaponOptions.Menu" allow`.
+4. Copy `vMenuClient.net.dll`, `client/backups.lua`, `client/exports.lua` and
+   `server/backups.lua`.
+5. Restart the server, or run `setr vmenu_backups true` in the console and then
+   restart the resource. The console should print "Save backups are enabled."
+   It names the problem instead if oxmysql or the table is missing.
+
+**Runtime acceptance:**
+- Misc Settings shows Back Up My Saves and Restore My Saves. Back up, delete a
+  saved vehicle, restore: it comes back, and your other saves are unchanged.
+- Back up twice within a minute: the second one is refused.
+- In a police car, set some extras and a livery, Save As My Preset, then spawn
+  the same model from the spawner: it has them. A saved vehicle of that model
+  keeps its own setup. A LEO spawn code uses the preset.
+- Noclip: A/D strafe in follow-cam, the wheel changes the speed shown in the
+  help panel, and the panel shows your Toggle NoClip key.
+- Bind the PV keys in Settings > Key Bindings > FiveM: they lock/unlock and start
+  or stop your personal vehicle. Set Waypoint To My Car marks it on the map.
+- Teleport To Coords opens one dialog with your position filled in.
+- Open Vehicle Liveries several times and change the livery: it changes once
+  per press, and Go Back on a car without liveries goes back one menu.
+- A community manager's god mode still works.
+- `resmon`: vMenu's client time is no higher than on release C.
