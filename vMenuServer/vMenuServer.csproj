@@ -5,7 +5,8 @@
     <Configurations>Release;Debug</Configurations>
     <AssemblyName>vMenuServer.net</AssemblyName>
     <TargetName>$(AssemblyName)</TargetName>
-    <OutputPath>..\build\vMenu\</OutputPath>
+    <!-- Never build into build/vMenu: copy the DLL in by hand (AGENTS.md). -->
+    <OutputPath>bin\$(Configuration)\</OutputPath>
     <DefineConstants>SERVER</DefineConstants>
 	  <LangVersion>latest</LangVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -32,27 +33,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="config\addons.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="config\pedpack.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="config\locations.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="config\permissions.cfg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="storage.html">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="System.Numerics.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
     <EditorConfigFiles Remove="D:\tomgr\Documents\GitHub-Repos\vMenu\vMenu\vMenuServer\.editorconfig" />
   </ItemGroup>
 
@@ -60,13 +40,4 @@
     <None Include="D:\tomgr\Documents\GitHub-Repos\vMenu\vMenu\vMenuServer\.editorconfig" />
   </ItemGroup>
 
-  <ItemGroup Label="PSRPStaminaBridge">
-    <None Update="server\staminaTelemetry.lua">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <None Update="server\vehicleIdentity.lua"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
-    <None Update="config\vehicleIdentityModels.json"><CopyToOutputDirectory>Always</CopyToOutputDirectory></None>
-  </ItemGroup>
 </Project>

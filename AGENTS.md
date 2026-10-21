@@ -18,22 +18,19 @@ Instructions for any AI agent or developer working in this repository.
 
 ## Building
 
-- Build only the client, into a temporary folder, then copy just the DLL in:
-  `dotnet build vMenu/vMenuClient.csproj -c Release --nologo --output <temp dir>`,
-  then copy `<temp dir>/vMenuClient.net.dll` to `build/vMenu/`.
-- Do not build the solution or the server project into `build/vMenu/`. Both
-  projects output there, and a server build copies the older
-  `vMenuServer/config/*` over the curated `build/vMenu/config/*`. Build the
-  server into a temporary folder too.
+- Builds go to each project's `bin/Release/` and never touch the package:
+  `dotnet build vMenu/vMenuClient.csproj -c Release --nologo`, or
+  `vMenuServer/vMenuServer.csproj` for the server. Copy only the DLL you changed
+  into `build/vMenu/`.
 - The committed server DLL is built from this source (release B). Before
-  changing the server, compare a temp build with
-  `dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll <temp dir>/vMenuServer.net.dll`.
-  Afterwards the report must show only your intended changes. Shipping a new
-  server DLL needs the owner's OK.
+  changing the server, compare a build with
+  `dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll vMenuServer/bin/Release/vMenuServer.net.dll`.
+  Afterwards the report must show only your intended changes. The same works for
+  the client DLL. Shipping a new server DLL needs the owner's OK.
 - After any build, run `git status` and restore every file you did not mean to
   change.
-- Lua and config in `build/vMenu/` are the deployed copies. Edit them there. If
-  the same file also exists under `vMenuServer/`, update both.
+- Lua, config, `storage.html` and every other deployed file exist only in
+  `build/vMenu/`. Edit them there.
 
 ## Tests
 

@@ -439,3 +439,22 @@ and that may be `vMenu.OnlinePlayers.Teleport`.
   only remove passengers from your own personal vehicle".
 - A moderator's Clear Area works.
 - No new errors in the server console.
+
+## October 21, 2026: build and repo cleanup (no package change)
+
+Nothing to deploy. The DLLs and every file in `build/vMenu/` are unchanged.
+
+- **The build trap is gone.** Both projects now build into their own
+  `bin/Release/`, so a plain `dotnet build` can no longer overwrite the package.
+  The server project no longer copies config, Lua, `storage.html` or
+  `System.Numerics.dll` anywhere.
+- **Stale copies deleted.** These were identical to the package copy, or (for
+  `locations.json` and `permissions.cfg`) older versions of it:
+  `vMenuServer/config/*`, `vMenuServer/server/*.lua`, `vMenuServer/storage.html`
+  and `vMenuServer/System.Numerics.dll`. `build/vMenu/` is now the only copy of
+  every deployed file.
+- **Dead code deleted.** These were comment-only: the flares and plane bombs
+  stub, the old weapon save/restore, `IntToFloat`, and the old noclip key handler.
+
+Proof: `tools/ilcompare` with `ILCOMPARE_RAW=1` shows 0 differences for both
+DLLs against the release B package (only the git hash differs).

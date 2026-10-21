@@ -5,7 +5,8 @@
     <Configurations>Release;Debug</Configurations>
     <AssemblyName>vMenuClient.net</AssemblyName>
     <TargetName>$(AssemblyName)</TargetName>
-    <OutputPath>..\build\vMenu\</OutputPath>
+    <!-- Never build into build/vMenu: copy the DLL in by hand (AGENTS.md). -->
+    <OutputPath>bin\$(Configuration)\</OutputPath>
     <DefineConstants>CLIENT</DefineConstants>
     <LangVersion>latest</LangVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

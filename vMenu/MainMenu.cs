@@ -588,34 +588,7 @@ namespace vMenuClient
                     Notify.Alert("You must save your ped first before exiting, or click the ~r~Exit Without Saving~s~ button.");
                 }
 
-                //if (Game.CurrentInputMode == InputMode.MouseAndKeyboard)
-                //{
-                //    if (Game.IsControlJustPressed(0, (Control)NoClipKey) && IsAllowed(Permission.NoClip) && UpdateOnscreenKeyboard() != 0)
-                //    {
-                //        if (Game.PlayerPed.IsInVehicle())
-                //        {
-                //            var veh = GetVehicle();
-                //            if (veh != null && veh.Exists() && veh.Driver == Game.PlayerPed)
-                //            {
-                //                NoClipEnabled = !NoClipEnabled;
-                //            }
-                //            else
-                //            {
-                //                NoClipEnabled = false;
-                //                Notify.Error("This vehicle does not exist (somehow) or you need to be the driver of this vehicle to enable noclip!");
-                //            }
-                //        }
-                //        else
-                //        {
-                //            NoClipEnabled = !NoClipEnabled;
-                //        }
-                //    }
-                //}
-
                 #endregion
-
-                // Menu toggle button.
-                //Game.DisableControlThisFrame(0, MenuToggleKey);
             }
         }
 

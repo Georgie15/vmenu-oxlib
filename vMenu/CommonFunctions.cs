@@ -2723,77 +2723,6 @@ namespace vMenuClient
         }
         #endregion
 
-        #region Save and restore weapon loadouts when changing models
-        //private struct WeaponInfo
-        //{
-        //    public int Ammo;
-        //    public uint Hash;
-        //    public List<uint> Components;
-        //    public int Tint;
-        //}
-
-        //private static List<WeaponInfo> weaponsList = new List<WeaponInfo>();
-
-        ///// <summary>
-        ///// Saves all current weapons and components.
-        ///// </summary>
-        //public static async Task SaveWeaponLoadout()
-        //{
-        //    weaponsList.Clear();
-        //    foreach (ValidWeapon vw in ValidWeapons.WeaponList)
-        //    {
-        //        if (HasPedGotWeapon(Game.PlayerPed.Handle, vw.Hash, false))
-        //        {
-        //            List<uint> components = new List<uint>();
-        //            if (vw.Components != null && vw.Components.Count > 0)
-        //            {
-        //                foreach (var c in vw.Components)
-        //                {
-        //                    if (HasPedGotWeaponComponent(Game.PlayerPed.Handle, vw.Hash, c.Value))
-        //                    {
-        //                        components.Add(c.Value);
-        //                    }
-        //                }
-        //            }
-        //            weaponsList.Add(new WeaponInfo()
-        //            {
-        //                Ammo = GetAmmoInPedWeapon(Game.PlayerPed.Handle, vw.Hash),
-        //                Components = components,
-        //                Hash = vw.Hash,
-        //                Tint = GetPedWeaponTintIndex(Game.PlayerPed.Handle, vw.Hash)
-        //            });
-
-        //        }
-        //    }
-        //    await Delay(0);
-        //}
-
-        ///// <summary>
-        ///// Restores all weapons and components
-        ///// </summary>
-        //public static async void RestoreWeaponLoadout()
-        //{
-        //    await Delay(0);
-        //    if (weaponsList.Count > 0)
-        //    {
-        //        foreach (WeaponInfo wi in weaponsList)
-        //        {
-        //            GiveWeaponToPed(Game.PlayerPed.Handle, wi.Hash, wi.Ammo, false, false);
-        //            if (wi.Components.Count > 0)
-        //            {
-        //                foreach (var wc in wi.Components)
-        //                {
-        //                    GiveWeaponComponentToPed(Game.PlayerPed.Handle, wi.Hash, wc);
-        //                }
-        //            }
-        //            // sometimes causes problems if this is not manually set.
-        //            SetPedAmmo(Game.PlayerPed.Handle, wi.Hash, wi.Ammo);
-        //            SetPedWeaponTintIndex(Game.PlayerPed.Handle, wi.Hash, wi.Tint);
-        //        }
-        //    }
-        //}
-        #endregion
-
         #region Get "Header" Menu Item
         /// <summary>
         /// Get a header menu item (text-centered, disabled MenuItem)
@@ -3622,60 +3551,6 @@ namespace vMenuClient
 
             await Delay(0);
         }
-        #endregion
-
-        #region Encoded float to normal float
-        ///// <summary>
-        ///// Converts an IEEE 754 (int encoded) floating-point to a real float value.
-        ///// </summary>
-        ///// <param name="input"></param>
-        ///// <returns></returns>
-        //public static float IntToFloat(int input)
-        //{
-        //    // This function is based on the 'hex2float' snippet found here for Lua:
-        //    // https://stackoverflow.com/a/19996852
-
-        //    //string d = input.ToString("X8");
-
-        //    var s1 = (char)int.Parse(d.Substring(0, 2), System.Globalization.NumberStyles.HexNumber);
-        //    var s2 = (char)int.Parse(d.Substring(2, 2), System.Globalization.NumberStyles.HexNumber);
-        //    var s3 = (char)int.Parse(d.Substring(4, 2), System.Globalization.NumberStyles.HexNumber);
-        //    var s4 = (char)int.Parse(d.Substring(6, 2), System.Globalization.NumberStyles.HexNumber);
-
-        //    var b1 = BitConverter.GetBytes(s1)[0];
-        //    var b2 = BitConverter.GetBytes(s2)[0];
-        //    var b3 = BitConverter.GetBytes(s3)[0];
-        //    var b4 = BitConverter.GetBytes(s4)[0];
-
-        //    int sign = b1 > 0x7F ? -1 : 1;
-        //    int expo = ((b1 % 0x80) * 0x2) + (b2 / 0x80);
-        //    float mant = ((b2 % 0x80) * 0x100 + b3) * 0x100 + b4;
-
-        //    float n;
-        //    if (mant == 0 && expo == 0)
-        //    {
-        //        n = sign * 0.0f;
-        //    }
-        //    else if (expo == 0xFF)
-        //    {
-        //        if (mant == 0)
-        //        {
-        //            n = (float)((double)sign * Math.E);
-        //        }
-        //        else
-        //        {
-        //            n = 0.0f;
-        //        }
-        //    }
-        //    else
-        //    {
-        //        double left = 1.0 + mant / 0x800000;
-        //        int right = expo - 0x7F;
-        //        float other = (float)left * ((float)right * (float)right);
-        //        n = (float)sign * (float)other;
-        //    }
-        //    return n;
-        //}
         #endregion
 
         #region save player location to the server locations.json file
