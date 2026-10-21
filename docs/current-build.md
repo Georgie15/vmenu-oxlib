@@ -271,11 +271,27 @@ your last vehicle visible every frame, whatever had hidden it.
      `client/vehicleCodes.lua`
    - `config/config_client.lua`
    - `server/oufitCodes.lua`, `server/vehicleCodes.lua`, `server/versionCheck.lua`
-3. In the live `permissions.cfg`, change only the line
-   `setr keep_player_head_props true` to `false`. Deploy it together with
-   `client/exports.lua`: the new Lua with the old `true` would stop hats falling
-   off.
+   - `config/vehicleIdentityModels.json`. Live never had it, although live already
+     runs `server/vehicleIdentity.lua`, which reads it. With it, CAD identity
+     tickets for stock vehicles check the vehicle-category permission instead of
+     spawn-by-name. The owner chose to add it.
+3. `permissions.cfg`: the repo copy is the live file
+   (`c5bcaee2a7abb016ac89aea330c9350fd55a89092354400a31411277a657f864`, checked
+   October 21) with one change, `setr keep_player_head_props true` to `false`.
+   - Either make that one-line change on live, or copy the repo file. Copying it
+     is only safe if the live file still has that hash.
+   - Deploy it together with `client/exports.lua`: the new Lua with the old
+     `true` would stop hats falling off.
 4. Restart the resource.
+
+Correction made before deploy: the repo's `permissions.cfg` had come from the
+September 27 snapshot and did not match live.
+- It gave the torque multiplier to `group.srmanagement` and `group.film`; live
+  gives it to `group.communitymanager`.
+- It gave the power multiplier to `group.film`, which live doesn't.
+- It lacked live's infinite fuel for `group.supreme`.
+
+It now matches live.
 
 **Runtime acceptance:**
 - F1 and noclip open.
