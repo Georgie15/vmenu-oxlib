@@ -193,17 +193,6 @@ namespace vMenuServer
             "HALLOWEEN"
         };
 
-        // ---- Anti-spam for vMenu:RequestPlayerList ----
-        private const int PLAYERLIST_REQ_WINDOW_MS = 2000;   // 2s window
-        private const int PLAYERLIST_REQ_MAX_BURST = 3;      // allow up to 3 requests per window
-        private readonly Dictionary<string, Counter> _playerListReqs = new Dictionary<string, Counter>();
-
-        // ---- Anti-spam for vMenu:SendMessageToPlayer ----
-        private const int PM_REQ_WINDOW_MS = 2000;   // 2s window
-        private const int PM_REQ_MAX_BURST = 3;      // max 3 PMs per window
-        private const int PM_MAX_LEN = 300;          // clamp PM length
-        private readonly Dictionary<string, Counter> _pmReqs = new Dictionary<string, Counter>();
-
         // ---- Anti-spam for vMenu:ClearArea ----
         private const int CLEAR_REQ_WINDOW_MS = 2000;
         private const int CLEAR_REQ_MAX_BURST = 2;
@@ -237,19 +226,6 @@ namespace vMenuServer
             }
             else
             {
-                // Add event handlers.
-                EventHandlers.Add("vMenu:GetPlayerIdentifiers", new Action<int, NetworkCallbackDelegate>((TargetPlayer, CallbackFunction) =>
-                {
-                    var data = new List<string>();
-                    Players[TargetPlayer].Identifiers.ToList().ForEach(e =>
-                    {
-                        if (!e.Contains("ip:"))
-                        {
-                            data.Add(e);
-                        }
-                    });
-                    CallbackFunction(JsonConvert.SerializeObject(data));
-                }));
                 // check addons file for errors
                 var addons = LoadResourceFile(GetCurrentResourceName(), "config/addons.json") ?? "{}";
                 try
@@ -319,29 +295,6 @@ namespace vMenuServer
                         else
                         {
                             Players[source].TriggerEvent("chatMessage", $"vMenu Debug mode is now set to: {DebugMode}.");
-                        }
-                        return;
-                    }
-                    else if (args[0].ToString().ToLower() == "unban" && (source < 1))
-                    {
-                        if (args.Count() > 1 && !string.IsNullOrEmpty(args[1].ToString()))
-                        {
-                            var uuid = args[1].ToString().Trim();
-                            var bans = BanManager.GetBanList();
-                            var banRecord = bans.Find(b => { return b.uuid.ToString() == uuid; });
-                            if (banRecord != null)
-                            {
-                                BanManager.RemoveBan(banRecord);
-                                Debug.WriteLine("Player has been successfully unbanned.");
-                            }
-                            else
-                            {
-                                Debug.WriteLine($"Could not find a banned player with the provided uuid '{uuid}'.");
-                            }
-                        }
-                        else
-                        {
-                            Debug.WriteLine("You did not specify a player to unban, you must enter the FULL playername. Usage: vmenuserver unban \"playername\"");
                         }
                         return;
                     }
@@ -442,78 +395,11 @@ namespace vMenuServer
                             Debug.WriteLine("Invalid syntax. Use: ^5vmenuserver time <freeze|<hour> <minute>>^7 instead.");
                         }
                     }
-                    else if (args[0].ToString().ToLower() == "ban" && source < 1)  // only via server console (server id < 1)
-                    {
-                        if (args.Count > 3)
-                        {
-                            Player p = null;
-
-                            var findByServerId = args[1].ToString().ToLower() == "id";
-                            var identifier = args[2].ToString().ToLower();
-
-                            if (findByServerId)
-                            {
-                                if (Players.Any(player => player.Handle == identifier))
-                                {
-                                    p = Players.Single(pl => pl.Handle == identifier);
-                                }
-                                else
-                                {
-                                    Debug.WriteLine("[vMenu] Could not find this player, make sure they are online.");
-                                    return;
-                                }
-                            }
-                            else
-                            {
-                                if (Players.Any(player => player.Name.ToLower() == identifier.ToLower()))
-                                {
-                                    p = Players.Single(pl => pl.Name.ToLower() == identifier.ToLower());
-                                }
-                                else
-                                {
-                                    Debug.WriteLine("[vMenu] Could not find this player, make sure they are online.");
-                                    return;
-                                }
-                            }
-
-                            var reason = "Banned by staff for:";
-                            args.GetRange(3, args.Count - 3).ForEach(arg => reason += " " + arg);
-
-                            if (p != null)
-                            {
-                                var ban = new BanManager.BanRecord(
-                                    BanManager.GetSafePlayerName(p.Name),
-                                    p.Identifiers.ToList(),
-                                    new DateTime(3000, 1, 1),
-                                    reason,
-                                    "Server Console",
-                                    new Guid()
-                                );
-
-                                BanManager.AddBan(ban);
-                                BanManager.BanLog($"[vMenu] Player {p.Name}^7 has been banned by Server Console for [{reason}].");
-                                TriggerEvent("vMenu:BanSuccessful", JsonConvert.SerializeObject(ban).ToString());
-                                var timeRemaining = BanManager.GetRemainingTimeMessage(ban.bannedUntil.Subtract(DateTime.Now));
-                                p.Drop($"You are banned from this server. Ban time remaining: {timeRemaining}. Banned by: {ban.bannedBy}. Ban reason: {ban.banReason}. Additional information: {vMenuShared.ConfigManager.GetSettingsString(vMenuShared.ConfigManager.Setting.vmenu_default_ban_message_information)}.");
-                            }
-                            else
-                            {
-                                Debug.WriteLine("[vMenu] Player not found, could not ban player.");
-                            }
-                        }
-                        else
-                        {
-                            Debug.WriteLine("[vMenu] Not enough arguments, syntax: ^5vmenuserver ban <id|name> <server id|username> <reason>^7.");
-                        }
-                    }
                     else if (args[0].ToString().ToLower() == "help")
                     {
                         Debug.WriteLine("Available commands:");
-                        Debug.WriteLine("(server console only): vmenuserver ban <id|name> <server id|username> <reason> (player must be online!)");
-                        Debug.WriteLine("(server console only): vmenuserver unban <uuid>");
                         Debug.WriteLine("vmenuserver weather <new weather type | dynamic <true | false>>");
                         Debug.WriteLine("vmenuserver time <freeze|<hour> <minute>>");
-                        Debug.WriteLine("vmenuserver migrate (This copies all banned players in the bans.json file to the new ban system in vMenu v3.3.0, you only need to do this once)");
                     }
                     else
                     {
@@ -533,13 +419,54 @@ namespace vMenuServer
         #endregion
 
         #region kick players from personal vehicle
+        private readonly PersonalVehicleRegistry personalVehicles = new PersonalVehicleRegistry();
+
+        /// <summary>
+        /// The client reports the vehicle it just set as its personal vehicle (0 to clear it). It is
+        /// only recorded once this server sees the player in its driver seat. The seat can take a
+        /// moment to sync, so the check is retried for about two seconds.
+        /// </summary>
+        [EventHandler("vMenu:SetPersonalVehicle")]
+        internal async void SetPersonalVehicle([FromSource] Player source, int vehicleNetId)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            var playerHandle = source.Handle;
+            var token = personalVehicles.Begin(playerHandle);
+            if (vehicleNetId == 0)
+            {
+                return;
+            }
+
+            for (var attempt = 0; attempt < 8; attempt++)
+            {
+                if (!DoesPlayerExist(playerHandle) || !personalVehicles.IsCurrent(playerHandle, token))
+                {
+                    return;
+                }
+
+                var vehicle = NetworkGetEntityFromNetworkId(vehicleNetId);
+                var ped = GetPlayerPed(playerHandle);
+                if (vehicle != 0 && DoesEntityExist(vehicle) && ped != 0 && GetPedInVehicleSeat(vehicle, -1) == ped)
+                {
+                    personalVehicles.Set(playerHandle, token, vehicleNetId, vehicle, (uint)GetEntityModel(vehicle));
+                    return;
+                }
+
+                await Delay(250);
+            }
+        }
+
         [EventHandler("vMenu:GetOutOfCar")]
         internal void GetOutOfCar([FromSource] Player source, int vehicleNetId)
         {
             if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.PVKickPassengers, source)
                 && !PermissionsManager.IsAllowed(PermissionsManager.Permission.PVAll, source))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:GetOutOfCar");
                 return;
             }
 
@@ -550,6 +477,12 @@ namespace vMenuServer
             }
 
             int vehicleHandle = vehicle.Handle;
+            if (!personalVehicles.Owns(source.Handle, vehicleNetId, vehicleHandle, (uint)GetEntityModel(vehicleHandle)))
+            {
+                source.TriggerEvent("vMenu:Notify", "You can only remove passengers from your own personal vehicle. Drive it once to set it as your personal vehicle.");
+                return;
+            }
+
             for (int i = -1; i < 15; i++)
             {
                 int pedHandle = GetPedInVehicleSeat(vehicleHandle, i);
@@ -579,7 +512,10 @@ namespace vMenuServer
         {
             if (source == null) return;
 
+            // The client shows Clear Area to anyone with vMenu.MiscSettings.ClearArea; this used to
+            // require MiscSettings.All, so moderators pressed it and nothing happened.
             bool allowed =
+                IsPlayerAceAllowed(source.Handle, "vMenu.MiscSettings.ClearArea") ||
                 IsPlayerAceAllowed(source.Handle, "vMenu.MiscSettings.All") ||
                 IsPlayerAceAllowed(source.Handle, "vMenu.Everything");
             if (!allowed) return;
@@ -731,7 +667,7 @@ namespace vMenuServer
         {
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.Menu") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:UpdateServerWeather");
                 return;
             }
 
@@ -752,7 +688,7 @@ namespace vMenuServer
         {
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.Blackout") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:UpdateServerBlackout");
                 return;
             }
 
@@ -764,7 +700,7 @@ namespace vMenuServer
         {
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.VehicleBlackout") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:UpdateServerVehicleBlackout");
                 return;
             }
 
@@ -776,7 +712,7 @@ namespace vMenuServer
         {
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.RemoveClouds") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.RandomizeClouds"))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:UpdateServerWeatherCloudsType");
                 return;
             }
 
@@ -797,218 +733,13 @@ namespace vMenuServer
         {
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.TimeOptions.Menu") && !IsPlayerAceAllowed(source.Handle, "vMenu.TimeOptions.All"))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:UpdateServerTime");
                 return;
             }
 
             CurrentHours = newHours;
             CurrentMinutes = newMinutes;
             FreezeTime = freezeTimeNew;
-        }
-        #endregion
-
-        #region Online Players Menu Actions
-        [EventHandler("vMenu:KickPlayer")]
-        internal void KickPlayer([FromSource] Player source, int target, string kickReason = "You have been kicked from the server.")
-        {
-            if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.OPKick, source)
-                && !PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, source))
-            {
-                BanManager.BanCheater(source);
-                return;
-            }
-
-            Player targetPlayer = GetPlayerFromServerId(target);
-            if (targetPlayer is null)
-            {
-                source.TriggerEvent("vMenu:Notify", "Failed to kick target, because the target could not be found. Did they already leave?");
-                return;
-            }
-
-            if (PermissionsManager.IsAllowed(PermissionsManager.Permission.DontKickMe, targetPlayer))
-            {
-                source.TriggerEvent("vMenu:Notify", "Sorry, this player can ~r~not ~w~be kicked.");
-                return;
-            }
-
-            KickLog($"Player: {source.Name} has kicked: {targetPlayer.Name} for: {kickReason}.");
-            source.TriggerEvent("vMenu:Notify", $"The target player (~y~{targetPlayer.Name}~s~) has been kicked.");
-
-            targetPlayer.Drop(kickReason);
-        }
-
-        [EventHandler("vMenu:KillPlayer")]
-        internal void KillPlayer([FromSource] Player source, int target)
-        {
-            if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.OPKill, source)
-                && !PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, source))
-            {
-                BanManager.BanCheater(source);
-                return;
-            }
-
-            Player targetPlayer = GetPlayerFromServerId(target);
-            if (targetPlayer is null)
-            {
-                return;
-            }
-
-            targetPlayer.TriggerEvent("vMenu:KillMe", source.Name);
-        }
-
-        [EventHandler("vMenu:SummonPlayer")]
-        internal async void SummonPlayer([FromSource] Player source, int target, int numberOfSeats)
-        {
-            if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.OPSummon, source)
-                && !PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, source))
-            {
-                BanManager.BanCheater(source);
-                return;
-            }
-
-            Player targetPlayer = GetPlayerFromServerId(target);
-            if (targetPlayer is null)
-            {
-                return;
-            }
-
-            Ped targetPed = targetPlayer.Character;
-            if (targetPed is null || !DoesEntityExist(targetPed.Handle))
-            {
-                return;
-            }
-
-            Ped sourcePed = source.Character;
-            if (sourcePed is null || !DoesEntityExist(sourcePed.Handle))
-            {
-                return;
-            }
-
-            int sourcePedVehicle = GetVehiclePedIsIn(sourcePed.Handle, false);
-            if (sourcePedVehicle == 0)
-            {
-                targetPed.Position = sourcePed.Position;
-                return;
-            }
-
-            bool seatFound = false;
-            numberOfSeats -= 1; // seat index starts at -1
-
-            for (int i = -1; i < numberOfSeats; i++)
-            {
-                if (GetPedInVehicleSeat(sourcePedVehicle, i) != 0)
-                {
-                    continue;
-                }
-
-                Vector3 priorPosition = targetPed.Position;
-                Vector3 newPosition = sourcePed.Position + new Vector3(0f, 0f, 5f);
-                seatFound = true;
-                targetPed.Position = newPosition;
-
-                long timeout = GetGameTimer() + 1500;
-                while (timeout > GetGameTimer() && priorPosition.DistanceToSquared(targetPed.Position) < newPosition.DistanceToSquared(targetPed.Position))
-                {
-                    await Delay(100);
-                }
-
-                if (timeout < GetGameTimer())
-                {
-                    source.TriggerEvent("vMenu:Notify", "Failed to teleport player.");
-                    break;
-                }
-
-                SetPedIntoVehicle(targetPed.Handle, sourcePedVehicle, i);
-                break;
-            }
-
-            if (!seatFound)
-            {
-                source.TriggerEvent("vMenu:Notify", "No free seats in your vehicle for summoned player.");
-            }
-        }
-
-        [EventHandler("vMenu:SendMessageToPlayer")]
-        internal void SendPrivateMessage([FromSource] Player source, int target, string message)
-        {
-            if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.OPSendMessage, source)
-                && !PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, source))
-            {
-                BanManager.BanCheater(source);
-                return;
-            }
-
-            long now = GetGameTimer();   // <-- long
-            Counter st;
-            if (_pmReqs.TryGetValue(source.Handle, out st))
-            {
-                if (now - st.WindowStart > PM_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
-                st.Hits++;
-                _pmReqs[source.Handle] = st;
-                if (st.Hits > PM_REQ_MAX_BURST) return;
-            }
-            else
-            {
-                _pmReqs[source.Handle] = new Counter { Hits = 1, WindowStart = now };
-            }
-
-            message = message ?? string.Empty;
-            if (message.Length > PM_MAX_LEN) message = message.Substring(0, PM_MAX_LEN);
-
-            bool sourcePmsDisabled = source.State.Get("vmenu_pms_disabled") ?? false;
-            if (sourcePmsDisabled)
-            {
-                source.TriggerEvent("vMenu:Notify", "You can't send a private message if you have private messages disabled yourself. Enable them in the Misc Settings menu and try again.");
-                return;
-            }
-
-            Player targetPlayer = GetPlayerFromServerId(target);
-            if (targetPlayer is null)
-            {
-                source.TriggerEvent("vMenu:Notify", "Failed to send message because the target could not be found. Did they disconnect?");
-                return;
-            }
-
-            bool targetPmsDisabled = targetPlayer.State.Get("vmenu_pms_disabled") ?? false;
-            if (targetPmsDisabled)
-            {
-                source.TriggerEvent("vMenu:Notify", $"Sorry, your private message to ~y~{source.Name}~s~ could not be delivered because they have private messages disabled.");
-                return;
-            }
-
-            targetPlayer.TriggerEvent("vMenu:PrivateMessage", source.Handle, message);
-
-            foreach (string playerHandle in joinedPlayers)
-            {
-                if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.OPSeePrivateMessages, playerHandle)
-                    && !PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, playerHandle))
-                {
-                    continue;
-                }
-
-                Player player = GetPlayerFromServerId(playerHandle);
-                player?.TriggerEvent("vMenu:Notify", $"[vMenu Staff Log] ~y~{source.Name}~s~ sent a PM to ~y~{targetPlayer.Name}~s~: {message}");
-            }
-        }
-        #endregion
-
-        #region logging and update checks notifications
-        private static void KickLog(string kickLogMesage)
-        {
-            if (GetSettingsBool(Setting.vmenu_log_kick_actions))
-            {
-                var file = LoadResourceFile(GetCurrentResourceName(), "vmenu.log") ?? "";
-                var date = DateTime.Now;
-                var formattedDate = (date.Day < 10 ? "0" : "") + date.Day + "-" +
-                    (date.Month < 10 ? "0" : "") + date.Month + "-" +
-                    (date.Year < 10 ? "0" : "") + date.Year + " " +
-                    (date.Hour < 10 ? "0" : "") + date.Hour + ":" +
-                    (date.Minute < 10 ? "0" : "") + date.Minute + ":" +
-                    (date.Second < 10 ? "0" : "") + date.Second;
-                var outputFile = file + $"[\t{formattedDate}\t] [KICK ACTION] {kickLogMesage}\n";
-                SaveResourceFile(GetCurrentResourceName(), "vmenu.log", outputFile, -1);
-                Debug.WriteLine("^3[vMenu] [KICK]^7 " + kickLogMesage + "\n");
-            }
         }
         #endregion
 
@@ -1021,7 +752,7 @@ namespace vMenuServer
             if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.MSTeleportSaveLocation, source)
                 && !PermissionsManager.IsAllowed(PermissionsManager.Permission.MSAll, source))
             {
-                BanManager.BanCheater(source);
+                LogUnauthorized(source, "vMenu:SaveTeleportLocation");
                 return;
             }
 
@@ -1069,67 +800,6 @@ namespace vMenuServer
             }
             ConfigManager.InvalidateTeleportLocationsCache();
             TriggerClientEvent("vMenu:UpdateTeleportLocations", JsonConvert.SerializeObject(locs.teleports));
-        }
-        #endregion
-
-        #region Infinity bits
-        [EventHandler("vMenu:RequestPlayerList")]
-        internal void RequestPlayerListFromPlayer([FromSource] Player player)
-        {
-            if (player == null) return;
-
-            if (!(IsPlayerAceAllowed(player.Handle, "vMenu.OnlinePlayers.Menu")
-               || IsPlayerAceAllowed(player.Handle, "vMenu.OnlinePlayers.All")
-               || IsPlayerAceAllowed(player.Handle, "vMenu.Everything")))
-            {
-                return;
-            }
-
-            long now = GetGameTimer();   // <-- long
-            Counter st;
-            if (_playerListReqs.TryGetValue(player.Handle, out st))
-            {
-                if (now - st.WindowStart > PLAYERLIST_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
-                st.Hits++;
-                _playerListReqs[player.Handle] = st;
-
-                if (st.Hits > PLAYERLIST_REQ_MAX_BURST)
-                {
-                    if (DebugMode) Debug.WriteLine($"^3[vMenu] [WARNING]^7 Dropped burst RequestPlayerList from {player.Name}.");
-                    return;
-                }
-            }
-            else
-            {
-                _playerListReqs[player.Handle] = new Counter { Hits = 1, WindowStart = now };
-            }
-
-            player.TriggerEvent("vMenu:ReceivePlayerList", Players.Select(p => new
-            {
-                n = p.Name,
-                s = int.Parse(p.Handle),
-            }));
-        }
-
-        [EventHandler("vMenu:GetPlayerCoords")]
-        internal void GetPlayerCoords([FromSource] Player source, int playerId, NetworkCallbackDelegate callback)
-        {
-            var coords = Vector3.Zero;
-            if (PermissionsManager.IsAllowed(PermissionsManager.Permission.OPTeleport, source)
-                || PermissionsManager.IsAllowed(PermissionsManager.Permission.OPAll, source))
-            {
-                Player targetPlayer = GetPlayerFromServerId(playerId);
-                if (targetPlayer is not null)
-                {
-                    Ped targetPed = targetPlayer.Character;
-                    if (targetPed is not null && DoesEntityExist(targetPed.Handle))
-                    {
-                        coords = targetPed.Position;
-                    }
-                }
-            }
-
-            _ = callback(coords);
         }
         #endregion
 
@@ -1192,13 +862,12 @@ namespace vMenuServer
         [EventHandler("playerDropped")]
         internal void OnPlayerDropped([FromSource] Player sourcePlayer, string reason)
         {
+            personalVehicles.Remove(sourcePlayer.Handle);
             if (!joinedPlayers.Contains(sourcePlayer.Handle))
             {
                 return;
             }
 
-            if (_playerListReqs.ContainsKey(sourcePlayer.Handle)) _playerListReqs.Remove(sourcePlayer.Handle);
-            if (_pmReqs.ContainsKey(sourcePlayer.Handle)) _pmReqs.Remove(sourcePlayer.Handle);
             if (_clearReqs.ContainsKey(sourcePlayer.Handle)) _clearReqs.Remove(sourcePlayer.Handle);
             if (_saveTpReqs.ContainsKey(sourcePlayer.Handle)) _saveTpReqs.Remove(sourcePlayer.Handle);
 
@@ -1232,6 +901,15 @@ namespace vMenuServer
             }
 
             return Players[serverId];
+        }
+
+        /// <summary>
+        /// Logs a request the sender had no permission for. vMenu's ban system was removed (never
+        /// used; EasyAdmin handles bans), and with vmenu_auto_ban_cheaters off it did nothing at all.
+        /// </summary>
+        private static void LogUnauthorized(Player source, string eventName)
+        {
+            Debug.WriteLine($"^3[vMenu] [WARNING]^7 {source?.Name} ({source?.Handle}) triggered {eventName} without permission.");
         }
         #endregion
     }

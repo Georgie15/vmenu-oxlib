@@ -493,6 +493,8 @@ namespace vMenuClient.menus
             CurrentPersonalVehicle.PreviouslyOwnedByPlayer = true;
             CurrentPersonalVehicle.IsPersistent = true;
             CurrentPersonalVehicleNetId = NetworkGetEntityIsNetworked(vehicle.Handle) ? vehicle.NetworkId : 0;
+            // The server only lets you kick passengers out of the vehicle recorded here.
+            TriggerServerEvent("vMenu:SetPersonalVehicle", CurrentPersonalVehicleNetId);
 
             if (BlipOnExit)
             {
@@ -522,6 +524,7 @@ namespace vMenuClient.menus
             }
             CurrentPersonalVehicle = null;
             CurrentPersonalVehicleNetId = 0;
+            TriggerServerEvent("vMenu:SetPersonalVehicle", 0);
             UpdateCurrentVehicleLabel();
         }
 

@@ -41,7 +41,6 @@ namespace vMenuClient
             EventHandlers.Add("vMenu:SetPermissions", new Action<string>(MainMenu.SetPermissions));
             EventHandlers.Add("vMenu:Notify", new Action<string>(NotifyPlayer));
             EventHandlers.Add("vMenu:SetClouds", new Action<float, string>(SetClouds));
-            EventHandlers.Add("vMenu:GoodBye", new Action(GoodBye));
             EventHandlers.Add("vMenu:ClearArea", new Action<Vector3>(ClearAreaNearPos));
             EventHandlers.Add("vMenu:updatePedDecors", new Action(UpdatePedDecors));
             EventHandlers.Add("playerSpawned", new Action(SetAppearanceOnFirstSpawn));
@@ -248,14 +247,6 @@ namespace vMenuClient
             {
                 Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your pedpack.json file contains a problem! Error details: {ex.Message}\n\n");
             }
-        }
-
-        /// <summary>
-        /// Used for cheaters.
-        /// </summary>
-        private void GoodBye()
-        {
-            ForceSocialClubUpdate();
         }
 
         /// <summary>

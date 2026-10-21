@@ -25,9 +25,9 @@ Instructions for any AI agent or developer working in this repository.
   projects output there, and a server build copies the older
   `vMenuServer/config/*` over the curated `build/vMenu/config/*`. Build the
   server into a temporary folder too.
-- `main`'s server source reproduces the committed server DLL method for method
-  (October 21 section of current-build.md). Before changing the server, compare a
-  temp build with `dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll <temp dir>/vMenuServer.net.dll`.
+- The committed server DLL is built from this source (release B). Before
+  changing the server, compare a temp build with
+  `dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll <temp dir>/vMenuServer.net.dll`.
   Afterwards the report must show only your intended changes. Shipping a new
   server DLL needs the owner's OK.
 - After any build, run `git status` and restore every file you did not mean to
@@ -47,6 +47,7 @@ python integrations/psrp-cad-vehicle-identity/test_saved_tokens.py
 dotnet run --project tests/override-latch
 python tests/permission-table/test_permission_table.py
 python tests/saved-vehicle-colours/test_custom_colours.py
+dotnet run --project tests/personal-vehicle-registry
 ```
 
 They need Python and the .NET 9 SDK. None of them run FiveM, so runtime checks

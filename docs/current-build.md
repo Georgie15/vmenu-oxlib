@@ -8,9 +8,9 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: client fixes release A (tag `build-2026-10-21`) |
-| `build/vMenu/vMenuClient.net.dll` | `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf` |
-| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (`main`'s server source reproduces it method-for-method; see October 21, server source) |
+| Latest change | October 21, 2026: server security release B |
+| `build/vMenu/vMenuClient.net.dll` | `27dcac3a54d0063a49b1fb95a985382e512e977f05f9f21fa7bcd23bd18a4630` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
@@ -358,3 +358,84 @@ packaged client, and the previous client showed exactly the release A changes.
 summon and PM handlers and the whole ban system. Then restrict Kick Passengers to
 your own personal vehicle. After that, the comparison should show only those
 intended differences. Release B waits until release A has run fine on live.
+
+## October 21, 2026: server security release B (server DLL, client DLL)
+
+Built on the local `next` branch and merged into `main` only after release A was
+confirmed on live. This is the first server DLL built from this repository's
+source.
+
+**Leaks closed.** Any client could trigger these, with no menu needed:
+- `vMenu:GetPlayerIdentifiers` returned any online player's license, Discord,
+  Steam and FiveM IDs.
+- `vMenu:RequestBanList` returned every ban record, including IP addresses.
+
+**Removed** (unused: only the owner had Online Players, and vMenu bans were never
+used; EasyAdmin handles bans):
+- the player list, player coordinates, kick (and `vmenu.log` kick logging), kill,
+  summon and private-message handlers
+- `BanManager.cs`: ban and unban events, ban list, connect-time ban check, and the
+  `vmenuserver ban/unban` console commands
+- the upstream author's dev-identifier check in the permission bootstrap
+- the client's `vMenu:GoodBye` handler (crashes the game; only the ban code sent it)
+
+The permission bootstrap is otherwise unchanged.
+
+**Kick Passengers works only on your own vehicle.**
+- The client reports each personal vehicle it sets
+  (`vMenu:SetPersonalVehicle`).
+- The server records it only once it sees that player in the driver seat,
+  retrying for about 2 s while the seat syncs. It keeps the net ID, entity and
+  model, because net IDs are reused.
+- `vMenu:GetOutOfCar` now only works for the sender's recorded vehicle. Before,
+  anyone with the permission (everyone) could empty any car by net ID.
+
+**Clear Area works for moderators.** The server required
+`vMenu.MiscSettings.All`, while the client shows the option to
+`vMenu.MiscSettings.ClearArea` (moderator, tmod, master). It now accepts either.
+
+**Unauthorised attempts are logged.** Weather, time, blackout, cloud,
+teleport-location and Kick Passengers requests without permission now log a
+`[vMenu] [WARNING] … without permission` line. With auto-ban off they used to do
+nothing at all.
+
+**`permissions.cfg` is unchanged.** The plan was to delete the now-unused
+`vMenu.OnlinePlayers.*` lines. They are kept: no vMenu code checks them any more,
+but psrp_telemetry verifies "a vMenu teleport ACE" before trusting a teleport,
+and that may be `vMenu.OnlinePlayers.Teleport`.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `27dcac3a54d0063a49b1fb95a985382e512e977f05f9f21fa7bcd23bd18a4630` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` |
+
+**Validation:**
+- `tools/ilcompare` against the previous live server DLL (`e17419b8…`) shows
+  exactly the changes above, and nothing else:
+  - removed: `BanManager` and the removed handlers with their lambdas, the
+    player-list anonymous type and the PM state-bag call sites
+  - changed: `MainServer` constructor, `ServerCommandHandler`, `GetOutOfCar`,
+    `ClearAreaNearPos`, the weather/time/teleport-location handlers (log instead
+    of `BanCheater`), `OnPlayerDropped`, and the bootstrap state machine (dev
+    check removed)
+  - added: `SetPersonalVehicle`, `LogUnauthorized`, `PersonalVehicleRegistry`
+- New test: `dotnet run --project tests/personal-vehicle-registry`.
+- All ten tests pass.
+- Both projects build with 0 warnings, into a temporary folder.
+
+**Deploy:**
+1. Hash the live DLLs. They must be release A's: client
+   `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf`, server
+   `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a`. If either
+   differs, stop.
+2. Copy `vMenuClient.net.dll` and `vMenuServer.net.dll`. Copy both: the new
+   server needs the client's personal-vehicle report.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- Players join and get their menus (F1), including on a busy server.
+- Drive a car, get out, let a friend sit in it, then use Personal Vehicle > Kick
+  Passengers: they are removed. Try it on a car you never drove: you get "You can
+  only remove passengers from your own personal vehicle".
+- A moderator's Clear Area works.
+- No new errors in the server console.
