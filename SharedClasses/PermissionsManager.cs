@@ -534,66 +534,10 @@ namespace vMenuShared
         /// </summary>
         public static readonly Dictionary<string, bool> JoinQuitNotifEligibility = new();
 
-        // One scheduler task owns the queue. At most one pending request per
-        // handle, plus the active request; duplicates share completion, while a
-        // request during active work retains one follow-up scan.
-        private sealed class PermissionRequest
-        {
-            internal Player Player;
-            internal string License;
-            internal object Session;
-            internal readonly TaskCompletionSource<bool> Completion = new();
-        }
-        private static readonly LinkedList<PermissionRequest> PermissionQueue = new();
-        private static readonly Dictionary<string, LinkedListNode<PermissionRequest>> PendingPermissions = new();
-        private static readonly Dictionary<string, object> PermissionSessions = new();
-        private static bool permissionWorkerRunning;
-
-        public static void InvalidatePermissionSession(string handle)
-        {
-            PermissionSessions.Remove(handle);
-            JoinQuitNotifEligibility.Remove(handle);
-            if (PendingPermissions.TryGetValue(handle, out var pending))
-            {
-                PendingPermissions.Remove(handle);
-                PermissionQueue.Remove(pending);
-                pending.Value.Completion.TrySetResult(false);
-            }
-        }
-
-        private static bool IsCurrentPermissionSession(PermissionRequest request)
-        {
-            return PermissionSessions.TryGetValue(request.Player.Handle, out var session)
-                && ReferenceEquals(session, request.Session)
-                && DoesPlayerExist(request.Player.Handle)
-                && request.Player.Identifiers["license"] == request.License;
-        }
-
-        private static async Task ProcessPermissionQueueAsync()
-        {
-            permissionWorkerRunning = true;
-            try
-            {
-                while (PermissionQueue.First != null)
-                {
-                    var request = PermissionQueue.First.Value;
-                    PermissionQueue.RemoveFirst();
-                    PendingPermissions.Remove(request.Player.Handle);
-                    try
-                    {
-                        await BuildPermissionsForPlayerAsync(request);
-                    }
-                    finally
-                    {
-                        request.Completion.TrySetResult(true);
-                    }
-                }
-            }
-            finally
-            {
-                permissionWorkerRunning = false;
-            }
-        }
+        // Permissions are built for one player at a time. This is the bootstrap in the live server
+        // build (packaged vMenuServer.net.dll e17419b8...). A per-handle queue that merged
+        // duplicate requests was built in September and pulled again; see current-build.md.
+        private static bool permissionsBootstrapBusy = false;
 
         // How many ace checks run per server tick during a bootstrap. The Permission
         // enum has ~300 entries and one IsPlayerAceAllowed call costs 0.3-0.5ms on a
@@ -617,46 +561,25 @@ namespace vMenuShared
         /// as before, just a few frames later.
         /// </summary>
         /// <param name="player"></param>
-        public static Task SetPermissionsForPlayerAsync(Player player)
+        public static async Task SetPermissionsForPlayerAsync(Player player)
         {
-            if (player == null) return Task.FromResult(false);
+            if (player == null)
+            {
+                return;
+            }
+
+            // Wait until the previous player's bootstrap has finished.
+            while (permissionsBootstrapBusy)
+            {
+                await BaseScript.Delay(0);
+            }
+            permissionsBootstrapBusy = true;
+
             try
             {
-                if (!DoesPlayerExist(player.Handle)) return Task.FromResult(false);
-                var license = player.Identifiers["license"];
-                if (string.IsNullOrEmpty(license)) return Task.FromResult(false);
-                if (!PermissionSessions.TryGetValue(player.Handle, out var session))
-                {
-                    session = new object();
-                    PermissionSessions[player.Handle] = session;
-                }
-                if (PendingPermissions.TryGetValue(player.Handle, out var pending))
-                {
-                    if (pending.Value.License == license && ReferenceEquals(pending.Value.Session, session))
-                        return pending.Value.Completion.Task;
-                    InvalidatePermissionSession(player.Handle);
-                    session = new object();
-                    PermissionSessions[player.Handle] = session;
-                }
-                var request = new PermissionRequest { Player = player, License = license, Session = session };
-                PendingPermissions[player.Handle] = PermissionQueue.AddLast(request);
-                if (!permissionWorkerRunning) _ = ProcessPermissionQueueAsync();
-                return request.Completion.Task;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[vMenu] Failed to queue permissions for player {player.Handle}: {ex.Message}");
-                return Task.FromResult(false);
-            }
-        }
-
-        private static async Task BuildPermissionsForPlayerAsync(PermissionRequest request)
-        {
-            var player = request.Player;
-            try
-            {
-                if (!IsCurrentPermissionSession(request)) return;
-
+                // The player can leave (and the handle be reused) while the checks yield between
+                // chunks; stop instead of sending one player's permissions to another.
+                var originalLicense = player.Identifiers["license"];
                 var perms = new Dictionary<Permission, bool>();
 
                 // If enabled in the permissions.cfg (disabled by default) then this will give me (only me) the option to trigger some debug commands and
@@ -714,7 +637,7 @@ namespace vMenuShared
                             {
                                 checksThisChunk = 0;
                                 await BaseScript.Delay(0);
-                                if (!IsCurrentPermissionSession(request))
+                                if (!DoesPlayerExist(player.Handle) || player.Identifiers["license"] != originalLicense)
                                 {
                                     return;
                                 }
@@ -727,8 +650,6 @@ namespace vMenuShared
                         || (perms.TryGetValue(Permission.MSAll, out var msAll) && msAll);
                 }
 
-                if (!IsCurrentPermissionSession(request)) return;
-
                 // Send the permissions to the client.
                 player.TriggerEvent("vMenu:SetPermissions", Newtonsoft.Json.JsonConvert.SerializeObject(perms));
 
@@ -739,6 +660,10 @@ namespace vMenuShared
             catch (Exception ex)
             {
                 Debug.WriteLine($"[vMenu] Failed to send permissions to player {player.Handle}: {ex.Message}");
+            }
+            finally
+            {
+                permissionsBootstrapBusy = false;
             }
         }
 #endif

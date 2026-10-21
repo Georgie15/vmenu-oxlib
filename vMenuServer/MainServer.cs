@@ -1180,7 +1180,6 @@ namespace vMenuServer
         [EventHandler("playerJoining")]
         internal void OnPlayerJoining([FromSource] Player sourcePlayer)
         {
-            PermissionsManager.InvalidatePermissionSession(sourcePlayer.Handle);
             joinedPlayers.Add(sourcePlayer.Handle);
             PermissionsManager.SetPermissionsForPlayer(sourcePlayer);
 
@@ -1193,7 +1192,6 @@ namespace vMenuServer
         [EventHandler("playerDropped")]
         internal void OnPlayerDropped([FromSource] Player sourcePlayer, string reason)
         {
-            PermissionsManager.InvalidatePermissionSession(sourcePlayer.Handle);
             if (!joinedPlayers.Contains(sourcePlayer.Handle))
             {
                 return;

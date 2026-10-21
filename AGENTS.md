@@ -22,10 +22,14 @@ Instructions for any AI agent or developer working in this repository.
   `dotnet build vMenu/vMenuClient.csproj -c Release --nologo --output <temp dir>`,
   then copy `<temp dir>/vMenuClient.net.dll` to `build/vMenu/`.
 - Do not build the solution or the server project into `build/vMenu/`. Both
-  projects output there. A server build copies the older `vMenuServer/config/*`
-  over the curated `build/vMenu/config/*`, and the committed server DLL is not
-  built from `main`'s server source (see the September 30 section of
-  current-build.md). Rebuilding the server needs the owner's decision first.
+  projects output there, and a server build copies the older
+  `vMenuServer/config/*` over the curated `build/vMenu/config/*`. Build the
+  server into a temporary folder too.
+- `main`'s server source reproduces the committed server DLL method for method
+  (October 21 section of current-build.md). Before changing the server, compare a
+  temp build with `dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll <temp dir>/vMenuServer.net.dll`.
+  Afterwards the report must show only your intended changes. Shipping a new
+  server DLL needs the owner's OK.
 - After any build, run `git status` and restore every file you did not mean to
   change.
 - Lua and config in `build/vMenu/` are the deployed copies. Edit them there. If

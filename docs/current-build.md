@@ -10,7 +10,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 | --- | --- |
 | Latest change | October 21, 2026: client fixes release A (tag `build-2026-10-21`) |
 | `build/vMenu/vMenuClient.net.dll` | `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf` |
-| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (not built from `main`'s server source; see September 30) |
+| `build/vMenu/vMenuServer.net.dll` | `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a` (`main`'s server source reproduces it method-for-method; see October 21, server source) |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
@@ -289,3 +289,56 @@ your last vehicle visible every frame, whatever had hidden it.
 - An imported share code gets its own CAD token.
 - Online Players and Banned Players are gone.
 - `vmenuclient dump` lists the same permissions as before.
+
+## October 21, 2026: server source reproduces the packaged server DLL (source only)
+
+This is release B step 1. The package does not change: `build/vMenu/vMenuServer.net.dll`
+is still `e17419b8…`, and there is nothing to deploy.
+
+**What the packaged server is.** Its `AssemblyInformationalVersion` is
+`1.0.0+cd866b83…`, so it was built while `HEAD` was `cd866b8`, from a working tree
+with uncommitted changes.
+
+**How it was compared.** `main`'s server project was built into a temporary folder
+(never into `build/vMenu/`). `tools/ilcompare` then compared it with the packaged
+DLL. The tool renders every type, field, attribute and method body, with operands
+resolved to names, and compares them method by method. It found exactly two
+differences:
+- `PermissionsManager`'s server bootstrap. `main` had the per-handle request queue
+  with sessions and merged duplicates. The live build has one
+  `permissionsBootstrapBusy` flag: it waits for the previous player, then
+  re-checks the player still exists with the same license after each chunk of 25
+  ACE checks.
+- `MainServer.OnPlayerJoining` and `OnPlayerDropped`, which in `main` also called
+  `InvalidatePermissionSession`.
+
+**What changed in the source.** `main` now has the live bootstrap, rebuilt from
+the IL, and the join/drop handlers without those calls. The queue version is
+still in git history (`a2d9aa8` and earlier) if it is ever wanted.
+
+**Result:**
+- The rebuilt server matches the packaged DLL in every type, field and method,
+  with 0 differences.
+- It also matches with compiler-generated names compared raw
+  (`ILCOMPARE_RAW=1`), which proves member order is identical too. Type, method
+  and field counts are equal.
+- The only difference is the git hash in `AssemblyInformationalVersion`.
+- A rebuilt client still matches the packaged client; the shared-file edit is
+  server-only.
+- All nine tests pass.
+
+Reproduce it with:
+
+```
+dotnet build vMenuServer/vMenuServer.csproj -c Release --nologo --output <temp dir>
+dotnet run --project tools/ilcompare -c Release -- build/vMenu/vMenuServer.net.dll <temp dir>/vMenuServer.net.dll
+```
+
+Exit code 0 means they match. Set `ILCOMPARE_RAW=1` for the strict comparison.
+The tool was first checked on the client: a fresh client build matched the
+packaged client, and the previous client showed exactly the release A changes.
+
+**Next (release B):** remove the identifier, player-list, coordinates, kick, kill,
+summon and PM handlers and the whole ban system. Then restrict Kick Passengers to
+your own personal vehicle. After that, the comparison should show only those
+intended differences. Release B waits until release A has run fine on live.
