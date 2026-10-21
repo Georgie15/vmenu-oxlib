@@ -39,7 +39,7 @@ The older `master`, `dev` and `codex/*` branches were retired on October 21,
 vehicle identity and the RVF `vehiclerepair` event from `master` (`52b59cb`),
 which every client DLL committed on `main` includes. `dev`
 was an unmodified copy of the upstream fork's `dev`, which is still available
-from the `upstream` remote.
+at `github.com/Gravxd/vmenu-oxlib`.
 
 ## September 30, 2026: permission request retry (client only)
 

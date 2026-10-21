@@ -7,9 +7,9 @@ Instructions for any AI agent or developer working in this repository.
 - `main` is the only live branch. Its source and the package in `build/vMenu/`
   are the latest PSRP vMenu build. Start every change from an up-to-date `main`:
   `git fetch origin && git switch main && git pull --ff-only`.
-- `origin` is this fork (`Georgie15/vmenu-oxlib`). `upstream` is the fork it came
-  from (`Gravxd/vmenu-oxlib`); its `dev` and `master` are not this build. Do not
-  base work on them or merge them without the owner asking.
+- `origin` (`Georgie15/vmenu-oxlib`) is the only remote, and `main` is its only
+  branch. The fork this came from, `Gravxd/vmenu-oxlib`, is not this build. Don't
+  add it as a remote, base work on it or merge from it unless the owner asks.
 - The "Current package" table at the top of
   [docs/current-build.md](docs/current-build.md) records the SHA-256 of both
   packaged DLLs. Before starting, check them with
