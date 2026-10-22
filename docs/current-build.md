@@ -836,8 +836,9 @@ the other releases on October 21 (see "Releases B-E merged" below). Client only:
 
 At the owner's request, releases B, cleanup, C, D and E were fast-forwarded onto
 `main` together, without waiting for each to be confirmed on live. Release A had
-not been checked on live either. The package is release E's; the table at the
-top has its hashes.
+not been checked on live either. Release F followed the same day, at the owner's
+request too, and the steps below include it. The table at the top has the
+current package's hashes.
 
 | Tag | Commit | Release |
 | --- | --- | --- |
@@ -845,12 +846,13 @@ top has its hashes.
 | `build-2026-10-21-b` | `29aa7b8` | B: server security (first server DLL built from source) |
 | `build-2026-10-21-c` | `76cc1b1` | C: bugs and performance |
 | `build-2026-10-21-d` | `4b2f49c` | D: backups, presets, noclip, PV keys, teleport |
-| `build-2026-10-21-e` | this commit | E: fixes, favourites, auto backup, clothing toggles |
+| `build-2026-10-21-e` | `103e449` | E: fixes, favourites, auto backup, clothing toggles |
+| `build-2026-10-21-f` | this commit | F: saved-car prompt, outfits, ped favourites and preview, auto-lock, car keys, photo mode, what's new |
 
 The cleanup commit (`d9459ba`) changed no package file, so it has no tag.
 
 **Deploy everything at once.** Each release section above says which hashes the
-live copy must have before *that* release. When deploying A-E together, use
+live copy must have before *that* release. When deploying A-F together, use
 these steps instead:
 
 1. Hash the live `vMenuClient.net.dll` and `vMenuServer.net.dll`. The server must
@@ -872,28 +874,31 @@ these steps instead:
      `allow` (release D).
    - Delete the second `add_ace group.georgiespecial "vMenu.WeaponOptions.Menu" allow`
      (release D).
+   - Optional: below `setr vmenu_backups true`, add `setr vmenu_photo_mode true`
+     to turn on photo mode (release F).
    - Optional: delete `set vmenu_disable_ai`, `vmenu_auto_ban_cheaters`,
      `vmenu_auto_ban_cheaters_ban_message`, `vmenu_log_ban_actions`,
      `vmenu_log_kick_actions` and `vmenu_default_ban_message_information`
      (release E; nothing reads them).
-5. Copy these files from `build/vMenu/`. They are every file A-E changed, plus
+5. Copy these files from `build/vMenu/`. They are every file A-F changed, plus
    `config/vehicleIdentityModels.json`, which release A added to live:
    - `vMenuClient.net.dll`, `vMenuServer.net.dll`, `fxmanifest.lua`
    - `client/`: `backups.lua`, `exports.lua`, `integrations.lua`,
-     `outfitCodes.lua`, `spawnProvenance.lua`, `vehicleCodes.lua`
+     `outfitCodes.lua`, `photoMode.lua`, `spawnProvenance.lua`, `vehicleCodes.lua`,
+     `whatsNew.lua`
    - `server/`: `backups.lua`, `oufitCodes.lua`, `spawnProvenance.lua`,
      `vehicleCodes.lua`, `versionCheck.lua`
    - `config/`: `config_client.lua`, `vehicleIdentityModels.json`
    - `database.sql` (not loaded by the resource; only the record of the tables)
 6. Restart the server, so the new convar is read. The console should print
    "Save backups are enabled."
-7. Work through the runtime acceptance list of each release, A to E. If something
+7. Work through the runtime acceptance list of each release, A to F. If something
    breaks, put the backup from step 2 back.
 
 ## October 21, 2026: player features release F (client DLL, Lua, config)
 
-Built on the local `next` branch after release E. Client only: the server DLL is
-release B's.
+Built on the local `next` branch after release E, and merged into `main` the same
+day at the owner's request. Client only: the server DLL is release B's.
 
 **New for players:**
 - **"Save your changes?" for saved vehicles.**
