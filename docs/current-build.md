@@ -361,9 +361,9 @@ intended differences. Release B waits until release A has run fine on live.
 
 ## October 21, 2026: server security release B (server DLL, client DLL)
 
-Built on the local `next` branch and merged into `main` only after release A was
-confirmed on live. This is the first server DLL built from this repository's
-source.
+Built on the local `next` branch and merged into `main` with releases C-E on
+October 21 (see "Releases B-E merged" below). This is the first server DLL built from
+this repository's source.
 
 **Leaks closed.** Any client could trigger these, with no menu needed:
 - `vMenu:GetPlayerIdentifiers` returned any online player's license, Discord,
@@ -461,8 +461,8 @@ DLLs against the release B package (only the git hash differs).
 
 ## October 21, 2026: bugs and performance release C (client DLL, Lua)
 
-Built on the local `next` branch after release B, and merged into `main` only
-after release B was confirmed on live. Client only: the server DLL is release B's.
+Built on the local `next` branch after release B, and merged into `main` with
+the other releases on October 21 (see "Releases B-E merged" below). Client only: the server DLL is release B's.
 
 **Bugs fixed:**
 - **Vehicle Extras "Go Back".** Every open of the Extras menu added another Go
@@ -562,8 +562,8 @@ version (`2.0.0-psrp`) and author. `fx_version` is unchanged.
 
 ## October 21, 2026: player features release D (client DLL, Lua, database, config)
 
-Built on the local `next` branch after release C, and merged into `main` only
-after release C was confirmed on live. Client only: the server DLL is release B's.
+Built on the local `next` branch after release C, and merged into `main` with
+the other releases on October 21 (see "Releases B-E merged" below). Client only: the server DLL is release B's.
 The backup server code is Lua.
 
 **Back up and restore saves** (Misc Settings, replacing the hidden
@@ -698,8 +698,8 @@ menu's in release C. Nothing visible changes.
 
 ## October 21, 2026: fixes and player features release E (client DLL, Lua, config)
 
-Built on the local `next` branch after release D, and merged into `main` only
-after release D was confirmed on live. Client only: the server DLL is release B's.
+Built on the local `next` branch after release D, and merged into `main` with
+the other releases on October 21 (see "Releases B-E merged" below). Client only: the server DLL is release B's.
 
 **Fixes:**
 - **Ped pack paywall.** Spawn By Name (everyone has it) accepted any model, so
@@ -831,3 +831,61 @@ after release D was confirmed on live. Client only: the server DLL is release B'
   within 10 minutes it is backed up again.
 - Clothing Quick Toggles take off and put back each item. Bind a key and use
   it.
+
+## October 21, 2026: releases B-E merged, and how to deploy them together
+
+At the owner's request, releases B, cleanup, C, D and E were fast-forwarded onto
+`main` together, without waiting for each to be confirmed on live. Release A had
+not been checked on live either. The package is release E's; the table at the
+top has its hashes.
+
+| Tag | Commit | Release |
+| --- | --- | --- |
+| `build-2026-10-21` | `a2d9aa8` | A: client fixes |
+| `build-2026-10-21-b` | `29aa7b8` | B: server security (first server DLL built from source) |
+| `build-2026-10-21-c` | `76cc1b1` | C: bugs and performance |
+| `build-2026-10-21-d` | `4b2f49c` | D: backups, presets, noclip, PV keys, teleport |
+| `build-2026-10-21-e` | this commit | E: fixes, favourites, auto backup, clothing toggles |
+
+The cleanup commit (`d9459ba`) changed no package file, so it has no tag.
+
+**Deploy everything at once.** Each release section above says which hashes the
+live copy must have before *that* release. When deploying A-E together, use
+these steps instead:
+
+1. Hash the live `vMenuClient.net.dll` and `vMenuServer.net.dll`. The server must
+   be `e17419b8231fc020b955753299dbf2d1785ba30051ad17f28c2c8be8aede9c8a`. The
+   client must be either:
+   - before release A: `586cff071970fafce2287690ee097a1a7044dd991c255ccfd3b24f5eddb33bc4`
+   - release A: `e30cc8d4769933f45d7b4f7df815ba494d01dc7f152535518bbafbc41bebe0cf`
+
+   If either DLL differs, stop: the server runs a build this repo doesn't record.
+2. Back up the live `vMenu` folder.
+3. Run the `vmenu_backups` statement from `database.sql` once (it only creates the
+   table if it is missing).
+4. Edit the live `config/permissions.cfg`. Don't copy the repo file over it:
+   staff can change the live one.
+   - `setr keep_player_head_props true` becomes `false` (release A; already done
+     if A is live).
+   - Below `setr vmenu_vehiclecodes true`, add `setr vmenu_backups true` (release D).
+   - `add_ace group.communitymanager "vMenu.PlayerOptions.God" true` ends in
+     `allow` (release D).
+   - Delete the second `add_ace group.georgiespecial "vMenu.WeaponOptions.Menu" allow`
+     (release D).
+   - Optional: delete `set vmenu_disable_ai`, `vmenu_auto_ban_cheaters`,
+     `vmenu_auto_ban_cheaters_ban_message`, `vmenu_log_ban_actions`,
+     `vmenu_log_kick_actions` and `vmenu_default_ban_message_information`
+     (release E; nothing reads them).
+5. Copy these files from `build/vMenu/`. They are every file A-E changed, plus
+   `config/vehicleIdentityModels.json`, which release A added to live:
+   - `vMenuClient.net.dll`, `vMenuServer.net.dll`, `fxmanifest.lua`
+   - `client/`: `backups.lua`, `exports.lua`, `integrations.lua`,
+     `outfitCodes.lua`, `spawnProvenance.lua`, `vehicleCodes.lua`
+   - `server/`: `backups.lua`, `oufitCodes.lua`, `spawnProvenance.lua`,
+     `vehicleCodes.lua`, `versionCheck.lua`
+   - `config/`: `config_client.lua`, `vehicleIdentityModels.json`
+   - `database.sql` (not loaded by the resource; only the record of the tables)
+6. Restart the server, so the new convar is read. The console should print
+   "Save backups are enabled."
+7. Work through the runtime acceptance list of each release, A to E. If something
+   breaks, put the backup from step 2 back.
