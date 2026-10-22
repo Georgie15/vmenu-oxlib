@@ -163,6 +163,9 @@ namespace vMenuClient
                 MenuToggleKey = "M";
             }
             MenuController.MenuToggleKey = (Control)(-1); // disables the menu toggle key
+            // MenuAPI otherwise forces a full GC.Collect() every 60 s while no menu is open: a periodic
+            // hitch. The runtime collects on its own when needed (release A removed vMenu's own 60 s GC).
+            MenuController.EnableManualGCs = false;
             RegisterCommand($"vMenu:{KeyMappingID}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
             {
                 if (!MenuEnabled || !PermissionsSetupComplete || !ConfigOptionsSetupComplete || Menu == null)

@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: player features release F |
-| `build/vMenu/vMenuClient.net.dll` | `38bac5d98528d7a5663fd7adee888af6ef9fb62b9cb1d7fc61ada6d48f1e635d` |
+| Latest change | October 21, 2026: frame-cost release G |
+| `build/vMenu/vMenuClient.net.dll` | `2d0178c6cdea02dfbf88378b0336d382fe43a0150679821b796073f808d3a02e` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -847,7 +847,8 @@ current package's hashes.
 | `build-2026-10-21-c` | `76cc1b1` | C: bugs and performance |
 | `build-2026-10-21-d` | `4b2f49c` | D: backups, presets, noclip, PV keys, teleport |
 | `build-2026-10-21-e` | `103e449` | E: fixes, favourites, auto backup, clothing toggles |
-| `build-2026-10-21-f` | this commit | F: saved-car prompt, outfits, ped favourites and preview, auto-lock, car keys, photo mode, what's new |
+| `build-2026-10-21-f` | `625fada` | F: saved-car prompt, outfits, ped favourites and preview, auto-lock, car keys, photo mode, what's new |
+| `build-2026-10-21-g` | the release G commit | G: frame-cost cuts (client DLL only; see its section) |
 
 The cleanup commit (`d9459ba`) changed no package file, so it has no tag.
 
@@ -1037,3 +1038,116 @@ day at the owner's request. Client only: the server DLL is release B's.
 - Photo Mode: move around, try to pass through a wall (you can't), go far (it
   stops at 15 m), zoom, hide the help, leave with Backspace.
 - The first menu open shows What's New once; Misc Settings shows it again.
+
+## October 21, 2026: frame-cost release G (client DLL)
+
+The owner's FiveM profile (`profiler record`, 1,000 frames) was taken on a
+client running release E, not the pre-edit build: the pre-edit DLLs all run a
+once-a-second `GcTick`, which never appears; `DeathNotifications` runs 4 times a
+second (release E); and F's auto-lock tick is absent. It showed vMenu at
+0.33 ms per frame:
+- 0.164 ms: vMenu's own tick code
+- 0.031 ms: MenuAPI's tick code
+- 0.071 ms: the C# scheduler starting or resuming about 25 tick functions a frame
+- 0.055 ms: the C# runtime's fixed cost
+
+Release G cuts the per-frame work in vMenu's code without changing what players
+see. Client only: the server DLL is release B's.
+
+**Changes:**
+- **Player blips** (when blips are on): the full refresh (creating and removing
+  blips, sprite, colour, name, category, heading indicator, display and your own
+  sprite decorator) runs 10 times a second instead of every frame. Rotation is
+  still set every frame for the blips the last refresh rotated, so a turning
+  player's blip turns smoothly. Before, the refresh made about 20 game calls per
+  player in scope and two per player elsewhere on the server, every frame; the
+  test scenario goes from about 120 calls a frame to about 10 between refreshes.
+- **Snowball and visor keys:** the two keys are read first. The six state checks
+  and the `vmenu_enable_snow` convar read now happen only when one is used, not
+  every frame.
+- **Clothing glow:** waits its 25 ms with one `Delay(25)` instead of waking every
+  frame until 25 ms had passed. The glow is the same.
+- **One shared per-frame tick** (`PerFrameChecks`) replaces four ticks: vehicle
+  health text, flash high beams on honk, the MP editor movement lock and the
+  animal-ped first-person block. Each keeps its permission or setting, and each
+  is caught separately so one failing doesn't stop the others. The movement lock
+  and the animal block now also apply on the odd frame the old ticks skipped while
+  restarting.
+- **Fewer game calls:**
+  - `PlayerPedId()` (one call) replaces `Game.PlayerPed` (two calls) in general
+    tasks, player options, vehicle options, weapon options, the MP editor camera
+    and the death check.
+  - On foot, your last vehicle is looked up only while vMenu has a vehicle
+    hidden.
+  - Unlimited parachutes use the parachute's hash (`WeaponHash.Parachute`,
+    0xFBAB5776) instead of hashing `"gadget_parachute"` every frame.
+- **MenuAPI's forced garbage collection is off.** MenuAPI called `GC.Collect()`
+  every 60 s while no menu was open (`EnableManualGCs`, on by default), a likely
+  periodic hitch. Release A removed vMenu's own one; this is the second.
+
+**Not changed:**
+- MenuAPI's own per-frame work (about 0.03 ms: texture-dictionary checks and
+  key handling while the menu is closed). It needs a fork of the library.
+- The duty-blip heartbeat (every 5 s) keeps its timing.
+- The C# runtime's fixed 0.055 ms.
+
+Expected effect: about 0.2 ms per frame instead of 0.33 under the profiler. This
+has not been measured; profile again to confirm.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `2d0178c6cdea02dfbf88378b0336d382fe43a0150679821b796073f808d3a02e` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release F's client DLL shows only the members above:
+  `PlayerBlipsControl` and `RotatePlayerBlips`, `AnimationsAndInteractions`,
+  `PlayerClothingAnimationsController`, `PerFrameChecks` with the four checks it
+  calls, `SetupTickFunctions`, `GeneralTasks`, `PlayerOptions`, `VehicleOptions`,
+  `WeaponOptions`, `ManageCamera`, `RestorePlayerAfterBeingDead` and the
+  `MainMenu` constructor. Everything else is renumbered compiler-generated local
+  functions.
+- New test `python tests/frame-costs/test_frame_costs.py`. It runs the production
+  code against fake natives, frame by frame, on a scheduler that restarts and
+  resumes ticks the way FiveM's C# runtime does:
+  - Blips: the throttled code against the same code with the throttle off (the
+    old every-frame behaviour), through players joining, leaving, entering a
+    heli, coming into range, the map opening, the duty list changing and blips
+    going off and on. They match at every refresh, refreshes come every 100 ms,
+    rotation follows every frame in between, and other resources' blips are never
+    touched.
+  - Snowball and visor keys, clothing glow (one wake-up per pass), and the shared
+    tick (every check every frame, errors isolated).
+  - Twelve deliberate breakages of these behaviours are each caught.
+- A one-off run of release F's code against G's on the same fakes:
+  - identical blips: every frame with the throttle off, and at every refresh with
+    it on
+  - identical snowball and visor results over 20,000 random frames
+  - identical glow writes at 7, 16 and 33 ms frames, with a quarter of the
+    wake-ups at 7 ms frames, half at 16 ms and the same at 33 ms
+  - identical health text and high beams
+  - the movement lock and the animal block identical, or applied on about 45
+    more of 20,000 frames, never fewer
+- `tests/client-guards`: its weapon-options fake gains `PlayerPedId`.
+- All twenty-five tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy** (on top of release F, or with the A-F steps in "releases B-E merged"):
+1. Hash the live client DLL. It must be release F's
+   (`38bac5d98528d7a5663fd7adee888af6ef9fb62b9cb1d7fc61ada6d48f1e635d`). A server
+   still on release E (`8b05f1f4…`) needs release F's files and steps too.
+2. Copy `vMenuClient.net.dll`.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- Blips on, with other players around: their blips appear, switch to a vehicle
+  sprite when they get in a car, turn smoothly as they turn, leave the minimap
+  when they're far and show on the pause-menu map. On-duty players keep the duty
+  blip. Turn blips off: vMenu's blips go.
+- With snow on, pick up a snowball (G while standing still). Hold the visor key
+  on a bike helmet. Neither works with the menu open.
+- Illuminated clothing: fade and flash look the same as before.
+- Vehicle health text, high beams on honk, no walking in the MP character editor,
+  and no first person as an animal.
+- Run `profiler record 1000` in the same spot as before, then `profiler saveJSON`,
+  and compare vMenu's time.

@@ -144,10 +144,10 @@ namespace vMenuClient
             if (IsAllowed(Permission.VOMenu))
             {
                 Tick += VehicleOptions;
-                Tick += VehicleShowHealthOnScreenTick;
+                vehicleHealthCheckEnabled = true;
                 if (IsAllowed(Permission.VOFlashHighbeamsOnHonk))
                 {
-                    Tick += VehicleHighbeamFlashTick;
+                    highbeamFlashCheckEnabled = true;
                 }
             }
             if (IsAllowed(Permission.VCMenu))
@@ -169,7 +169,7 @@ namespace vMenuClient
             if (IsAllowed(Permission.PAMenu))
             {
                 Tick += ManageCamera;
-                Tick += DisableMovement;
+                movementLockCheckEnabled = true;
             }
             if (IsAllowed(Permission.MSPlayerBlips))
             {
@@ -198,7 +198,11 @@ namespace vMenuClient
             }
             if (GetSettingsBool(Setting.vmenu_enable_animals_spawn_menu))
             {
-                Tick += AnimalPedCameraChangeBlocker;
+                animalCameraCheckEnabled = true;
+            }
+            if (vehicleHealthCheckEnabled || highbeamFlashCheckEnabled || movementLockCheckEnabled || animalCameraCheckEnabled)
+            {
+                Tick += PerFrameChecks;
             }
         }
 
@@ -211,7 +215,8 @@ namespace vMenuClient
         private async Task GeneralTasks()
         {
             // Check if the player has switched to a new vehicle.
-            if (Game.PlayerPed.IsInVehicle()) // added this for improved performance.
+            // PlayerPedId() is one game call; Game.PlayerPed is two (PlayerId, then GetPlayerPed).
+            if (IsPedInAnyVehicle(PlayerPedId(), false)) // added this for improved performance.
             {
                 var tmpVehicle = GetVehicle();
                 if (tmpVehicle != null && tmpVehicle.Exists() && tmpVehicle.Handle != LastVehicle)
@@ -241,6 +246,7 @@ namespace vMenuClient
             // perms
             var godmodeAllowed = IsAllowed(Permission.POGod);
             var noRagdollAllowed = IsAllowed(Permission.PONoRagdoll);
+            var playerPed = PlayerPedId();
 
             if (MainMenu.MpPedCustomizationMenu != null && MainMenu.MpPedCustomizationMenu.appearanceMenu != null && MainMenu.MpPedCustomizationMenu.faceShapeMenu != null && MainMenu.MpPedCustomizationMenu.createCharacterMenu != null && MainMenu.MpPedCustomizationMenu.inheritanceMenu != null && MainMenu.MpPedCustomizationMenu.propsMenu != null && MainMenu.MpPedCustomizationMenu.clothesMenu != null && MainMenu.MpPedCustomizationMenu.tattoosMenu != null)
             {
@@ -258,7 +264,7 @@ namespace vMenuClient
                 }
                 if (!IsMpPedCreatorOpen())
                 {
-                    ApplyOverride(godModeLatch, MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed, Game.PlayerPed.Handle,
+                    ApplyOverride(godModeLatch, MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed, playerPed,
                         ped => SetEntityInvincible(ped, true), ped => SetEntityInvincible(ped, false));
                 }
             }
@@ -266,7 +272,7 @@ namespace vMenuClient
             // Manage PlayerInvisible
             if (MainMenu.PlayerOptionsMenu.PlayerInvisible && IsAllowed(Permission.POInvisible) && GetSettingsBool(Setting.vmenu_handle_invisibility))
             {
-                SetEntityVisible(Game.PlayerPed.Handle, false, false);
+                SetEntityVisible(playerPed, false, false);
             }
 
             // Manage Super jump.
@@ -276,7 +282,7 @@ namespace vMenuClient
             }
 
             // Manage PlayerNoRagdoll
-            ApplyOverride(noRagdollLatch, MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed, Game.PlayerPed.Handle,
+            ApplyOverride(noRagdollLatch, MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed, playerPed,
                 ped => SetPedCanRagdoll(ped, false), ped => SetPedCanRagdoll(ped, true));
 
 
@@ -402,11 +408,12 @@ namespace vMenuClient
         {
             // No helmet applies to the ped, so it is kept up to date on foot too.
             var noHelmet = MainMenu.VehicleOptionsMenu.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet);
-            ApplyOverride(noHelmetLatch, noHelmet, Game.PlayerPed.Handle,
+            var playerPed = PlayerPedId();
+            ApplyOverride(noHelmetLatch, noHelmet, playerPed,
                 ped => new Ped(ped).CanWearHelmet = false, ped => new Ped(ped).CanWearHelmet = true);
 
             // When the player is in a valid vehicle:
-            if (IsPedInAnyVehicle(Game.PlayerPed.Handle, true))
+            if (IsPedInAnyVehicle(playerPed, true))
             {
                 var veh = GetVehicle();
                 if (veh != null && veh.Exists())
@@ -583,14 +590,18 @@ namespace vMenuClient
                 UpdateVehicleGodOverrides(0);
 
                 // Make the vehicle visible again if vMenu hid it, otherwise you could not get back in.
-                var lastVehicle = GetVehicle(true);
-                if (lastVehicle != null && lastVehicle.Exists() && lastVehicle.Handle == menus.VehicleOptions.HiddenVehicle)
+                // Only looked up while vMenu has a vehicle hidden; no existing vehicle has handle 0.
+                if (menus.VehicleOptions.HiddenVehicle != 0)
                 {
-                    if (!lastVehicle.IsVisible)
+                    var lastVehicle = GetVehicle(true);
+                    if (lastVehicle != null && lastVehicle.Exists() && lastVehicle.Handle == menus.VehicleOptions.HiddenVehicle)
                     {
-                        lastVehicle.IsVisible = true;
+                        if (!lastVehicle.IsVisible)
+                        {
+                            lastVehicle.IsVisible = true;
+                        }
+                        menus.VehicleOptions.HiddenVehicle = 0;
                     }
-                    menus.VehicleOptions.HiddenVehicle = 0;
                 }
 
                 vehicleOnlyMenus ??= new[]
@@ -629,10 +640,9 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// Vehicle control options for flashing highbeams.
+        /// Vehicle control options for flashing highbeams. Runs every frame, from PerFrameChecks.
         /// </summary>
-        /// <returns></returns>
-        private async Task VehicleHighbeamFlashTick()
+        private void VehicleHighbeamFlash()
         {
             if (MainMenu.VehicleOptionsMenu.FlashHighbeamsOnHonk && IsPedInAnyVehicle(Game.PlayerPed.Handle, true))
             {
@@ -654,14 +664,12 @@ namespace vMenuClient
                     }
                 }
             }
-            await Task.FromResult(0);
         }
 
         /// <summary>
-        /// Shows the vehicle health on screen.
+        /// Shows the vehicle health on screen. Runs every frame, from PerFrameChecks.
         /// </summary>
-        /// <returns></returns>
-        private async Task VehicleShowHealthOnScreenTick()
+        private void VehicleShowHealthOnScreen()
         {
             if (MainMenu.VehicleOptionsMenu.VehicleShowHealth)
             {
@@ -692,8 +700,6 @@ namespace vMenuClient
                     DrawTextOnScreen($"~n~~n~~n~Tank health: {GetHealthString(Math.Round(veh.PetrolTankHealth, 2))}", 0.5f, 0.0f);
                 }
             }
-
-            await Task.FromResult(0);
         }
         #endregion
 
@@ -1453,7 +1459,7 @@ namespace vMenuClient
             // Unlimited ammo: kept on the weapon in hand while the option is on, and switched off once
             // for the last weapon when the option goes off or you change weapon. It used to write
             // "off" every frame, undoing any other script's infinite ammo.
-            var ped = Game.PlayerPed.Handle;
+            var ped = PlayerPedId();
             var weapon = GetSelectedPedWeapon(ped);
             var unlimitedAmmo = MainMenu.WeaponOptionsMenu.UnlimitedAmmo && IsAllowed(Permission.WPUnlimitedAmmo);
             var applyAmmo = unlimitedAmmoLatch.Update(unlimitedAmmo, weapon == unchecked((int)WeaponHash.Unarmed) ? 0 : weapon, out var previousWeapon);
@@ -1468,24 +1474,25 @@ namespace vMenuClient
 
             if (MainMenu.WeaponOptionsMenu.AutoEquipChute)
             {
-                if ((IsPedInAnyHeli(Game.PlayerPed.Handle) || IsPedInAnyPlane(Game.PlayerPed.Handle)) && !HasPedGotWeapon(Game.PlayerPed.Handle, (uint)WeaponHash.Parachute, false))
+                if ((IsPedInAnyHeli(ped) || IsPedInAnyPlane(ped)) && !HasPedGotWeapon(ped, (uint)WeaponHash.Parachute, false))
                 {
-                    GiveWeaponToPed(Game.PlayerPed.Handle, (uint)WeaponHash.Parachute, 1, false, true);
-                    SetPlayerHasReserveParachute(Game.Player.Handle);
-                    SetPlayerCanLeaveParachuteSmokeTrail(Game.PlayerPed.Handle, true);
+                    GiveWeaponToPed(ped, (uint)WeaponHash.Parachute, 1, false, true);
+                    SetPlayerHasReserveParachute(PlayerId());
+                    SetPlayerCanLeaveParachuteSmokeTrail(ped, true);
                 }
             }
 
             if (MainMenu.WeaponOptionsMenu.UnlimitedParachutes)
             {
-                if (!HasPedGotWeapon(Game.PlayerPed.Handle, (uint)GetHashKey("gadget_parachute"), false))
+                // WeaponHash.Parachute is GetHashKey("gadget_parachute") (0xFBAB5776), which this hashed every frame.
+                if (!HasPedGotWeapon(ped, (uint)WeaponHash.Parachute, false))
                 {
-                    GiveWeaponToPed(Game.PlayerPed.Handle, (uint)GetHashKey("gadget_parachute"), 0, false, false);
+                    GiveWeaponToPed(ped, (uint)WeaponHash.Parachute, 0, false, false);
                 }
 
-                if (!GetPlayerHasReserveParachute(Game.Player.Handle))
+                if (!GetPlayerHasReserveParachute(PlayerId()))
                 {
-                    SetPlayerHasReserveParachute(Game.Player.Handle);
+                    SetPlayerHasReserveParachute(PlayerId());
                 }
             }
             await Task.FromResult(0);
@@ -1567,7 +1574,7 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task ManageCamera()
         {
-            if (Game.PlayerPed.IsInVehicle())
+            if (IsPedInAnyVehicle(PlayerPedId(), false))
             {
                 if (MainMenu.MpPedCustomizationMenu.editPedBtn != null && MainMenu.MpPedCustomizationMenu.editPedBtn.Enabled)
                 {
@@ -1924,10 +1931,9 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// Disables movement while the mp character creator is open.
+        /// Disables movement while the mp character creator is open. Runs every frame, from PerFrameChecks.
         /// </summary>
-        /// <returns></returns>
-        private async Task DisableMovement()
+        private void DisableMovement()
         {
             if (IsMpCharEditorOpen())
             {
@@ -1969,10 +1975,6 @@ namespace vMenuClient
                 Game.DisableControlThisFrame(0, Control.VehicleExit);
                 Game.DisableControlThisFrame(0, Control.Enter);
             }
-            else
-            {
-                await Delay(0);
-            }
         }
         #endregion
 
@@ -1983,7 +1985,7 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task RestorePlayerAfterBeingDead()
         {
-            if (MainMenu.MiscSettingsMenu != null && Game.PlayerPed.IsDead)
+            if (MainMenu.MiscSettingsMenu != null && IsEntityDead(PlayerPedId()))
             {
                 var restoreDefault = MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter
                     && !string.IsNullOrEmpty(GetResourceKvpString("vmenu_default_character"));
@@ -2175,11 +2177,9 @@ namespace vMenuClient
                         clothingAnimationReverse = true;
                     }
                 }
-                var timer = GetGameTimer();
-                while (GetGameTimer() - timer < 25)
-                {
-                    await Delay(0);
-                }
+                // One wake-up after 25 ms. This used to wait by waking every frame (Delay(0) until 25 ms
+                // had passed), and each wake-up costs the C# scheduler more than the check itself.
+                await Delay(25);
             }
             try
             {
@@ -2222,6 +2222,25 @@ namespace vMenuClient
             public int Display = -1;
         }
         private readonly Dictionary<int, BlipStyle> blipStyles = new();
+
+        // With blips on, the whole refresh below ran every frame: about 20 game calls per player in
+        // scope and two per player elsewhere on the server. It now runs 10 times a second, which is
+        // as fast as a blip's sprite, colour or display could usefully change. Rotation follows a
+        // turning player, so it is still set every frame, for the blips the last refresh rotated.
+        private const int PlayerBlipsRefreshMs = 100;
+        private int playerBlipsRefreshedAt;
+        private readonly List<KeyValuePair<int, int>> rotatingPlayerBlips = new(); // blip, ped
+
+        private void RotatePlayerBlips()
+        {
+            foreach (var entry in rotatingPlayerBlips)
+            {
+                if (DoesBlipExist(entry.Key))
+                {
+                    SetBlipRotation(entry.Key, (int)GetEntityHeading(entry.Value));
+                }
+            }
+        }
 
         /// <summary>
         /// Removes the blip vMenu created for this player, if any. Blips from other resources are never touched.
@@ -2285,11 +2304,19 @@ namespace vMenuClient
             // player in scope at frame rate. The body must keep running while
             // off — it deletes leftover blips and keeps our sprite decorator
             // fresh for other players who have blips enabled — but 2Hz is
-            // plenty for that. Toggled on, it stays per-frame as before.
+            // plenty for that. Toggled on, it refreshes 10 times a second and
+            // rotates the blips in between (see PlayerBlipsRefreshMs).
             if (MainMenu.MiscSettingsMenu == null || !MainMenu.MiscSettingsMenu.ShowPlayerBlips)
             {
                 await Delay(500);
             }
+            else if (GetGameTimer() - playerBlipsRefreshedAt < PlayerBlipsRefreshMs)
+            {
+                RotatePlayerBlips();
+                return;
+            }
+            playerBlipsRefreshedAt = GetGameTimer();
+            rotatingPlayerBlips.Clear();
 
             if (DecorIsRegisteredAsType("vmenu_player_blip_sprite_id", 3))
             {
@@ -2419,6 +2446,7 @@ namespace vMenuClient
                                         if (rotateBlip)
                                         {
                                             SetBlipRotation(blip, (int)GetEntityHeading(ped));
+                                            rotatingPlayerBlips.Add(new KeyValuePair<int, int>(blip, ped));
                                         }
 
                                         // display on minimap and main map.
@@ -2532,20 +2560,25 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task AnimationsAndInteractions()
         {
+            // Nothing below happens unless one of these two keys is used this frame, so they are read
+            // first. The state checks and the snow convar read used to run every frame to find that out.
+            var snowballKeyReleased = Game.IsControlJustReleased(0, Control.Detonate);
+            if (!snowballKeyReleased && !Game.IsControlPressed(0, Control.SwitchVisor))
+            {
+                return;
+            }
+
             if (!(MenuController.IsAnyMenuOpen() || MainMenu.DontOpenMenus || !Fading.IsFadedIn || Game.IsPaused || IsPlayerSwitchInProgress() || Game.PlayerPed.IsDead))
             {
                 // snowballs
-                if (EventManager.IsSnowEnabled && IsAllowed(Permission.WPSnowball))
+                if (snowballKeyReleased && EventManager.IsSnowEnabled && IsAllowed(Permission.WPSnowball))
                 {
-                    if (Game.IsControlJustReleased(0, Control.Detonate))
+                    if (!(Game.PlayerPed.IsInVehicle() || Game.PlayerPed.IsDead || !Fading.IsFadedIn || IsPlayerSwitchInProgress() || Game.IsPaused
+                        || GetInteriorFromEntity(Game.PlayerPed.Handle) != 0 || !Game.PlayerPed.IsOnFoot || Game.PlayerPed.IsInParachuteFreeFall ||
+                        Game.PlayerPed.IsFalling || Game.PlayerPed.IsBeingStunned || Game.PlayerPed.IsWalking || Game.PlayerPed.IsRunning ||
+                        Game.PlayerPed.IsSprinting || Game.PlayerPed.IsSwimming || Game.PlayerPed.IsSwimmingUnderWater || (Game.PlayerPed.IsDiving && GetSelectedPedWeapon(Game.PlayerPed.Handle) == snowball_hash) || GetSelectedPedWeapon(Game.PlayerPed.Handle) == GetHashKey("unarmed")))
                     {
-                        if (!(Game.PlayerPed.IsInVehicle() || Game.PlayerPed.IsDead || !Fading.IsFadedIn || IsPlayerSwitchInProgress() || Game.IsPaused
-                            || GetInteriorFromEntity(Game.PlayerPed.Handle) != 0 || !Game.PlayerPed.IsOnFoot || Game.PlayerPed.IsInParachuteFreeFall ||
-                            Game.PlayerPed.IsFalling || Game.PlayerPed.IsBeingStunned || Game.PlayerPed.IsWalking || Game.PlayerPed.IsRunning ||
-                            Game.PlayerPed.IsSprinting || Game.PlayerPed.IsSwimming || Game.PlayerPed.IsSwimmingUnderWater || (Game.PlayerPed.IsDiving && GetSelectedPedWeapon(Game.PlayerPed.Handle) == snowball_hash) || GetSelectedPedWeapon(Game.PlayerPed.Handle) == GetHashKey("unarmed")))
-                        {
-                            await PickupSnowballOnce();
-                        }
+                        await PickupSnowballOnce();
                     }
                 }
 
@@ -2791,19 +2824,51 @@ namespace vMenuClient
         /// <summary>
         /// Prevents players from going into first person when they're currently using an animal as their player ped.
         /// This is to prevent them crashing their game or falling out of the sky as ~~birds~~ bricks.
+        /// Runs every frame, from PerFrameChecks: first person stays blocked for every frame the ped is an animal.
         /// </summary>
-        /// <returns></returns>
-        private async Task AnimalPedCameraChangeBlocker()
+        private void AnimalPedCameraChangeBlocker()
         {
-            var model = (uint)GetEntityModel(Game.PlayerPed.Handle);
-            if (AnimalHashes.Contains(model))
+            if (AnimalHashes.Contains((uint)GetEntityModel(PlayerPedId())))
             {
-                while (model == (uint)GetEntityModel(Game.PlayerPed.Handle))
-                {
-                    DisableFirstPersonCamThisFrame();
-                    await Delay(0);
-                }
+                DisableFirstPersonCamThisFrame();
             }
+        }
+        #endregion
+
+        #region per-frame checks
+        // Small checks that must run every frame. As separate ticks, each cost the C# scheduler a task
+        // start every frame (and DisableMovement and the animal blocker a Delay(0) resume as well), which
+        // was more than the checks themselves. They now share this one tick. Each is caught on its own,
+        // so one failing doesn't stop the others, as when they were separate ticks.
+        private bool vehicleHealthCheckEnabled;
+        private bool highbeamFlashCheckEnabled;
+        private bool movementLockCheckEnabled;
+        private bool animalCameraCheckEnabled;
+
+        private async Task PerFrameChecks()
+        {
+            if (vehicleHealthCheckEnabled)
+            {
+                try { VehicleShowHealthOnScreen(); } catch (Exception e) { LogPerFrameCheckError(nameof(VehicleShowHealthOnScreen), e); }
+            }
+            if (highbeamFlashCheckEnabled)
+            {
+                try { VehicleHighbeamFlash(); } catch (Exception e) { LogPerFrameCheckError(nameof(VehicleHighbeamFlash), e); }
+            }
+            if (movementLockCheckEnabled)
+            {
+                try { DisableMovement(); } catch (Exception e) { LogPerFrameCheckError(nameof(DisableMovement), e); }
+            }
+            if (animalCameraCheckEnabled)
+            {
+                try { AnimalPedCameraChangeBlocker(); } catch (Exception e) { LogPerFrameCheckError(nameof(AnimalPedCameraChangeBlocker), e); }
+            }
+            await Task.FromResult(0);
+        }
+
+        private static void LogPerFrameCheckError(string check, Exception e)
+        {
+            Debug.WriteLine($"[vMenu] {check} failed: {e}");
         }
         #endregion
 

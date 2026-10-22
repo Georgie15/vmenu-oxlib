@@ -93,6 +93,7 @@ static class Program
 
     static int selected;
     static readonly List<string> calls = new List<string>();
+    static int PlayerPedId() => Game.PlayerPed.Handle;
     static int GetSelectedPedWeapon(int ped) => selected;
     static void SetPedInfiniteAmmo(int ped, bool on, uint weapon) { calls.Add($"{weapon}:{on}"); }
     static readonly OverrideLatch unlimitedAmmoLatch = new OverrideLatch();

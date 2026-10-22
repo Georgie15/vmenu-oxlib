@@ -59,6 +59,7 @@ dotnet run --project tests/vehicle-conveniences
 dotnet run --project tests/saved-outfits
 lua tests/photo-mode/test_photo_mode.lua
 lua tests/whats-new/test_whats_new.lua
+python tests/frame-costs/test_frame_costs.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so
