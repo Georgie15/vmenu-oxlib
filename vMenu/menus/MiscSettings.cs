@@ -150,6 +150,7 @@ namespace vMenuClient.menus
             };
             var backupSaves = new MenuItem("Back Up My Saves", "Copies your saved vehicles, peds, MP characters, weapon loadouts and vehicle presets to the server, replacing your previous backup. Restore them after clearing your game cache or on another PC.");
             var restoreSaves = new MenuItem("Restore My Saves", "Adds the saves from your server backup. Saves you already have with the same name are kept as they are.");
+            var autoBackupSaves = new MenuCheckboxItem("Auto Back Up My Saves", "Backs up your saves on its own when they change, checking every 10 minutes. Turning it on backs up straight away.", GetResourceKvpInt("vmenu_auto_backup") == 1);
             var joinQuitNotifs = new MenuCheckboxItem("Join / Quit Notifications", "Receive notifications when someone joins or leaves the server.", JoinQuitNotifications);
             var deathNotifs = new MenuCheckboxItem("Death Notifications", "Receive notifications when someone dies or gets killed.", DeathNotifications);
             var nightVision = new MenuCheckboxItem("Toggle Night Vision", "Enable or disable night vision.", false);
@@ -691,6 +692,19 @@ namespace vMenuClient.menus
             {
                 menu.AddMenuItem(backupSaves);
                 menu.AddMenuItem(restoreSaves);
+                menu.AddMenuItem(autoBackupSaves);
+                // client/backups.lua reads vmenu_auto_backup every 10 minutes.
+                menu.OnCheckboxChange += (sender, item, index, _checked) =>
+                {
+                    if (item == autoBackupSaves)
+                    {
+                        SetResourceKvpInt("vmenu_auto_backup", _checked ? 1 : 0);
+                        if (_checked)
+                        {
+                            TriggerEvent("vMenu:backups:autoNow");
+                        }
+                    }
+                };
             }
             menu.AddMenuItem(saveSettings);
 

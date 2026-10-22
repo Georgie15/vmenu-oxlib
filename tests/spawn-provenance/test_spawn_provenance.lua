@@ -142,3 +142,47 @@ local createAt = core:find('new Vehicle(CreateVehicle(vehicleHash', 1, true)
 local spawnedAt = core:find('TriggerEvent("vMenu:telemetry:vehicleSpawned", vehicle.Handle);', 1, true)
 check(queueAt and createAt and spawnedAt and queueAt < createAt and createAt < spawnedAt, 'spawn core: queue, create, then hand over the vehicle')
 print('PASS: wiring')
+
+-- Server: one ticket per spawn. Requests closer together than half the spawner cooldown are refused,
+-- so a client can't hold a stream of wildcard tickets.
+local function newServer(cooldown)
+    local srv = { now = 50000, handlers = {}, issued = 0, toClient = {}, aceAllowed = true }
+    _G.GetGameTimer = function() return srv.now end
+    _G.GetConvarInt = function(name, default) if name == 'vmenu_vehicle_spawner_cooldown' then return cooldown end return default end
+    _G.RegisterNetEvent = function(name, fn) srv.handlers[name] = fn end
+    _G.AddEventHandler = function(name, fn) srv.handlers[name] = fn end
+    _G.IsPlayerAceAllowed = function() return srv.aceAllowed end
+    _G.GetResourceState = function() return 'started' end
+    _G.TriggerClientEvent = function(name, target, ...) srv.toClient[#srv.toClient + 1] = { name = name, target = target, args = { ... } } end
+    _G.exports = setmetatable({ psrp_telemetry = { IssueVehicleSpawnTicket = function() srv.issued = srv.issued + 1; return true, 'nonce-' .. srv.issued end } },
+        { __call = function(_, name, fn) srv.exportsFn = fn end })
+    local realPrint = print
+    _G.print = function() end
+    assert(load(readFile('build/vMenu/server/spawnProvenance.lua'), '@server/spawnProvenance.lua'))()
+    _G.print = realPrint
+    function srv.begin(src, request) _G.source = src; srv.handlers['vMenu:telemetry:beginVehicleSpawn'](request or 'VM-0000abcd-0001'); _G.source = nil end
+    function srv.drop(src) _G.source = src; srv.handlers['playerDropped'](); _G.source = nil end
+    return srv
+end
+
+local srv = newServer(1000)
+srv.begin(1)
+check(srv.issued == 1 and srv.toClient[1].name == 'vMenu:telemetry:vehicleSpawnTicket' and srv.toClient[1].target == 1, 'a spawn gets a ticket')
+for _ = 1, 20 do srv.now = srv.now + 10; srv.begin(1) end
+check(srv.issued == 1 and srv.exportsFn().throttled == 20, 'a burst of requests gets no more tickets')
+srv.begin(2)
+check(srv.issued == 2, 'each player has their own limit')
+srv.now = srv.now + 500
+srv.begin(1)
+check(srv.issued == 3, 'allowed again after half the cooldown (network jitter)')
+srv.drop(1)
+srv.begin(1)
+check(srv.issued == 4, 'the limit is forgotten when the player leaves')
+srv = newServer(100)
+srv.begin(1); srv.now = srv.now + 200; srv.begin(1); srv.now = srv.now + 200; srv.begin(1)
+check(srv.issued == 2, 'never less than 250 ms apart, however short the cooldown')
+srv = newServer(1000)
+srv.aceAllowed = false
+srv.begin(1)
+check(srv.issued == 0 and srv.exportsFn().rejected == 1, 'no ticket without the spawner permission')
+print('PASS: server issues at most one ticket per spawn interval, per player')

@@ -37,6 +37,9 @@ namespace vMenuClient.menus
 
         public static Dictionary<string, uint> AddonPeds;
         public static List<PedPackEntry> PedPackPeds;
+        // Model hashes from pedpack.json. Becoming one needs vMenu.PlayerAppearance.PedPack, however
+        // it's reached: the Ped Pack menu, Spawn By Name, a saved ped or a restore.
+        public static readonly HashSet<uint> PedPackModelHashes = new();
         public static PlayerAppearance Instance { get; private set; }
 
         public static int ClothingAnimationType { get; set; } = UserDefaults.PAClothingAnimationType;
@@ -115,6 +118,30 @@ namespace vMenuClient.menus
 
             menu.AddMenuItem(walkingStyle);
             menu.AddMenuItem(clothingGlowType);
+
+            // Clothing quick toggles, with key bindings that are unbound until the player picks keys.
+            var clothingTogglesMenu = new Menu(" ", "Clothing Quick Toggles");
+            var clothingTogglesBtn = new MenuItem("Clothing Quick Toggles", "Take off your hat, glasses, ear accessory, mask or bag, and put back exactly what you took off.") { Label = "→→→" };
+            MenuController.AddSubmenu(menu, clothingTogglesMenu);
+            menu.AddMenuItem(clothingTogglesBtn);
+            MenuController.BindMenuItem(menu, clothingTogglesMenu, clothingTogglesBtn);
+            var keyMappingId = MainMenu.GetKeyMappingId();
+            foreach (var info in ClothingToggles.Slots)
+            {
+                var slot = info.Slot;
+                clothingTogglesMenu.AddMenuItem(new MenuItem($"Toggle {info.Name}",
+                    $"Take off or put back {info.Phrase}. To use a key, set one in Settings > Key Bindings > FiveM > vMenu Toggle {info.Name}.") { ItemData = slot });
+                var command = $"vMenu:{keyMappingId}:Toggle{slot}";
+                RegisterCommand(command, new Action<int, List<object>, string>((source, args, rawCommand) => ToggleClothing(slot)), false);
+                RegisterKeyMapping(command, $"vMenu Toggle {info.Name}", "keyboard", "");
+            }
+            clothingTogglesMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item.ItemData is ClothingToggles.Slot slot)
+                {
+                    ToggleClothing(slot);
+                }
+            };
 
             if (IsAllowed(Permission.PACustomize))
             {
@@ -817,6 +844,76 @@ namespace vMenuClient.menus
         {
             var configuredUrl = GetSettingsString(Setting.vmenu_pedpack_store_url, DefaultPedPackStoreUrl);
             return string.IsNullOrWhiteSpace(configuredUrl) ? DefaultPedPackStoreUrl : configuredUrl.Trim();
+        }
+
+        private static readonly ClothingToggles clothingToggles = new();
+
+        private static bool IsMpCharacter(int ped)
+            => IsPedModel(ped, (uint)GetHashKey("mp_m_freemode_01")) || IsPedModel(ped, (uint)GetHashKey("mp_f_freemode_01"));
+
+        /// <summary>
+        /// Takes off, or puts back, one clothing slot (menu item or key binding).
+        /// </summary>
+        internal static void ToggleClothing(ClothingToggles.Slot slot)
+        {
+            var ped = Game.PlayerPed.Handle;
+            if (IsPedDeadOrDying(ped, true) || IsPedRagdoll(ped))
+            {
+                return;
+            }
+            var info = ClothingToggles.Slots.First(s => s.Slot == slot);
+            if (info.MpOnly && !IsMpCharacter(ped))
+            {
+                Notify.Error($"Only MP characters can take off {info.Phrase} this way.");
+                return;
+            }
+
+            ClothingToggles.Look? worn = null;
+            var drawable = info.IsProp ? GetPedPropIndex(ped, info.Index) : GetPedDrawableVariation(ped, info.Index);
+            if (info.IsProp ? drawable >= 0 : drawable > 0)
+            {
+                worn = new ClothingToggles.Look(drawable, info.IsProp ? GetPedPropTextureIndex(ped, info.Index) : GetPedTextureVariation(ped, info.Index));
+            }
+
+            switch (clothingToggles.Toggle(ped, slot, worn, out var look))
+            {
+                case ClothingToggles.Outcome.TakenOff:
+                    if (info.IsProp)
+                    {
+                        ClearPedProp(ped, info.Index);
+                    }
+                    else
+                    {
+                        SetPedComponentVariation(ped, info.Index, 0, 0, 0);
+                    }
+                    break;
+                case ClothingToggles.Outcome.PutBack:
+                    if (info.IsProp)
+                    {
+                        SetPedPropIndex(ped, info.Index, look.Drawable, look.Texture, true);
+                    }
+                    else
+                    {
+                        SetPedComponentVariation(ped, info.Index, look.Drawable, look.Texture, 0);
+                    }
+                    break;
+                default:
+                    Notify.Info($"You aren't wearing {info.Phrase}.");
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// True, after showing the store prompt, when this is a ped pack model the player hasn't unlocked.
+        /// </summary>
+        internal static bool IsLockedPedPackModel(uint model)
+        {
+            if (!PedPackModelHashes.Contains(model) || IsAllowed(Permission.PAPedPack))
+            {
+                return false;
+            }
+            ShowPedPackStorePrompt();
+            return true;
         }
 
         private static void ShowPedPackStorePrompt()

@@ -1,7 +1,7 @@
 -- Run from the repo root: lua tests/save-backups/test_backups.lua
 -- Runs the production client/backups.lua and server/backups.lua against fake FiveM, ox_lib and
--- oxmysql: what goes into a backup, the server's checks and rate limits, and the merge-only
--- restore that never overwrites a save you already have.
+-- oxmysql: what goes into a backup, the server's checks and rate limits, the merge-only restore
+-- that never overwrites a save you already have, and auto backup with its reminder.
 
 local function check(condition, message)
     if not condition then error('FAIL: ' .. message, 2) end
@@ -14,107 +14,30 @@ local function readFile(path)
     return text
 end
 
--- Minimal JSON (FiveM provides json.encode/json.decode).
-local json = {}
-do
-    local escapes = { ['"'] = '\\"', ['\\'] = '\\\\', ['\b'] = '\\b', ['\f'] = '\\f', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
-    local function encodeString(s)
-        return '"' .. (s:gsub('[%c"\\]', function(c) return escapes[c] or ('\\u%04x'):format(c:byte()) end)) .. '"'
-    end
-
-    function json.encode(v)
-        local t = type(v)
-        if t == 'string' then return encodeString(v) end
-        if t == 'number' or t == 'boolean' then return tostring(v) end
-        if t == 'nil' then return 'null' end
-        assert(t == 'table', 'cannot encode ' .. t)
-        if #v > 0 then
-            local parts = {}
-            for i = 1, #v do parts[i] = json.encode(v[i]) end
-            return '[' .. table.concat(parts, ',') .. ']'
-        end
-        local keys = {}
-        for k in pairs(v) do keys[#keys + 1] = tostring(k) end
-        table.sort(keys)
-        local parts = {}
-        for _, k in ipairs(keys) do parts[#parts + 1] = encodeString(k) .. ':' .. json.encode(v[k]) end
-        return '{' .. table.concat(parts, ',') .. '}'
-    end
-
-    function json.decode(text)
-        local pos = 1
-        local function ws() pos = text:find('[^ \t\r\n]', pos) or #text + 1 end
-        local function str()
-            pos = pos + 1
-            local out = {}
-            while true do
-                local c = text:sub(pos, pos)
-                if c == '' then error('unterminated string') end
-                if c == '"' then pos = pos + 1; return table.concat(out) end
-                if c == '\\' then
-                    local e = text:sub(pos + 1, pos + 1)
-                    local map = { ['"'] = '"', ['\\'] = '\\', ['/'] = '/', b = '\b', f = '\f', n = '\n', r = '\r', t = '\t' }
-                    if e == 'u' then
-                        out[#out + 1] = utf8.char(tonumber(text:sub(pos + 2, pos + 5), 16)); pos = pos + 6
-                    elseif map[e] then
-                        out[#out + 1] = map[e]; pos = pos + 2
-                    else
-                        error('bad escape')
-                    end
-                else
-                    out[#out + 1] = c; pos = pos + 1
-                end
-            end
-        end
-        local value
-        local function list(close, item)
-            pos = pos + 1; ws()
-            if text:sub(pos, pos) == close then pos = pos + 1; return end
-            while true do
-                item(); ws()
-                local d = text:sub(pos, pos); pos = pos + 1
-                if d == close then return end
-                if d ~= ',' then error('expected , or ' .. close) end
-            end
-        end
-        function value()
-            ws()
-            local c = text:sub(pos, pos)
-            if c == '{' then
-                local obj = {}
-                list('}', function()
-                    ws(); if text:sub(pos, pos) ~= '"' then error('expected key') end
-                    local k = str(); ws()
-                    if text:sub(pos, pos) ~= ':' then error('expected :') end
-                    pos = pos + 1; obj[k] = value()
-                end)
-                return obj
-            elseif c == '[' then
-                local arr = {}
-                list(']', function() arr[#arr + 1] = value() end)
-                return arr
-            elseif c == '"' then return str()
-            elseif text:find('^true', pos) then pos = pos + 4; return true
-            elseif text:find('^false', pos) then pos = pos + 5; return false
-            elseif text:find('^null', pos) then pos = pos + 4; return nil
-            end
-            local num = text:match('^-?%d+%.?%d*[eE]?[-+]?%d*', pos)
-            if not num then error('unexpected ' .. c) end
-            pos = pos + #num
-            return tonumber(num)
-        end
-        local result = value(); ws()
-        if pos <= #text then error('trailing data') end
-        return result
-    end
-end
+local json = dofile('tests/lua/json.lua')
 _G.json = json
 
 local function count(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
 
+-- GTA's joaat, as GetHashKey returns it (case-insensitive, signed).
+local function joaat(text)
+    text = text:lower()
+    local h = 0
+    for i = 1, #text do
+        h = (h + text:byte(i)) & 0xFFFFFFFF
+        h = (h + (h << 10)) & 0xFFFFFFFF
+        h = h ~ (h >> 6)
+    end
+    h = (h + (h << 3)) & 0xFFFFFFFF
+    h = h ~ (h >> 11)
+    h = (h + (h << 15)) & 0xFFFFFFFF
+    return h >= 0x80000000 and h - 0x100000000 or h
+end
+
 -- A client with these KVPs. lib.alertDialog answers client.answer ('confirm' by default).
 local function newClient(kvps)
-    local c = { kvps = kvps, notes = {}, latent = {}, server = {}, handlers = {}, dialogs = {}, now = 0, answer = 'confirm' }
+    local c = { kvps = kvps, notes = {}, latent = {}, server = {}, handlers = {}, dialogs = {}, now = 0, answer = 'confirm',
+        clock = 1700000000, convar = 'true' }
     c.info = function() return false, "You don't have a backup on this server yet." end
 
     _G.GetGameTimer = function() return c.now end
@@ -136,6 +59,13 @@ local function newClient(kvps)
     _G.TriggerServerEvent = function(name, ...) c.server[#c.server + 1] = { name = name, args = { ... } } end
     _G.TriggerLatentServerEvent = function(name, bps, ...) c.latent[#c.latent + 1] = { name = name, bps = bps, args = { ... } } end
     _G.Config = { Notify = function(_, msg, kind) c.notes[#c.notes + 1] = { msg = msg, kind = kind } end }
+    _G.GetConvar = function(name, default) if name == 'vmenu_backups' then return c.convar end return default end
+    _G.GetHashKey = joaat
+    _G.GetResourceKvpInt = function(k) local v = c.kvps[k]; return math.type(v) == 'integer' and v or 0 end
+    _G.SetResourceKvpInt = function(k, v) c.kvps[k] = math.tointeger(v) end
+    _G.GetCloudTimeAsInt = function() return c.clock end
+    _G.Wait = function(ms) coroutine.yield(ms) end
+    _G.CreateThread = function(fn) c.thread = coroutine.create(fn) end
     _G.lib = {
         alertDialog = function(d) c.dialogs[#c.dialogs + 1] = d; return c.answer end,
         callback = { await = function(name) assert(name == 'vMenu:backups:info'); return c.info() end },
@@ -143,6 +73,12 @@ local function newClient(kvps)
     assert(load(readFile('build/vMenu/client/backups.lua'), '@client/backups.lua'))()
 
     function c.fire(name, ...) c.handlers[name](...) end
+    -- Runs the background thread to its next Wait and returns how long it waits (nil once it ends).
+    function c.step()
+        local ok, waitMs = coroutine.resume(c.thread)
+        assert(ok, waitMs)
+        return coroutine.status(c.thread) ~= 'dead' and waitMs or nil
+    end
     function c.lastNote() return c.notes[#c.notes] or { msg = '' } end
     return c
 end
@@ -206,6 +142,8 @@ local SAVES = {
     vmenu_default_character = 'mp_ped_Main',
     vmenu_last_character = 'mp_ped_Main',
     vmenu_string_default_loadout = 'vmenu_string_saved_weapon_loadout_Patrol',
+    vmenu_vehicle_favourites = '[2046537925]',
+    vmenu_vehicle_recent = '[1,2,2046537925]',
 }
 local NOT_SAVES = {
     settings_noclip_speed = '3',
@@ -214,6 +152,9 @@ local NOT_SAVES = {
     vmenu_last_mp_character_snapshot = '{}',
     veh_ = 'just the prefix',
     vmenu_cleanup_version = 2,
+    vmenu_auto_backup = 1,
+    vmenu_backup_fingerprint = '10:20:30',
+    vmenu_backup_last_at = 1600000000,
 }
 
 local function copy(...)
@@ -229,17 +170,17 @@ check(#c.latent == 1 and c.latent[1].name == 'vMenu:backups:upload' and c.latent
 local sent = json.decode(c.latent[1].args[1])
 check(count(sent) == count(SAVES), 'only saves are backed up (got ' .. count(sent) .. ')')
 for k, v in pairs(SAVES) do check(sent[k] == v, 'backed up unchanged: ' .. k) end
-check(c.dialogs[1].content:find('11 saves', 1, true), 'the confirmation says how many saves')
+check(c.dialogs[1].content:find('13 saves', 1, true), 'the confirmation says how many saves')
 
 c.fire('vMenu:backups:backup')
 check(#c.latent == 1 and c.lastNote().msg:find('in progress', 1, true), 'one transfer at a time')
-c.fire('vMenu:backups:uploadResult', true, 'Backed up 11 saves to the server.')
+c.fire('vMenu:backups:uploadResult', true, 'Backed up 13 saves to the server.')
 c.fire('vMenu:backups:backup')
 check(#c.latent == 2, 'the server reply ends the transfer')
 c.now = c.now + 61000
 c.fire('vMenu:backups:backup')
 check(#c.latent == 3, 'no reply within a minute also ends it')
-print('PASS: backups hold saves, categories, loadouts, presets and defaults, not settings or temporary keys')
+print('PASS: backups hold saves, categories, loadouts, presets, favourites, recents and defaults, not settings or temporary keys')
 
 c = newClient(copy(SAVES))
 c.answer = 'cancel'
@@ -263,7 +204,7 @@ local payload = c.latent[1].args[1]
 check(s.info(1) == false, 'no backup yet')
 s.send(1, 'vMenu:backups:upload', payload)
 check(s.lastReply().name == 'vMenu:backups:uploadResult' and s.lastReply().target == 1 and s.lastReply().args[1] == true, 'a valid backup is stored')
-check(s.rows['license:aaa'].entries == 11 and count(json.decode(s.rows['license:aaa'].data)) == 11, 'stored per license with its count')
+check(s.rows['license:aaa'].entries == 13 and count(json.decode(s.rows['license:aaa'].data)) == 13, 'stored per license with its count')
 s.send(1, 'vMenu:backups:upload', payload)
 check(s.lastReply().args[1] == false and s.lastReply().args[2]:find('once a minute', 1, true), 'backups are limited to one a minute')
 s.now = s.now + 60000
@@ -313,7 +254,7 @@ print('PASS: server validation, rate limit, license, convar and database errors'
 -- Info and download.
 s.now = s.now + 3000
 local info = s.info(1)
-check(type(info) == 'table' and info.entries == 11 and info.updated == '2026-10-21 12:00', 'info returns the count and date')
+check(type(info) == 'table' and info.entries == 13 and info.updated == '2026-10-21 12:00', 'info returns the count and date')
 local ok, reason = s.info(1)
 check(ok == false and reason:find('wait', 1, true), 'info is rate limited')
 s.send(1, 'vMenu:backups:download')
@@ -335,7 +276,7 @@ c = newClient({ veh_Cruiser = '{"model":1,"mine":"newer"}', settings_noclip_spee
 c.info = function() return backupInfo end
 c.fire('vMenu:backups:restore')
 check(#c.server == 1 and c.server[1].name == 'vMenu:backups:download', 'confirming asks the server for the backup')
-check(c.dialogs[1].content:find('2026-10-21 12:00 (11 saves)', 1, true), 'the confirmation names the backup')
+check(c.dialogs[1].content:find('2026-10-21 12:00 (13 saves)', 1, true), 'the confirmation names the backup')
 local restored = json.decode(s.latent[1].args[1])
 restored.settings_injected = 'x'
 c.fire('vMenu:backups:restoreData', json.encode(restored))
@@ -344,7 +285,7 @@ check(c.kvps.settings_injected == nil and c.kvps.settings_noclip_speed == '1', '
 for k, v in pairs(SAVES) do
     if k ~= 'veh_Cruiser' then check(c.kvps[k] == v, 'restored: ' .. k) end
 end
-check(c.lastNote().msg == 'Restored 10 saves. 1 you already had were kept as they are. Reopen the menu to see them.', 'reports what was added and kept: ' .. c.lastNote().msg)
+check(c.lastNote().msg == 'Restored 12 saves. 1 you already had were kept as they are. Reopen the menu to see them.', 'reports what was added and kept: ' .. c.lastNote().msg)
 c.fire('vMenu:backups:restoreData', json.encode(restored))
 check(c.lastNote().msg:find('Nothing to restore', 1, true), 'restoring twice adds nothing')
 c.fire('vMenu:backups:restoreData', 'garbage')
@@ -364,6 +305,68 @@ c.fire('vMenu:backups:restoreFailed', 'You can restore your saves once every 30 
 c.fire('vMenu:backups:restore')
 check(#c.server == 2, 'a failed restore ends the transfer')
 print('PASS: merge-only restore, never overwrites, ignores non-saves')
+
+-- Auto backup: uploads only changed saves, quietly, and records each successful backup.
+c = newClient(copy(SAVES))
+c.fire('vMenu:backups:backup')
+c.fire('vMenu:backups:uploadResult', true, 'Backed up 13 saves to the server.')
+check(type(c.kvps.vmenu_backup_fingerprint) == 'string' and c.kvps.vmenu_backup_last_at == c.clock, 'a successful backup is recorded on this PC')
+c.fire('vMenu:backups:autoNow')
+check(#c.latent == 1, 'unchanged saves are not uploaded again')
+c.kvps.veh_New = '{"model":9,"name":"cruiser"}'
+c.fire('vMenu:backups:autoNow')
+check(#c.latent == 2 and #c.dialogs == 1 and json.decode(c.latent[2].args[1]).veh_New, 'changed saves are uploaded without a dialog')
+c.fire('vMenu:backups:autoNow')
+check(#c.latent == 2, 'one upload at a time')
+local before = c.kvps.vmenu_backup_fingerprint
+c.fire('vMenu:backups:uploadResult', true, 'Backed up 14 saves to the server.')
+check(c.kvps.vmenu_backup_fingerprint ~= before and c.lastNote().msg == 'Your saves were backed up automatically.' and c.lastNote().kind == 'inform',
+    'an automatic backup is a quiet note')
+c.kvps.veh_New = '{"model":9,"name":"Cruiser"}'
+c.fire('vMenu:backups:autoNow')
+check(#c.latent == 3, 'a change of letter case alone still counts as a change')
+c.fire('vMenu:backups:uploadResult', false, 'You can back up your saves once a minute. Please wait and try again.')
+check(c.lastNote().msg:find('Auto backup failed', 1, true) and c.lastNote().kind == 'error', 'the first automatic failure is shown')
+local notes = #c.notes
+c.fire('vMenu:backups:autoNow')
+c.fire('vMenu:backups:uploadResult', false, 'You can back up your saves once a minute. Please wait and try again.')
+check(#c.latent == 4 and #c.notes == notes, 'later automatic failures are quiet, and the upload is retried')
+c.fire('vMenu:backups:uploadResult', true, 'Backed up 14 saves to the server.')
+c.fire('vMenu:backups:backup')
+c.fire('vMenu:backups:uploadResult', false, 'You can back up your saves once a minute. Please wait and try again.')
+check(c.lastNote().msg:find('once a minute', 1, true) and c.lastNote().kind == 'error', 'a manual backup still reports its own result')
+print('PASS: auto backup uploads changes only, quietly, one at a time, and retries')
+
+-- The background thread: a reminder for players who never backed up, then auto backup every 10 minutes.
+c = newClient(copy(SAVES))
+c.kvps.vmenu_auto_backup = nil
+check(c.step() == 120000, 'the first check waits 2 minutes')
+check(c.step() == 600000 and c.lastNote().msg:find('only stored on this PC', 1, true) and c.kvps.vmenu_backup_reminded_at == c.clock,
+    'a player who never backed up is reminded, then checks repeat every 10 minutes')
+check(#c.latent == 0, 'nothing is uploaded with auto backup off')
+c.kvps.vmenu_auto_backup = 1
+c.step()
+check(#c.latent == 1, 'with auto backup on, the next check uploads')
+
+local function reminded(setup)
+    local r = newClient(copy(SAVES))
+    r.kvps.vmenu_auto_backup = nil
+    setup(r)
+    r.step(); r.step()
+    return #r.notes > 0 and r.lastNote().msg or nil
+end
+check(reminded(function(r) r.kvps.vmenu_backup_reminded_at = r.clock - 3600 end) == nil, 'at most one reminder a week')
+check(reminded(function(r) r.kvps.vmenu_auto_backup = 1; r.kvps.vmenu_backup_last_at = nil end) == nil, 'auto backup on: no reminder')
+check(reminded(function(r) r.kvps.vmenu_backup_last_at = r.clock - 86400 end) == nil, 'no reminder after a recent backup')
+check((reminded(function(r) r.kvps.vmenu_backup_last_at = r.clock - 31 * 86400 end) or ''):find('over 30 days old', 1, true),
+    'a stale backup with changed saves gets a reminder')
+local empty = newClient({})
+empty.step(); empty.step()
+check(#empty.notes == 0, 'no reminder without saves')
+local off = newClient(copy(SAVES))
+off.convar = 'false'
+check(off.step() == nil, 'nothing runs while vmenu_backups is off')
+print('PASS: weekly reminder, 10-minute auto backup, off without the convar')
 
 -- Both sides must agree on what a save is.
 local function lists(path)

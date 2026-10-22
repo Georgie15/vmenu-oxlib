@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 using CitizenFX.Core;
 
@@ -46,6 +47,20 @@ namespace vMenuClient.menus
             }
             menu.AddMenuItem(spawnInVeh);
             menu.AddMenuItem(replacePrev);
+            #endregion
+
+            #region favourite and recent vehicles
+            var favouritesMenu = new Menu("Vehicle Spawner", "Favourite Vehicles");
+            var recentMenu = new Menu("Vehicle Spawner", "Recent Vehicles");
+            var favouritesBtn = new MenuItem("Favourite Vehicles", "Vehicles you've starred. Add the one you're in, or one from Recent Vehicles.") { Label = "→→→" };
+            var recentBtn = new MenuItem("Recent Vehicles", $"The last {VehicleShortlist.MaxRecent} vehicles you spawned from the spawner, by name or from your favourites.") { Label = "→→→" };
+            MenuController.AddSubmenu(menu, favouritesMenu);
+            MenuController.AddSubmenu(menu, recentMenu);
+            menu.AddMenuItem(favouritesBtn);
+            menu.AddMenuItem(recentBtn);
+            MenuController.BindMenuItem(menu, favouritesMenu, favouritesBtn);
+            MenuController.BindMenuItem(menu, recentMenu, recentBtn);
+            CreateShortlistMenus(favouritesMenu, recentMenu);
             #endregion
 
             #region custom vehicles button
@@ -378,6 +393,172 @@ namespace vMenuClient.menus
                 }
             };
             #endregion
+        }
+
+        private static VehicleShortlist LoadShortlist(string key, int capacity) => VehicleShortlist.Parse(GetResourceKvpString(key), capacity);
+
+        private static VehicleShortlist LoadFavourites() => LoadShortlist(VehicleShortlist.FavouritesKey, VehicleShortlist.MaxFavourites);
+
+        /// <summary>
+        /// Records a fresh spawn (spawner, by name, favourites) in Recent Vehicles. Saved vehicles
+        /// have their own menu and aren't recorded.
+        /// </summary>
+        internal static void RememberRecent(uint model)
+        {
+            var recent = LoadShortlist(VehicleShortlist.RecentKey, VehicleShortlist.MaxRecent);
+            recent.Touch(model);
+            SetResourceKvp(VehicleShortlist.RecentKey, recent.ToJson());
+        }
+
+        private static string GetVehicleName(uint model)
+        {
+            var displayName = GetDisplayNameFromVehicleModel(model);
+            var label = GetLabelText(displayName);
+            if (!string.IsNullOrEmpty(label) && label != "NULL")
+            {
+                return label;
+            }
+            return string.IsNullOrEmpty(displayName) || displayName == "CARNOTFOUND" ? $"Unknown vehicle ({model})" : displayName;
+        }
+
+        private Task<int> SpawnFromShortlist(uint model)
+            => SpawnVehicle(vehicleHash: model, spawnInside: SpawnInVehicle, replacePrevious: ReplaceVehicle, skipLoad: false, vehicleInfo: new VehicleInfo(), saveName: null);
+
+        /// <summary>
+        /// Favourite and Recent Vehicles. Each vehicle is a list item: Spawn, or Remove / (Un)favourite.
+        /// Both menus are rebuilt from storage when opened; spawning goes through the normal spawn checks.
+        /// </summary>
+        private void CreateShortlistMenus(Menu favouritesMenu, Menu recentMenu)
+        {
+            var addCurrent = new MenuItem("Add My Current Vehicle", "Adds the vehicle you're in to your favourites.");
+            var clearRecent = new MenuItem("~r~Clear Recent Vehicles", "Empties this list.");
+
+            MenuListItem VehicleItem(uint model, string secondAction)
+                => new(GetVehicleName(model), new List<string> { "Spawn", secondAction }, 0, $"Choose Spawn or {secondAction}, then press Enter.") { ItemData = model };
+
+            void RebuildFavourites()
+            {
+                favouritesMenu.ClearMenuItems();
+                favouritesMenu.AddMenuItem(addCurrent);
+                var favourites = LoadFavourites();
+                if (favourites.Models.Count == 0)
+                {
+                    favouritesMenu.AddMenuItem(new MenuItem("No favourites yet", "Add the vehicle you're in, or favourite one from Recent Vehicles.") { Enabled = false });
+                }
+                foreach (var model in favourites.Models)
+                {
+                    favouritesMenu.AddMenuItem(VehicleItem(model, "Remove"));
+                }
+                favouritesMenu.RefreshIndex();
+            }
+
+            void RebuildRecent()
+            {
+                recentMenu.ClearMenuItems();
+                var recent = LoadShortlist(VehicleShortlist.RecentKey, VehicleShortlist.MaxRecent);
+                var favourites = LoadFavourites();
+                if (recent.Models.Count == 0)
+                {
+                    recentMenu.AddMenuItem(new MenuItem("No recent vehicles yet", "Vehicles you spawn from the spawner or by name show up here.") { Enabled = false });
+                }
+                foreach (var model in recent.Models)
+                {
+                    recentMenu.AddMenuItem(VehicleItem(model, favourites.Contains(model) ? "Unfavourite" : "Favourite"));
+                }
+                if (recent.Models.Count > 0)
+                {
+                    recentMenu.AddMenuItem(clearRecent);
+                }
+                recentMenu.RefreshIndex();
+            }
+
+            // Adds or removes a favourite; false (with a message) if the list is full.
+            bool SetFavourite(uint model, bool favourite)
+            {
+                var favourites = LoadFavourites();
+                if (favourite && !favourites.Contains(model) && !favourites.Add(model))
+                {
+                    Notify.Error($"You can have up to {VehicleShortlist.MaxFavourites} favourite vehicles.");
+                    return false;
+                }
+                if (!favourite)
+                {
+                    favourites.Remove(model);
+                }
+                SetResourceKvp(VehicleShortlist.FavouritesKey, favourites.ToJson());
+                return true;
+            }
+
+            favouritesMenu.OnMenuOpen += (m) => RebuildFavourites();
+            recentMenu.OnMenuOpen += (m) => RebuildRecent();
+
+            favouritesMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item != addCurrent)
+                {
+                    return;
+                }
+                var veh = GetVehicle();
+                if (veh == null || !veh.Exists())
+                {
+                    Notify.Error(CommonErrors.NoVehicle);
+                    return;
+                }
+                var model = (uint)veh.Model.Hash;
+                if (LoadFavourites().Contains(model))
+                {
+                    Notify.Info($"{GetVehicleName(model)} is already a favourite.");
+                }
+                else if (SetFavourite(model, true))
+                {
+                    Notify.Success($"{GetVehicleName(model)} added to your favourites.");
+                    RebuildFavourites();
+                }
+            };
+
+            favouritesMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
+            {
+                if (item.ItemData is not uint model)
+                {
+                    return;
+                }
+                if (listIndex == 0)
+                {
+                    await SpawnFromShortlist(model);
+                }
+                else if (SetFavourite(model, false))
+                {
+                    RebuildFavourites();
+                }
+            };
+
+            recentMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item == clearRecent)
+                {
+                    DeleteResourceKvp(VehicleShortlist.RecentKey);
+                    RebuildRecent();
+                }
+            };
+
+            recentMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
+            {
+                if (item.ItemData is not uint model)
+                {
+                    return;
+                }
+                if (listIndex == 0)
+                {
+                    await SpawnFromShortlist(model);
+                    return;
+                }
+                var favourite = !LoadFavourites().Contains(model);
+                if (SetFavourite(model, favourite))
+                {
+                    Notify.Success(favourite ? $"{GetVehicleName(model)} added to your favourites." : $"{GetVehicleName(model)} removed from your favourites.");
+                    RebuildRecent();
+                }
+            };
         }
 
         /// <summary>

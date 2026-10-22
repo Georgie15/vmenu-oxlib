@@ -76,6 +76,8 @@ namespace vMenuClient
         private readonly OverrideLatch noSirenLatch = new();
         private readonly OverrideLatch planeTurbulenceLatch = new();
         private readonly OverrideLatch heliTurbulenceLatch = new();
+        // Target is the weapon hash in hand, not an entity.
+        private readonly OverrideLatch unlimitedAmmoLatch = new();
         // The boat vMenu anchored, so entering other boats never releases someone else's anchor.
         private int anchoredBoat = 0;
         private Menu[] vehicleOnlyMenus;
@@ -261,7 +263,7 @@ namespace vMenuClient
             }
 
             // Manage PlayerInvisible
-            if (GetSettingsBool(Setting.vmenu_handle_invisibility) && MainMenu.PlayerOptionsMenu.PlayerInvisible && IsAllowed(Permission.POInvisible))
+            if (MainMenu.PlayerOptionsMenu.PlayerInvisible && IsAllowed(Permission.POInvisible) && GetSettingsBool(Setting.vmenu_handle_invisibility))
             {
                 SetEntityVisible(Game.PlayerPed.Handle, false, false);
             }
@@ -901,6 +903,8 @@ namespace vMenuClient
 
         #region Main misc settings function
         int radarSwitchTimer = 0;
+        // Whether vMenu opened the expanded radar; one another script opened is left alone.
+        bool vMenuOpenedBigmap = false;
         int lastPressedPoint = 0;
         /// <summary>
         /// Run all tasks that need to be handeled for the Misc Settings Menu.
@@ -1061,9 +1065,10 @@ namespace vMenuClient
             }
             else
             {
-                if (IsBigmapActive() && GetGameTimer() - radarSwitchTimer > 8000)
+                if (vMenuOpenedBigmap && (!IsBigmapActive() || GetGameTimer() - radarSwitchTimer > 8000))
                 {
                     SetBigmapActive(false, false);
+                    vMenuOpenedBigmap = false;
                 }
                 if (Game.IsControlJustReleased(0, Control.MultiplayerInfo) && Game.IsControlEnabled(0, Control.MultiplayerInfo) && MainMenu.MiscSettingsMenu.KbRadarKeys && !MenuController.IsAnyMenuOpen() && !IsPauseMenuActive())
                 {
@@ -1072,11 +1077,13 @@ namespace vMenuClient
                     if (radarExpanded)
                     {
                         SetBigmapActive(false, false);
+                        vMenuOpenedBigmap = false;
                     }
                     else
                     {
                         SetBigmapActive(true, false);
                         radarSwitchTimer = GetGameTimer();
+                        vMenuOpenedBigmap = true;
                     }
                 }
             }
@@ -1317,7 +1324,8 @@ namespace vMenuClient
                     }
                 }
             }
-            await Task.FromResult(0);
+            // Players stay dead for seconds, so 4 checks a second is enough. This ran every frame.
+            await Delay(250);
         }
         #endregion
         #endregion
@@ -1441,10 +1449,20 @@ namespace vMenuClient
                 SetAmmoInClip(Game.PlayerPed.Handle, (uint)Game.PlayerPed.Weapons.Current.Hash, 5);
             }
 
-            // Enable/disable infinite ammo.
-            if (IsAllowed(Permission.WPUnlimitedAmmo) && Game.PlayerPed.Weapons.Current != null && Game.PlayerPed.Weapons.Current.Hash != WeaponHash.Unarmed)
+            // Unlimited ammo: kept on the weapon in hand while the option is on, and switched off once
+            // for the last weapon when the option goes off or you change weapon. It used to write
+            // "off" every frame, undoing any other script's infinite ammo.
+            var ped = Game.PlayerPed.Handle;
+            var weapon = GetSelectedPedWeapon(ped);
+            var unlimitedAmmo = MainMenu.WeaponOptionsMenu.UnlimitedAmmo && IsAllowed(Permission.WPUnlimitedAmmo);
+            var applyAmmo = unlimitedAmmoLatch.Update(unlimitedAmmo, weapon == unchecked((int)WeaponHash.Unarmed) ? 0 : weapon, out var previousWeapon);
+            if (previousWeapon != 0)
             {
-                Game.PlayerPed.Weapons.Current.InfiniteAmmo = MainMenu.WeaponOptionsMenu.UnlimitedAmmo;
+                SetPedInfiniteAmmo(ped, false, unchecked((uint)previousWeapon));
+            }
+            if (applyAmmo)
+            {
+                SetPedInfiniteAmmo(ped, true, unchecked((uint)weapon));
             }
 
             if (MainMenu.WeaponOptionsMenu.AutoEquipChute)

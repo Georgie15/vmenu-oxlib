@@ -16,7 +16,10 @@ local BACKUP_PREFIXES = {
     'veh_', 'saved_veh_category_', 'ped_', 'mp_ped_', 'mp_character_category_',
     'vmenu_string_saved_weapon_loadout_', 'vmenu_vehicle_preset_',
 }
-local BACKUP_KEYS = { 'vmenu_default_character', 'vmenu_last_character', 'vmenu_string_default_loadout' }
+local BACKUP_KEYS = {
+    'vmenu_default_character', 'vmenu_last_character', 'vmenu_string_default_loadout',
+    'vmenu_vehicle_favourites', 'vmenu_vehicle_recent',
+}
 
 local exactKeys = {}
 for _, key in ipairs(BACKUP_KEYS) do exactKeys[key] = true end

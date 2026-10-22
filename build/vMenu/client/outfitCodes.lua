@@ -2,6 +2,25 @@ local Cooldown = false
 local GenerateCooldown = false
 local format = string.format
 
+-- An outfit code's clothes and props, or nil if the code is damaged. Codes made before the
+-- server checked them can hold anything; entries that aren't numbers are dropped.
+local function readOutfitCode(text)
+    local ok, code = pcall(json.decode, text)
+    if not ok or type(code) ~= "table" or type(code.Clothes) ~= "table" or type(code.Props) ~= "table" then
+        return nil
+    end
+    local function slots(source)
+        local out = {}
+        for k, v in pairs(source) do
+            if tonumber(k) and type(v) == "table" and type(v.Item) == "number" and type(v.Texture) == "number" then
+                out[tostring(k)] = v
+            end
+        end
+        return out
+    end
+    return { Clothes = slots(code.Clothes), Props = slots(code.Props) }
+end
+
 ---@class loadSharedOutfit
 ---@param name string
 exports("loadSharedOutfit", function(name)
@@ -55,9 +74,17 @@ exports("loadSharedOutfit", function(name)
         return false
     end
 
-    Valid = json.decode(Valid)
+    Valid = readOutfitCode(Valid)
+    if not Valid then
+        Config.Notify("vMenu", "This outfit code is damaged and can't be loaded.", "error", 6500)
+        return false
+    end
 
     local Data = json.decode(Existing)
+    Data.DrawableVariations = Data.DrawableVariations or {}
+    Data.DrawableVariations.clothes = Data.DrawableVariations.clothes or {}
+    Data.PropVariations = Data.PropVariations or {}
+    Data.PropVariations.props = Data.PropVariations.props or {}
     for k, v in pairs(Valid.Clothes) do
         local component = tonumber(k)
         if component ~= 0 and component ~= 2 then
@@ -108,7 +135,11 @@ exports("loadOutfitFromCode", function(outfitCode)
         return false
     end
 
-    local validData = json.decode(Valid)
+    local validData = readOutfitCode(Valid)
+    if not validData then
+        lib.print.debug(format("export: Outfit code %s is damaged", outfitCode))
+        return false
+    end
 
     for i = 0, 11 do
         if i ~= 0 and i ~= 2 then

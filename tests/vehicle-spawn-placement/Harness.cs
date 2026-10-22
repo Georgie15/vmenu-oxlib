@@ -22,7 +22,13 @@ namespace vMenuClient
             public static void Error(CommonErrors error) { }
             public static void Info(string text) { }
         }
-        static class VehicleSpawner { public static bool[] allowedCategories = Enumerable.Repeat(true, 22).ToArray(); }
+        static class VehicleSpawner
+        {
+            public static bool[] allowedCategories = Enumerable.Repeat(true, 22).ToArray();
+            // Models recorded in Recent Vehicles.
+            public static readonly List<uint> Recent = new List<uint>();
+            public static void RememberRecent(uint model) => Recent.Add(model);
+        }
         static class UserDefaults { public static int VehicleDefaultRadio = 0; }
         class IdentityStub
         {
@@ -58,6 +64,7 @@ namespace vMenuClient
             _previousVehicle = null;
             Events.Clear();
             PresetsApplied.Clear();
+            VehicleSpawner.Recent.Clear();
         }
         static Task<int> Spawn(bool inside = true, bool replace = true, string save = null,
             float x = 0, float y = 0, float z = 0)
@@ -176,10 +183,12 @@ namespace vMenuClient
             Console.WriteLine("PASS: spawn provenance asked once before creation and given the created vehicle");
 
             Check(PresetsApplied.Count == 1 && PresetsApplied[0] == tracked, "a fresh spawn gets the player's preset for its model");
+            Check(VehicleSpawner.Recent.Count == 1 && VehicleSpawner.Recent[0] == 123, "a fresh spawn is recorded in Recent Vehicles");
             Reset(); Surfaces.Add(new Surface(-20));
             await Spawn(save: "saved");
             Check(PresetsApplied.Count == 0 && ModsApplied == 1, "a saved vehicle keeps its own setup, not the preset");
-            Console.WriteLine("PASS: model presets apply to fresh spawns only");
+            Check(VehicleSpawner.Recent.Count == 0, "saved vehicles aren't recorded in Recent Vehicles");
+            Console.WriteLine("PASS: model presets and Recent Vehicles cover fresh spawns only");
         }
     }
 }

@@ -1,6 +1,14 @@
 local INTEGRATION_VERSION = 2
 local readySources = {}
-local status = { requests = 0, issued = 0, rejected = 0, errors = 0 }
+local status = { requests = 0, issued = 0, rejected = 0, errors = 0, throttled = 0 }
+
+-- One ticket per spawn: the client can't spawn faster than vmenu_vehicle_spawner_cooldown, so
+-- requests closer together than half of it (allowing for network jitter) are refused. Without
+-- this a client could hold a stream of wildcard tickets to pass off vehicles it injected.
+local lastTicketAt = {}
+local function minTicketIntervalMs()
+    return math.max(250, math.floor(GetConvarInt('vmenu_vehicle_spawner_cooldown', 1000) / 2))
+end
 
 RegisterNetEvent('vMenu:telemetry:spawnProvenanceReady', function(version)
     local src = tonumber(source)
@@ -10,7 +18,7 @@ end)
 
 AddEventHandler('playerDropped', function()
     local src = tonumber(source)
-    if src then readySources[src] = nil end
+    if src then readySources[src], lastTicketAt[src] = nil, nil end
 end)
 
 RegisterNetEvent('vMenu:telemetry:beginVehicleSpawn', function(request)
@@ -18,6 +26,12 @@ RegisterNetEvent('vMenu:telemetry:beginVehicleSpawn', function(request)
     if not src or type(request) ~= 'string' or #request > 48
             or not request:match('^VM%-%x+%-%x+$') then return end
     status.requests = status.requests + 1
+    local now = GetGameTimer()
+    if lastTicketAt[src] and now - lastTicketAt[src] < minTicketIntervalMs() then
+        status.throttled = status.throttled + 1
+        return
+    end
+    lastTicketAt[src] = now
     if not IsPlayerAceAllowed(src, 'vMenu.VehicleSpawner.Menu')
             or GetResourceState('psrp_telemetry') ~= 'started' then
         status.rejected = status.rejected + 1
@@ -51,6 +65,7 @@ exports('GetVehicleSpawnProvenanceStatus', function()
         issued = status.issued,
         rejected = status.rejected,
         errors = status.errors,
+        throttled = status.throttled,
     }
 end)
 

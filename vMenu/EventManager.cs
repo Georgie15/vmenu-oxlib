@@ -215,6 +215,7 @@ namespace vMenuClient
         private void SetPedPackPeds()
         {
             PlayerAppearance.PedPackPeds = new List<PedPackEntry>();
+            PlayerAppearance.PedPackModelHashes.Clear();
 
             var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/pedpack.json") ?? "[]";
             try
@@ -241,6 +242,7 @@ namespace vMenuClient
                         Model = modelName,
                         DisplayName = string.IsNullOrWhiteSpace(ped.DisplayName) ? modelName : ped.DisplayName.Trim()
                     });
+                    PlayerAppearance.PedPackModelHashes.Add((uint)GetHashKey(modelName));
                 }
             }
             catch (JsonReaderException ex)

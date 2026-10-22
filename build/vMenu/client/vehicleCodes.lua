@@ -40,7 +40,12 @@ exports("loadSharedVehicle", function()
         return false
     end
 
-    local decoded = json.decode(Valid)
+    -- Codes made before the server checked them can hold anything.
+    local ok, decoded = pcall(json.decode, Valid)
+    if not ok or type(decoded) ~= "table" or (type(decoded.model) ~= "number" and type(decoded.model) ~= "string") then
+        Config.Notify("vMenu", "This vehicle code is damaged and can't be loaded.", "error", 6500)
+        return false
+    end
     local vehicleClass = GetVehicleClassFromName(decoded.model)
     local vehicleClassLabel = "Not Found"
     if IsModelInCdimage(decoded.model) and IsModelValid(decoded.model) then

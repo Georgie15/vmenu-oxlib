@@ -3,6 +3,42 @@ local function vehicleCodesEnabled()
     return GetConvarBool("vmenu_vehiclecodes", false)
 end
 
+-- A vehicle code is a saved vehicle: plain values plus a few flat tables (colors, extras, mods).
+-- Anything deeper, larger or of another type is refused, so an importer never receives data
+-- vMenu can't read.
+local MAX_VEHICLE_BYTES = 16384
+
+local function plainValue(value)
+    local kind = type(value)
+    if kind == "number" then return value == value and value ~= math.huge and value ~= -math.huge end
+    if kind == "string" then return #value <= 128 end
+    return kind == "boolean"
+end
+
+local function validVehicle(data)
+    if type(data) ~= "table" or (type(data.model) ~= "number" and type(data.model) ~= "string") then return false end
+    local fields = 0
+    for key, value in pairs(data) do
+        fields = fields + 1
+        if fields > 64 or type(key) ~= "string" or #key > 32 then return false end
+        if type(value) == "table" then
+            local entries = 0
+            for innerKey, innerValue in pairs(value) do
+                entries = entries + 1
+                if entries > 128 or not plainValue(innerKey) or not plainValue(innerValue) then return false end
+            end
+        elseif not plainValue(value) then
+            return false
+        end
+    end
+    return #json.encode(data) <= MAX_VEHICLE_BYTES
+end
+
+-- Limits are per Rockstar license, so reconnecting doesn't reset them.
+local function playerKey(source)
+    return GetPlayerIdentifierByType(source, "license") or ("source:" .. source)
+end
+
 local userRequestCooldowns = {}
 lib.callback.register(
     "vMenu:Vehicles:Request",
@@ -12,7 +48,8 @@ lib.callback.register(
             return false, "Vehicle codes are disabled on this server."
         end
 
-        if userRequestCooldowns[source] then
+        local key = playerKey(source)
+        if userRequestCooldowns[key] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam
             lib.print.error(string.format("%s [%s] tried to request vehicle too quickly.", GetPlayerName(source), source))
             return false, "You are requesting vehicles too quickly. Please wait a moment."
@@ -28,14 +65,14 @@ lib.callback.register(
             return false
         end
 
-        userRequestCooldowns[source] = true
+        userRequestCooldowns[key] = true
 
         local response = exports.oxmysql:query_async('SELECT `data` FROM `vmenu_vehicles` WHERE `id` = ?', {
             id
         })
 
         SetTimeout(3500, function()
-            userRequestCooldowns[source] = nil
+            userRequestCooldowns[key] = nil
         end)
 
         if response then
@@ -56,7 +93,8 @@ lib.callback.register(
             return false, "Vehicle codes are disabled on this server."
         end
 
-        if userGenerateCooldowns[source] then
+        local key = playerKey(source)
+        if userGenerateCooldowns[key] then
             -- shouldnt be possible with the client side cooldowns but this is to protect against event spam
             lib.print.error(string.format("%s [%s] tried to generate vehicle too quickly.", GetPlayerName(source), source))
             return false, "You are generating vehicles too quickly. Please wait a moment."
@@ -67,10 +105,13 @@ lib.callback.register(
             return false, "No data provided."
         end
 
-        if type(data) ~= "table" then
+        if not validVehicle(data) then
             lib.print.error(string.format("%s [%s] tried to save vehicle with invalid data?", GetPlayerName(source), source))
-            return false, "Invalid data provided."
+            return false, "This vehicle can't be shared."
         end
+        -- Each importer gets their own CAD token and puts it in their own category.
+        data.cadSaveToken = nil
+        data.Category = "Uncategorized"
 
         local discord = GetPlayerIdentifierByType(source, "discord") and
             GetPlayerIdentifierByType(source, "discord"):gsub("discord:", "") or false
@@ -78,14 +119,14 @@ lib.callback.register(
             return false, "You need to have Discord linked to generate vehicle codes."
         end
 
-        userGenerateCooldowns[source] = true
+        userGenerateCooldowns[key] = true
 
         local id = exports.oxmysql:insert_async('INSERT INTO `vmenu_vehicles` (`discord_id`, `data`) VALUES (?, ?)', {
             discord, json.encode(data)
         })
 
         SetTimeout(12500, function()
-            userGenerateCooldowns[source] = nil
+            userGenerateCooldowns[key] = nil
         end)
 
         return id or false

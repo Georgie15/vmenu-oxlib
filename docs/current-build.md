@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: player features release D |
-| `build/vMenu/vMenuClient.net.dll` | `c84a9ae894dcde1b851ecc7287b0bb2286a0277f57edcf4302940be48abc9c00` |
+| Latest change | October 21, 2026: fixes and player features release E |
+| `build/vMenu/vMenuClient.net.dll` | `8b05f1f47c1cc660aca62f337d6fe0e6d3ac0b56a8d196e75fdc2ca35164d7c8` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -695,3 +695,139 @@ menu's in release C. Nothing visible changes.
   per press, and Go Back on a car without liveries goes back one menu.
 - A community manager's god mode still works.
 - `resmon`: vMenu's client time is no higher than on release C.
+
+## October 21, 2026: fixes and player features release E (client DLL, Lua, config)
+
+Built on the local `next` branch after release D, and merged into `main` only
+after release D was confirmed on live. Client only: the server DLL is release B's.
+
+**Fixes:**
+- **Ped pack paywall.** Spawn By Name (everyone has it) accepted any model, so
+  typing a `pedpack.json` model such as `pw_ana` gave the paid ped without
+  `vMenu.PlayerAppearance.PedPack`. A saved ped of a pack model also kept working
+  after the pack expired. Only the Ped Pack menu checked the permission.
+  `SetPlayerSkin`, which every ped change goes through, now refuses a pack model
+  without the permission and shows the store prompt.
+- **Spawn tickets.** Any client could call `vMenu:telemetry:beginVehicleSpawn`
+  as often as it liked, and each call got a 12 s wildcard ticket from
+  psrp_telemetry. A cheater could keep a stream of tickets so injected vehicles
+  looked like vMenu spawns. `server/spawnProvenance.lua` now issues at most one
+  ticket per player per half `vmenu_vehicle_spawner_cooldown` (500 ms with
+  the live 1000), never closer than 250 ms. Normal spawning is never that fast.
+  The status export gains a `throttled` count.
+- **Share codes.**
+  - The outfit and vehicle code servers stored any table of any size. They now
+    store only real outfits (clothes and props, whole numbers in range) and real
+    saved vehicles (plain values and flat tables, at most 16 KB).
+  - The server also drops the sharer's CAD token and category itself.
+  - Cooldowns are per Rockstar license, so reconnecting no longer resets them.
+  - Importing a damaged old code shows "damaged" instead of a Lua error. An
+    outfit keeps its good entries.
+  - Old codes keep working.
+- **Unlimited ammo** (owner, master, georgiespecial) was written every frame,
+  which switched off any other script's infinite ammo. It now uses release A's
+  latch: kept on the weapon in hand while on, and put back once when it goes off
+  or you change weapon.
+- **Expanded radar.** vMenu closed an expanded radar that another script opened
+  on the next frame; its 8 s timer only counted vMenu's own opens. It now only
+  closes one it opened.
+- **Death notifications** (owner, master, admin) checked every player every
+  frame. They now check 4 times a second.
+- **Tidy-ups:**
+  - The player options tick no longer reads a convar every frame before
+    checking the option.
+  - Removed from `permissions.cfg` because nothing reads them:
+    `set vmenu_disable_ai` (NPCs are controlled by `Config.DisableAI` in
+    `config_server.lua`), and the auto-ban, ban-log, kick-log and ban-message
+    convars (release B removed their code).
+
+**New for players:**
+- **Favourite and Recent Vehicles** (Vehicle Spawner):
+  - Recent Vehicles lists the last 10 vehicles you spawned from the spawner, by
+    name or from your favourites. Saved vehicles aren't listed.
+  - Favourite Vehicles holds up to 50: add the vehicle you're in, or favourite
+    one from Recent.
+  - Each entry offers Spawn and Remove or (Un)favourite. Spawning goes through
+    the normal spawn checks, so restricted classes stay restricted.
+  - Both lists are included in save backups.
+- **Auto Back Up My Saves** (Misc Settings, a checkbox):
+  - Every 10 minutes it uploads your saves if they changed since your last
+    successful backup, with no dialog. Success is a short note; only the first
+    failure of a session is shown. Turning it on backs up straight away.
+  - With it off, a player who has saves but never backed up from this PC (or
+    not for 30 days, with changes since) gets a reminder at most once a week.
+- **Clothing Quick Toggles** (Player Appearance):
+  - Take off and put back your hat, glasses, ear accessory, mask or bag.
+    Putting back restores exactly what you took off, and a new ped starts fresh.
+  - The mask and bag only work on MP characters, because those slots mean
+    something else on other peds.
+  - Key bindings "vMenu Toggle Hat", "Glasses", "Ear Accessory", "Mask" and
+    "Bag" are unbound by default. Set them in Settings > Key Bindings > FiveM.
+  - Gloves are left out. GTA draws gloves as part of the arms piece, and the
+    bare-arms piece depends on the top you wear, so it needs a lookup table for
+    every top.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `8b05f1f47c1cc660aca62f337d6fe0e6d3ac0b56a8d196e75fdc2ca35164d7c8` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release D's client DLL shows only the members
+  above: `ClothingToggles`, `VehicleShortlist`, the ped pack check, the spawner,
+  Misc Settings and Player Appearance menus, `SetPlayerSkin`, the spawn core and
+  the changed ticks. Everything else is renumbered compiler-generated local
+  functions.
+- New tests:
+  - `python tests/client-guards/test_client_guards.py`: compiles the real ped pack
+    check and the real unlimited-ammo block (with `OverrideLatch`) against fakes,
+    and checks the radar, death notification, convar order and config fixes.
+  - `lua tests/share-codes/test_share_codes.lua`: both share-code servers refuse
+    every malformed outfit and vehicle, drop the CAD token, and limit per
+    license. The clients report damaged codes and keep an outfit's good
+    entries.
+  - `dotnet run --project tests/vehicle-shortlists`: recent order and limit,
+    favourites, damaged storage, and the spawner, spawn core and backup wiring.
+  - `dotnet run --project tests/clothing-toggles`: take off and put back per
+    slot, the newest item, a new ped, and the menu and key binding wiring.
+- Extended tests:
+  - `tests/spawn-provenance` now also runs the server script: one ticket per
+    interval per player, the 250 ms floor, and the permission check.
+  - `tests/save-backups` now covers auto backup (changed saves only, quiet, one
+    at a time, letter-case changes, failures shown once) and the reminder (weekly,
+    not with auto backup on, after a recent backup, or without saves). It also
+    covers favourites and recents in backups.
+  - `tests/vehicle-spawn-placement` checks that only fresh spawns go into Recent
+    Vehicles.
+- The new tests fail against release D's scripts.
+- All twenty tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy:**
+1. Hash the live DLLs. The client must be release D's
+   (`c84a9ae894dcde1b851ecc7287b0bb2286a0277f57edcf4302940be48abc9c00`) and the
+   server release B's (`003e0932…`). If either differs, stop.
+2. Copy `vMenuClient.net.dll`, `client/backups.lua`, `client/outfitCodes.lua`,
+   `client/vehicleCodes.lua`, `server/backups.lua`, `server/oufitCodes.lua`,
+   `server/vehicleCodes.lua` and `server/spawnProvenance.lua`.
+3. Optional: delete the dead convar lines listed above from the live
+   `permissions.cfg`. They do nothing, so leaving them is harmless.
+4. Restart the resource.
+
+**Runtime acceptance:**
+- Without the ped pack, Spawn By Name `pw_ana`: the store prompt opens and your
+  ped doesn't change. With the pack it works, and saved pack peds spawn.
+- Spawn several vehicles in a row: psrp_telemetry records each as a vMenu
+  spawn, and `GetVehicleSpawnProvenanceStatus().throttled` stays 0.
+- Generate and load an outfit code and a vehicle code. Codes made before this
+  release still load.
+- With unlimited ammo off, another script's infinite ammo keeps working. On, it
+  still works as before.
+- Another script's expanded radar stays open. vMenu's radar key still opens it,
+  and it closes after 8 s.
+- Spawn a few cars: they appear in Recent Vehicles. Favourite one and spawn it
+  from Favourite Vehicles. A restricted class still refuses.
+- Turn on Auto Back Up My Saves: "backed up automatically". Change a save and
+  within 10 minutes it is backed up again.
+- Clothing Quick Toggles take off and put back each item. Bind a key and use
+  it.

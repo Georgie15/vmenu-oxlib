@@ -1239,6 +1239,7 @@ namespace vMenuClient
             {
                 // A fresh spawn of this model: use the player's own extras and livery, if saved.
                 ApplyVehiclePreset(vehicle.Handle);
+                VehicleSpawner.RememberRecent(vehicleHash);
             }
 
             await WaitForVehicleIdentity(
@@ -2504,6 +2505,10 @@ namespace vMenuClient
             {
                 // stops people purposefully crashing games with codes like "police" etc
                 Notify.Error(CommonErrors.InvalidModel);
+                return;
+            }
+            if (PlayerAppearance.IsLockedPedPackModel(modelHash))
+            {
                 return;
             }
             if (IsModelInCdimage(modelHash))
