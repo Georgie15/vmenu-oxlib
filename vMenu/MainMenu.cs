@@ -548,6 +548,10 @@ namespace vMenuClient
                 {
                     _wasMenuOpen = isMenuOpen;
                     TriggerEvent("vMenu:MenuStateChanged", isMenuOpen);
+                    if (!isMenuOpen)
+                    {
+                        OfferToUpdateSavedVehicle();
+                    }
                 }
                 if (MpPedCustomizationMenu != null)
                 {

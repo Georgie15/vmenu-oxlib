@@ -12,7 +12,7 @@ namespace vMenuClient
     {
         static Vehicle _previousVehicle;
         static readonly IdentityStub IdentityBridge = new IdentityStub();
-        public struct VehicleInfo { public string cadSaveToken { get; set; } }
+        public struct VehicleInfo { public string cadSaveToken { get; set; } public string Category { get; set; } }
         enum Permission { VSDisableReplacePrevious }
         enum CommonErrors { InvalidModel }
         static class Notify
@@ -48,6 +48,9 @@ namespace vMenuClient
         // Vehicles the player's model preset was applied to.
         static readonly List<int> PresetsApplied = new List<int>();
         static bool ApplyVehiclePreset(int vehicle) { PresetsApplied.Add(vehicle); return true; }
+        // Saved vehicles the spawn core told the update-prompt tracker about.
+        class TrackerStub { public readonly List<string> Tracked = new List<string>(); public void Track(int vehicle, string name, string category) => Tracked.Add($"{vehicle}:{name}"); }
+        static readonly TrackerStub SavedVehicleChanges = new TrackerStub();
         static Task Delay(int milliseconds) => BaseScript.Delay(milliseconds);
         // Spawn provenance events, with the number of vehicles that existed when each fired.
         static readonly List<string> Events = new List<string>();
@@ -65,6 +68,7 @@ namespace vMenuClient
             Events.Clear();
             PresetsApplied.Clear();
             VehicleSpawner.Recent.Clear();
+            SavedVehicleChanges.Tracked.Clear();
         }
         static Task<int> Spawn(bool inside = true, bool replace = true, string save = null,
             float x = 0, float y = 0, float z = 0)
@@ -184,11 +188,13 @@ namespace vMenuClient
 
             Check(PresetsApplied.Count == 1 && PresetsApplied[0] == tracked, "a fresh spawn gets the player's preset for its model");
             Check(VehicleSpawner.Recent.Count == 1 && VehicleSpawner.Recent[0] == 123, "a fresh spawn is recorded in Recent Vehicles");
+            Check(SavedVehicleChanges.Tracked.Count == 0, "a fresh spawn isn't tracked as a saved vehicle");
             Reset(); Surfaces.Add(new Surface(-20));
             await Spawn(save: "saved");
             Check(PresetsApplied.Count == 0 && ModsApplied == 1, "a saved vehicle keeps its own setup, not the preset");
             Check(VehicleSpawner.Recent.Count == 0, "saved vehicles aren't recorded in Recent Vehicles");
-            Console.WriteLine("PASS: model presets and Recent Vehicles cover fresh spawns only");
+            Check(SavedVehicleChanges.Tracked.Count == 1 && SavedVehicleChanges.Tracked[0].EndsWith(":saved"), "a saved vehicle is tracked under its save name");
+            Console.WriteLine("PASS: presets and Recent Vehicles cover fresh spawns; saved vehicles are tracked for the update prompt");
         }
     }
 }

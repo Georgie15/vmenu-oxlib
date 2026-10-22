@@ -53,7 +53,7 @@ namespace vMenuClient.menus
             var favouritesMenu = new Menu("Vehicle Spawner", "Favourite Vehicles");
             var recentMenu = new Menu("Vehicle Spawner", "Recent Vehicles");
             var favouritesBtn = new MenuItem("Favourite Vehicles", "Vehicles you've starred. Add the one you're in, or one from Recent Vehicles.") { Label = "→→→" };
-            var recentBtn = new MenuItem("Recent Vehicles", $"The last {VehicleShortlist.MaxRecent} vehicles you spawned from the spawner, by name or from your favourites.") { Label = "→→→" };
+            var recentBtn = new MenuItem("Recent Vehicles", $"The last {ModelShortlist.MaxRecent} vehicles you spawned from the spawner, by name or from your favourites.") { Label = "→→→" };
             MenuController.AddSubmenu(menu, favouritesMenu);
             MenuController.AddSubmenu(menu, recentMenu);
             menu.AddMenuItem(favouritesBtn);
@@ -395,9 +395,9 @@ namespace vMenuClient.menus
             #endregion
         }
 
-        private static VehicleShortlist LoadShortlist(string key, int capacity) => VehicleShortlist.Parse(GetResourceKvpString(key), capacity);
+        private static ModelShortlist LoadShortlist(string key, int capacity) => ModelShortlist.Parse(GetResourceKvpString(key), capacity);
 
-        private static VehicleShortlist LoadFavourites() => LoadShortlist(VehicleShortlist.FavouritesKey, VehicleShortlist.MaxFavourites);
+        private static ModelShortlist LoadFavourites() => LoadShortlist(ModelShortlist.VehicleFavouritesKey, ModelShortlist.MaxFavourites);
 
         /// <summary>
         /// Records a fresh spawn (spawner, by name, favourites) in Recent Vehicles. Saved vehicles
@@ -405,9 +405,9 @@ namespace vMenuClient.menus
         /// </summary>
         internal static void RememberRecent(uint model)
         {
-            var recent = LoadShortlist(VehicleShortlist.RecentKey, VehicleShortlist.MaxRecent);
+            var recent = LoadShortlist(ModelShortlist.VehicleRecentKey, ModelShortlist.MaxRecent);
             recent.Touch(model);
-            SetResourceKvp(VehicleShortlist.RecentKey, recent.ToJson());
+            SetResourceKvp(ModelShortlist.VehicleRecentKey, recent.ToJson());
         }
 
         private static string GetVehicleName(uint model)
@@ -455,7 +455,7 @@ namespace vMenuClient.menus
             void RebuildRecent()
             {
                 recentMenu.ClearMenuItems();
-                var recent = LoadShortlist(VehicleShortlist.RecentKey, VehicleShortlist.MaxRecent);
+                var recent = LoadShortlist(ModelShortlist.VehicleRecentKey, ModelShortlist.MaxRecent);
                 var favourites = LoadFavourites();
                 if (recent.Models.Count == 0)
                 {
@@ -478,14 +478,14 @@ namespace vMenuClient.menus
                 var favourites = LoadFavourites();
                 if (favourite && !favourites.Contains(model) && !favourites.Add(model))
                 {
-                    Notify.Error($"You can have up to {VehicleShortlist.MaxFavourites} favourite vehicles.");
+                    Notify.Error($"You can have up to {ModelShortlist.MaxFavourites} favourite vehicles.");
                     return false;
                 }
                 if (!favourite)
                 {
                     favourites.Remove(model);
                 }
-                SetResourceKvp(VehicleShortlist.FavouritesKey, favourites.ToJson());
+                SetResourceKvp(ModelShortlist.VehicleFavouritesKey, favourites.ToJson());
                 return true;
             }
 
@@ -536,7 +536,7 @@ namespace vMenuClient.menus
             {
                 if (item == clearRecent)
                 {
-                    DeleteResourceKvp(VehicleShortlist.RecentKey);
+                    DeleteResourceKvp(ModelShortlist.VehicleRecentKey);
                     RebuildRecent();
                 }
             };

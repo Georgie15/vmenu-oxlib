@@ -35,6 +35,18 @@ assert 'PlayerAppearance.PedPackModelHashes.Clear();' in pack and 'PlayerAppeara
 assert re.search(r'if \(item == spawnByNameBtn\).*?await SetPlayerSkin\(model,', appearance, re.S), 'Spawn By Name goes through SetPlayerSkin'
 print('PASS: ped pack wiring (SetPlayerSkin, pedpack.json hashes, Spawn By Name)')
 
+# Release F: everyone can browse and preview the pack; only the pack can spawn.
+pack_block = member(appearance, r'^            if \(PedPackPeds != null && PedPackPeds\.Count > 0\)\n            \{.*?^            \}\n')
+assert pack_block.index('MenuController.BindMenuItem(spawnPedsMenu, pedPackPedsMenu, pedPackPedsBtn);') < pack_block.index('if (!hasPedPack)'), \
+    'the Ped Pack list opens for everyone'
+assert 'ShowPedPackStorePrompt' not in pack_block, 'opening the list no longer jumps straight to the store'
+assert re.search(r'if \(hasPedPack\)\s*\{\s*pedPackPedActionsMenu\.AddMenuItem\(spawnPedPackPed\);', appearance), 'Spawn Ped only with the pack'
+preview = member(appearance, r'^        private static async Task PreviewPed\(uint model\).*?^        }$')
+assert 'CreatePed(4, model, pos.X, pos.Y, groundZ, player.Heading + 180f, false, false);' in preview, 'the preview ped is local: not networked'
+assert 'await Delay(20000);' in preview and 'pedPackPedActionsMenu.OnMenuClose += (m) => ClearPreviewPed();' in appearance, \
+    'the preview goes after 20 s or when the menu closes'
+print('PASS: ped pack browse and preview (local ped, spawn still locked)')
+
 # --- fix 4: expanded radar --------------------------------------------------------------------
 misc = member(fc, r'^        private async Task MiscSettings\(\).*?^        }$')
 assert 'if (vMenuOpenedBigmap && (!IsBigmapActive() || GetGameTimer() - radarSwitchTimer > 8000))' in misc, \

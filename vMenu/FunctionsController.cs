@@ -194,6 +194,7 @@ namespace vMenuClient
             if (IsAllowed(Permission.PVLockDoors))
             {
                 Tick += PersonalVehicleOptions;
+                Tick += PersonalVehicleAutoLockTick;
             }
             if (GetSettingsBool(Setting.vmenu_enable_animals_spawn_menu))
             {
@@ -2850,6 +2851,28 @@ namespace vMenuClient
         #endregion
 
         #region Personal Vehicle options
+        private readonly PersonalVehicleAutoLock pvAutoLock = new();
+
+        /// <summary>
+        /// Personal Vehicle > Auto-Lock When I Walk Away, checked twice a second.
+        /// </summary>
+        private async Task PersonalVehicleAutoLockTick()
+        {
+            await Delay(500);
+            var personalVehicleMenu = MainMenu.PersonalVehicleMenu;
+            var veh = personalVehicleMenu?.CurrentPersonalVehicle;
+            if (!MainMenu.PermissionsSetupComplete || veh == null || !veh.Exists() || veh.IsDead)
+            {
+                return;
+            }
+            var distance = Game.PlayerPed.Position.DistanceToSquared(veh.Position);
+            var occupied = GetVehicleNumberOfPassengers(veh.Handle) > 0 || !IsVehicleSeatFree(veh.Handle, -1);
+            if (pvAutoLock.Update(personalVehicleMenu.AutoLock, (float)Math.Sqrt(distance), occupied, IsVehicleLocked(veh)))
+            {
+                LockOrUnlockDoors(veh, true);
+            }
+        }
+
         private bool didShowPvHelpMessage = false;
         private int time = 0;
 
@@ -2936,7 +2959,7 @@ namespace vMenuClient
                                 // lock or unlock the vehicle
                                 PressKeyFob(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle);
                                 await Delay(100);
-                                var lockDoors = !GetVehicleDoorsLockedForPlayer(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle.Handle, Game.PlayerPed.Handle);
+                                var lockDoors = !IsVehicleLocked(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle);
                                 LockOrUnlockDoors(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle, lockDoors);
 
                                 // reset the timer.

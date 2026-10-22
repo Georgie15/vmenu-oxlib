@@ -150,6 +150,8 @@ namespace vMenuClient.menus
             };
             var backupSaves = new MenuItem("Back Up My Saves", "Copies your saved vehicles, peds, MP characters, weapon loadouts and vehicle presets to the server, replacing your previous backup. Restore them after clearing your game cache or on another PC.");
             var restoreSaves = new MenuItem("Restore My Saves", "Adds the saves from your server backup. Saves you already have with the same name are kept as they are.");
+            var photoMode = new MenuItem("Photo Mode", "A free camera for screenshots, with the HUD hidden. It stays within 15 m of you and can't see through walls.");
+            var whatsNew = new MenuItem("What's New In vMenu", "Shows the list of recent vMenu features again.");
             var autoBackupSaves = new MenuCheckboxItem("Auto Back Up My Saves", "Backs up your saves on its own when they change, checking every 10 minutes. Turning it on backs up straight away.", GetResourceKvpInt("vmenu_auto_backup") == 1);
             var joinQuitNotifs = new MenuCheckboxItem("Join / Quit Notifications", "Receive notifications when someone joins or leaves the server.", JoinQuitNotifications);
             var deathNotifs = new MenuCheckboxItem("Death Notifications", "Receive notifications when someone dies or gets killed.", DeathNotifications);
@@ -706,6 +708,12 @@ namespace vMenuClient.menus
                     }
                 };
             }
+            // client/photoMode.lua; needs setr vmenu_photo_mode true.
+            if (GetConvar("vmenu_photo_mode", "false") == "true")
+            {
+                menu.AddMenuItem(photoMode);
+            }
+            menu.AddMenuItem(whatsNew);
             menu.AddMenuItem(saveSettings);
 
             // Handle checkbox changes.
@@ -855,6 +863,11 @@ namespace vMenuClient.menus
                 {
                     MenuController.CloseAllMenus();
                     TriggerEvent(item == backupSaves ? "vMenu:backups:backup" : "vMenu:backups:restore");
+                }
+                else if (item == photoMode || item == whatsNew)
+                {
+                    MenuController.CloseAllMenus();
+                    TriggerEvent(item == photoMode ? "vMenu:photoMode:start" : "vMenu:whatsNew:show");
                 }
                 // save settings
                 else if (item == saveSettings)

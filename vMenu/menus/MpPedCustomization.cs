@@ -889,6 +889,16 @@ namespace vMenuClient.menus
             menu.AddMenuItem(savedCharacters);
             MenuController.BindMenuItem(menu, savedCharactersMenu, savedCharacters);
 
+            var savedOutfitsMenu = new Menu(" ", "Saved Outfits");
+            var savedOutfits = new MenuItem("Saved Outfits", "Save the clothes you're wearing as an outfit, and change into a saved one. Your face, hair and tattoos stay as they are.")
+            {
+                Label = "→→→"
+            };
+            MenuController.AddSubmenu(menu, savedOutfitsMenu);
+            menu.AddMenuItem(savedOutfits);
+            MenuController.BindMenuItem(menu, savedOutfitsMenu, savedOutfits);
+            CreateSavedOutfitsMenu(savedOutfitsMenu);
+
             menu.RefreshIndex();
 
             createCharacterMenu.InstructionalButtons.Add(Control.MoveLeftRight, "Turn Head");
@@ -3166,6 +3176,126 @@ namespace vMenuClient.menus
             EndFindKvp(handle);
 
             return names;
+        }
+
+        /// <summary>
+        /// Saved Outfits: clothes and props only, for the freemode model you are now. Wearing one
+        /// also updates the character being edited, so saving the character keeps it.
+        /// </summary>
+        private void CreateSavedOutfitsMenu(Menu outfitsMenu)
+        {
+            var saveCurrent = new MenuItem("Save Current Outfit", "Saves the clothes and props you're wearing under a name.");
+
+            Dictionary<string, SavedOutfit> LoadOutfits(uint model)
+            {
+                var outfits = new Dictionary<string, SavedOutfit>();
+                var handle = StartFindKvp(SavedOutfit.KeyPrefix);
+                while (true)
+                {
+                    var key = FindKvp(handle);
+                    if (string.IsNullOrEmpty(key))
+                    {
+                        break;
+                    }
+                    var outfit = SavedOutfit.Parse(GetResourceKvpString(key));
+                    if (outfit != null && outfit.Model == model)
+                    {
+                        outfits[key.Substring(SavedOutfit.KeyPrefix.Length)] = outfit;
+                    }
+                }
+                EndFindKvp(handle);
+                return outfits;
+            }
+
+            SavedOutfit CaptureOutfit()
+            {
+                var ped = Game.PlayerPed.Handle;
+                return SavedOutfit.Capture((uint)GetEntityModel(ped),
+                    slot => GetPedDrawableVariation(ped, slot), slot => GetPedTextureVariation(ped, slot),
+                    slot => GetPedPropIndex(ped, slot), slot => GetPedPropTextureIndex(ped, slot));
+            }
+
+            void Rebuild()
+            {
+                outfitsMenu.ClearMenuItems();
+                if (!IsCurrentPedMpFreemode())
+                {
+                    outfitsMenu.AddMenuItem(new MenuItem("Only for MP characters", "Load or create an MP character to save and wear outfits.") { Enabled = false });
+                    outfitsMenu.RefreshIndex();
+                    return;
+                }
+                outfitsMenu.AddMenuItem(saveCurrent);
+                var outfits = LoadOutfits((uint)GetEntityModel(Game.PlayerPed.Handle));
+                if (outfits.Count == 0)
+                {
+                    outfitsMenu.AddMenuItem(new MenuItem("No outfits yet", "Outfits are kept per body type: male characters share theirs, and so do female ones.") { Enabled = false });
+                }
+                foreach (var name in outfits.Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+                {
+                    outfitsMenu.AddMenuItem(new MenuListItem(name, new List<string> { "Wear", "Update", "Delete" }, 0,
+                        "Wear changes into it. Update replaces it with what you're wearing. Choose one, then press Enter.") { ItemData = name });
+                }
+                outfitsMenu.RefreshIndex();
+            }
+
+            outfitsMenu.OnMenuOpen += (m) => Rebuild();
+
+            outfitsMenu.OnItemSelect += async (sender, item, index) =>
+            {
+                if (item != saveCurrent || !IsCurrentPedMpFreemode())
+                {
+                    return;
+                }
+                var name = (await GetUserInput("Outfit name", 30) ?? "").Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    Notify.Error(CommonErrors.InvalidSaveName);
+                    return;
+                }
+                if (!string.IsNullOrEmpty(GetResourceKvpString(SavedOutfit.KeyFor(name))))
+                {
+                    Notify.Error($"You already have an outfit called {name}. Choose Update on it to replace it.");
+                    return;
+                }
+                SetResourceKvp(SavedOutfit.KeyFor(name), CaptureOutfit().ToJson());
+                Notify.Success($"Outfit {name} saved.");
+                Rebuild();
+            };
+
+            outfitsMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
+            {
+                if (item.ItemData is not string name || !IsCurrentPedMpFreemode())
+                {
+                    return;
+                }
+                var key = SavedOutfit.KeyFor(name);
+                if (listIndex == 0)
+                {
+                    var outfit = SavedOutfit.Parse(GetResourceKvpString(key));
+                    if (outfit == null || outfit.Model != (uint)GetEntityModel(Game.PlayerPed.Handle))
+                    {
+                        Notify.Error("This outfit can't be worn by this character.");
+                        return;
+                    }
+                    var ped = Game.PlayerPed.Handle;
+                    outfit.Apply((slot, drawable, texture) => SetPedComponentVariation(ped, slot, drawable, texture, 0),
+                        slot => ClearPedProp(ped, slot),
+                        (slot, drawable, texture) => SetPedPropIndex(ped, slot, drawable, texture, true));
+                    currentCharacter = ReplacePedDataClothing(currentCharacter);
+                    Notify.Success($"Changed into {name}. Save your character to make it their usual look.");
+                }
+                else if (listIndex == 1)
+                {
+                    SetResourceKvp(key, CaptureOutfit().ToJson());
+                    Notify.Success($"Outfit {name} updated with what you're wearing.");
+                }
+                else if (await GetUserConfirmation("Delete Outfit", $"Delete the outfit **{name}**?"))
+                {
+                    DeleteResourceKvp(key);
+                    Notify.Success($"Outfit {name} deleted.");
+                    Rebuild();
+                }
+            };
         }
 
         private MultiplayerPedData ReplacePedDataClothing(MultiplayerPedData character)

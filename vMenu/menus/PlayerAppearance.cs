@@ -355,9 +355,22 @@ namespace vMenuClient.menus
             };
 
             var selectedPedPackPed = new PedPackEntry();
+            var hasPedPack = IsAllowed(Permission.PAPedPack);
             var spawnPedPackPed = new MenuItem("Spawn Ped", "Spawn this ped.");
+            var previewPedPackPed = new MenuItem("Preview", "Shows this ped in front of you for 20 seconds. Only you can see it.");
+            var getPedPack = new MenuItem("Get It In The Store", "Opens the store page for the ped pack.") { RightIcon = MenuItem.Icon.LOCK };
 
-            pedPackPedActionsMenu.AddMenuItem(spawnPedPackPed);
+            if (hasPedPack)
+            {
+                pedPackPedActionsMenu.AddMenuItem(spawnPedPackPed);
+            }
+            pedPackPedActionsMenu.AddMenuItem(previewPedPackPed);
+            if (!hasPedPack)
+            {
+                pedPackPedActionsMenu.AddMenuItem(getPedPack);
+            }
+            // The preview goes when you leave the ped's menu (or the menus close).
+            pedPackPedActionsMenu.OnMenuClose += (m) => ClearPreviewPed();
 
             pedPackPedsMenu.OnItemSelect += (_, item, __) =>
             {
@@ -367,7 +380,15 @@ namespace vMenuClient.menus
 
             pedPackPedActionsMenu.OnItemSelect += async (_, item, __) =>
             {
-                if (item == spawnPedPackPed)
+                if (item == previewPedPackPed && !string.IsNullOrWhiteSpace(selectedPedPackPed?.Model))
+                {
+                    await PreviewPed((uint)GetHashKey(selectedPedPackPed.Model));
+                }
+                else if (item == getPedPack)
+                {
+                    ShowPedPackStorePrompt();
+                }
+                else if (item == spawnPedPackPed)
                 {
                     if (string.IsNullOrWhiteSpace(selectedPedPackPed?.Model))
                     {
@@ -379,13 +400,7 @@ namespace vMenuClient.menus
                 }
             };
 
-            spawnPedsMenu.OnItemSelect += (_, item, __) =>
-            {
-                if (item == pedPackPedsBtn && !IsAllowed(Permission.PAPedPack))
-                {
-                    ShowPedPackStorePrompt();
-                }
-            };
+            CreatePedShortlistMenus(spawnPedsMenu);
 
             if (AddonPeds != null && AddonPeds.Count > 0 && IsAllowed(Permission.PAAddonPeds))
             {
@@ -424,35 +439,33 @@ namespace vMenuClient.menus
 
             if (PedPackPeds != null && PedPackPeds.Count > 0)
             {
+                // Everyone can browse and preview the pack; spawning one needs the pack (SetPlayerSkin).
                 spawnPedsMenu.AddMenuItem(pedPackPedsBtn);
-                if (IsAllowed(Permission.PAPedPack))
+                MenuController.BindMenuItem(spawnPedsMenu, pedPackPedsMenu, pedPackPedsBtn);
+
+                var pedPackEntries = PedPackPeds.ToList();
+                pedPackEntries.Sort((a, b) => a.DisplayName.ToLower().CompareTo(b.DisplayName.ToLower()));
+
+                foreach (var ped in pedPackEntries)
                 {
-                    MenuController.BindMenuItem(spawnPedsMenu, pedPackPedsMenu, pedPackPedsBtn);
+                    var pedBtn = new MenuItem(ped.DisplayName, hasPedPack ? "Click to manage this ped." : "Click to preview this ped.") { Label = $"({ped.Model})", ItemData = ped };
+                    var model = (uint)GetHashKey(ped.Model);
 
-                    var pedPackEntries = PedPackPeds.ToList();
-                    pedPackEntries.Sort((a, b) => a.DisplayName.ToLower().CompareTo(b.DisplayName.ToLower()));
-
-                    foreach (var ped in pedPackEntries)
+                    if (!IsModelInCdimage(model) || !IsModelAPed(model))
                     {
-                        var pedBtn = new MenuItem(ped.DisplayName, "Click to manage this ped.") { Label = $"({ped.Model})", ItemData = ped };
-                        var model = (uint)GetHashKey(ped.Model);
-
-                        if (!IsModelInCdimage(model) || !IsModelAPed(model))
-                        {
-                            pedBtn.Enabled = false;
-                            pedBtn.LeftIcon = MenuItem.Icon.LOCK;
-                            pedBtn.Description = "This ped is not (correctly) streamed. If you are the server owner, please ensure that the ped name and model are valid!";
-                        }
-
-                        pedPackPedsMenu.AddMenuItem(pedBtn);
-                        MenuController.BindMenuItem(pedPackPedsMenu, pedPackPedActionsMenu, pedBtn);
+                        pedBtn.Enabled = false;
+                        pedBtn.LeftIcon = MenuItem.Icon.LOCK;
+                        pedBtn.Description = "This ped is not (correctly) streamed. If you are the server owner, please ensure that the ped name and model are valid!";
                     }
+
+                    pedPackPedsMenu.AddMenuItem(pedBtn);
+                    MenuController.BindMenuItem(pedPackPedsMenu, pedPackPedActionsMenu, pedBtn);
                 }
-                else
+
+                if (!hasPedPack)
                 {
-                    pedPackPedsBtn.Label = string.Empty;
                     pedPackPedsBtn.RightIcon = MenuItem.Icon.LOCK;
-                    pedPackPedsBtn.Description = "You do not have access to this ped pack. Select this option to visit the store.";
+                    pedPackPedsBtn.Description = "Browse and preview the ped pack. Get it in the store to use these peds.";
                 }
             }
 
@@ -847,6 +860,275 @@ namespace vMenuClient.menus
         }
 
         private static readonly ClothingToggles clothingToggles = new();
+
+        #region favourite and recent peds
+        private static ModelShortlist LoadPedShortlist(string key, int capacity) => ModelShortlist.Parse(GetResourceKvpString(key), capacity);
+
+        private static ModelShortlist LoadFavouritePeds() => LoadPedShortlist(ModelShortlist.PedFavouritesKey, ModelShortlist.MaxFavourites);
+
+        /// <summary>
+        /// Records a ped model change in Recent Peds. MP characters have their own menu and aren't recorded.
+        /// </summary>
+        internal static void RememberRecentPed(uint model)
+        {
+            if (model == (uint)GetHashKey("mp_m_freemode_01") || model == (uint)GetHashKey("mp_f_freemode_01"))
+            {
+                return;
+            }
+            var recent = LoadPedShortlist(ModelShortlist.PedRecentKey, ModelShortlist.MaxRecent);
+            recent.Touch(model);
+            SetResourceKvp(ModelShortlist.PedRecentKey, recent.ToJson());
+        }
+
+        // Model hash -> the name the Spawn Peds lists show, built on first use.
+        private Dictionary<uint, string> pedNames;
+
+        private string GetPedName(uint model)
+        {
+            if (pedNames == null)
+            {
+                pedNames = new Dictionary<uint, string>();
+                foreach (var list in new[] { mainModels, maleModels, femaleModels, animalModels, otherPeds })
+                {
+                    foreach (var ped in list)
+                    {
+                        pedNames[(uint)GetHashKey(ped.Key)] = string.IsNullOrWhiteSpace(ped.Value) ? ped.Key : $"{ped.Value} ({ped.Key})";
+                    }
+                }
+                foreach (var ped in AddonPeds ?? new Dictionary<string, uint>())
+                {
+                    pedNames[ped.Value] = ped.Key;
+                }
+                foreach (var ped in PedPackPeds ?? new List<PedPackEntry>())
+                {
+                    pedNames[(uint)GetHashKey(ped.Model)] = ped.DisplayName;
+                }
+            }
+            return pedNames.TryGetValue(model, out var name) ? name : $"Ped ({model})";
+        }
+
+        private static readonly HashSet<uint> WaterAnimals = new(new[] { "a_c_dolphin", "a_c_fish", "a_c_humpback", "a_c_killerwhale", "a_c_sharkhammer", "a_c_sharktiger" }
+            .Select(name => (uint)GetHashKey(name)));
+
+        // Spawns a favourite or recent ped with the same rules as the Spawn Peds lists.
+        private static async Task SpawnShortlistPed(uint model, bool animalsAllowed)
+        {
+            if (data.PedModels.AnimalHashes.Contains(model))
+            {
+                if (!animalsAllowed)
+                {
+                    Notify.Error("You can't spawn animals on this server.");
+                    return;
+                }
+                if (WaterAnimals.Contains(model) && !Game.PlayerPed.IsInWater)
+                {
+                    Notify.Error("This animal can only be spawned when you are in water, otherwise you will die immediately.");
+                    return;
+                }
+                Game.PlayerPed.Weapons.RemoveAll();
+                await SetPlayerSkin(model, new PedInfo() { version = -1 }, false);
+                return;
+            }
+            await SetPlayerSkin(model, new PedInfo() { version = -1 }, true);
+        }
+
+        /// <summary>
+        /// Favourite Peds and Recent Peds at the top of Spawn Peds, like the vehicle spawner's.
+        /// </summary>
+        private void CreatePedShortlistMenus(Menu spawnPedsMenu)
+        {
+            var favouritesMenu = new Menu(" ", "Favourite Peds");
+            var recentMenu = new Menu(" ", "Recent Peds");
+            var favouritesBtn = new MenuItem("Favourite Peds", "Peds you've starred. Add the one you are, or one from Recent Peds.") { Label = "→→→" };
+            var recentBtn = new MenuItem("Recent Peds", $"The last {ModelShortlist.MaxRecent} peds you became. MP characters aren't listed.") { Label = "→→→" };
+            MenuController.AddSubmenu(spawnPedsMenu, favouritesMenu);
+            MenuController.AddSubmenu(spawnPedsMenu, recentMenu);
+            spawnPedsMenu.AddMenuItem(favouritesBtn);
+            spawnPedsMenu.AddMenuItem(recentBtn);
+            MenuController.BindMenuItem(spawnPedsMenu, favouritesMenu, favouritesBtn);
+            MenuController.BindMenuItem(spawnPedsMenu, recentMenu, recentBtn);
+
+            var animalsAllowed = GetSettingsBool(Setting.vmenu_enable_animals_spawn_menu) && IsAllowed(Permission.PASpawnAnimals);
+            var addCurrent = new MenuItem("Add My Current Ped", "Adds the ped you are now to your favourites.");
+            var clearRecent = new MenuItem("~r~Clear Recent Peds", "Empties this list.");
+
+            MenuListItem PedItem(uint model, string secondAction)
+                => new(GetPedName(model), new List<string> { "Become", secondAction }, 0, $"Choose Become or {secondAction}, then press Enter.") { ItemData = model };
+
+            void RebuildFavourites()
+            {
+                favouritesMenu.ClearMenuItems();
+                favouritesMenu.AddMenuItem(addCurrent);
+                var favourites = LoadFavouritePeds();
+                if (favourites.Models.Count == 0)
+                {
+                    favouritesMenu.AddMenuItem(new MenuItem("No favourites yet", "Add the ped you are, or favourite one from Recent Peds.") { Enabled = false });
+                }
+                foreach (var model in favourites.Models)
+                {
+                    favouritesMenu.AddMenuItem(PedItem(model, "Remove"));
+                }
+                favouritesMenu.RefreshIndex();
+            }
+
+            void RebuildRecent()
+            {
+                recentMenu.ClearMenuItems();
+                var recent = LoadPedShortlist(ModelShortlist.PedRecentKey, ModelShortlist.MaxRecent);
+                var favourites = LoadFavouritePeds();
+                if (recent.Models.Count == 0)
+                {
+                    recentMenu.AddMenuItem(new MenuItem("No recent peds yet", "Peds you become show up here.") { Enabled = false });
+                }
+                foreach (var model in recent.Models)
+                {
+                    recentMenu.AddMenuItem(PedItem(model, favourites.Contains(model) ? "Unfavourite" : "Favourite"));
+                }
+                if (recent.Models.Count > 0)
+                {
+                    recentMenu.AddMenuItem(clearRecent);
+                }
+                recentMenu.RefreshIndex();
+            }
+
+            bool SetFavourite(uint model, bool favourite)
+            {
+                var favourites = LoadFavouritePeds();
+                if (favourite && !favourites.Contains(model) && !favourites.Add(model))
+                {
+                    Notify.Error($"You can have up to {ModelShortlist.MaxFavourites} favourite peds.");
+                    return false;
+                }
+                if (!favourite)
+                {
+                    favourites.Remove(model);
+                }
+                SetResourceKvp(ModelShortlist.PedFavouritesKey, favourites.ToJson());
+                return true;
+            }
+
+            favouritesMenu.OnMenuOpen += (m) => RebuildFavourites();
+            recentMenu.OnMenuOpen += (m) => RebuildRecent();
+
+            favouritesMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item != addCurrent)
+                {
+                    return;
+                }
+                var model = (uint)GetEntityModel(Game.PlayerPed.Handle);
+                if (model == (uint)GetHashKey("mp_m_freemode_01") || model == (uint)GetHashKey("mp_f_freemode_01"))
+                {
+                    Notify.Info("MP characters live in Saved Characters, not here.");
+                }
+                else if (LoadFavouritePeds().Contains(model))
+                {
+                    Notify.Info($"{GetPedName(model)} is already a favourite.");
+                }
+                else if (SetFavourite(model, true))
+                {
+                    Notify.Success($"{GetPedName(model)} added to your favourites.");
+                    RebuildFavourites();
+                }
+            };
+
+            favouritesMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
+            {
+                if (item.ItemData is not uint model)
+                {
+                    return;
+                }
+                if (listIndex == 0)
+                {
+                    await SpawnShortlistPed(model, animalsAllowed);
+                }
+                else if (SetFavourite(model, false))
+                {
+                    RebuildFavourites();
+                }
+            };
+
+            recentMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item == clearRecent)
+                {
+                    DeleteResourceKvp(ModelShortlist.PedRecentKey);
+                    RebuildRecent();
+                }
+            };
+
+            recentMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
+            {
+                if (item.ItemData is not uint model)
+                {
+                    return;
+                }
+                if (listIndex == 0)
+                {
+                    await SpawnShortlistPed(model, animalsAllowed);
+                    return;
+                }
+                var favourite = !LoadFavouritePeds().Contains(model);
+                if (SetFavourite(model, favourite))
+                {
+                    Notify.Success(favourite ? $"{GetPedName(model)} added to your favourites." : $"{GetPedName(model)} removed from your favourites.");
+                    RebuildRecent();
+                }
+            };
+        }
+        #endregion
+
+        #region ped preview
+        // A local ped (not networked: nobody else sees it) showing a ped pack model.
+        private static int previewPed;
+
+        /// <summary>
+        /// Shows a ped in front of the player for 20 seconds. It is created locally only, so the
+        /// preview gives nothing away: other players never see it and it can't be controlled.
+        /// </summary>
+        private static async Task PreviewPed(uint model)
+        {
+            ClearPreviewPed();
+            if (!IsModelInCdimage(model) || !IsModelAPed(model) || !await LoadModelAsync(model))
+            {
+                Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "this ped");
+                return;
+            }
+            var player = Game.PlayerPed;
+            var pos = GetOffsetFromEntityInWorldCoords(player.Handle, 0f, 2.5f, 0f);
+            var groundZ = pos.Z;
+            GetGroundZFor_3dCoord(pos.X, pos.Y, pos.Z + 1f, ref groundZ, false);
+            var ped = CreatePed(4, model, pos.X, pos.Y, groundZ, player.Heading + 180f, false, false);
+            SetModelAsNoLongerNeeded(model);
+            if (ped == 0)
+            {
+                Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "this ped");
+                return;
+            }
+            SetPedDefaultComponentVariation(ped);
+            SetEntityInvincible(ped, true);
+            SetBlockingOfNonTemporaryEvents(ped, true);
+            SetPedCanRagdoll(ped, false);
+            TaskStandStill(ped, -1);
+            previewPed = ped;
+            Notify.Info("Preview: only you can see this ped. It goes after 20 seconds or when you leave this menu.");
+
+            await Delay(20000);
+            if (previewPed == ped)
+            {
+                ClearPreviewPed();
+            }
+        }
+
+        private static void ClearPreviewPed()
+        {
+            if (previewPed != 0 && DoesEntityExist(previewPed))
+            {
+                DeleteEntity(ref previewPed);
+            }
+            previewPed = 0;
+        }
+        #endregion
 
         private static bool IsMpCharacter(int ped)
             => IsPedModel(ped, (uint)GetHashKey("mp_m_freemode_01")) || IsPedModel(ped, (uint)GetHashKey("mp_f_freemode_01"));

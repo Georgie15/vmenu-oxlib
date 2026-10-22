@@ -62,7 +62,7 @@ for command, permission, label in (('PVLock', 'PVLockDoors', 'vMenu PV Lock/Unlo
     block = member(pv, r'if \(IsAllowed\(Permission\.' + permission + r'\)\)\s*\{\s*RegisterCommand\(\$"vMenu:\{keyMappingId\}:' + command + r'".*?\n            }')
     assert f'RegisterKeyMapping($"vMenu:{{keyMappingId}}:{command}", "{label}", "keyboard", "");' in block, \
         f'{label} is unbound by default and needs {permission}'
-assert 'LockOrUnlockDoors(veh, !GetVehicleDoorsLockedForPlayer(veh.Handle, Game.PlayerPed.Handle));' in pv, 'lock key toggles'
+assert 'LockOrUnlockDoors(veh, !IsVehicleLocked(veh));' in pv, 'lock key toggles, reading the lock state from the vehicle (release F)'
 assert pv.count('ToggleEngine(') >= 3, 'menu item and key share the engine toggle'
 assert 'menu.AddMenuItem(waypointToVehicle);' in pv and 'SetNewWaypoint(LastKnownPosition.Value.X, LastKnownPosition.Value.Y);' in pv
 assert re.search(r'personalVehicleMenu\.LastKnownPosition = personalVehicle\.Position;', member(fc, r'^        private async Task AutoPVBlipOnExitTick\(\).*?^        }$')), \

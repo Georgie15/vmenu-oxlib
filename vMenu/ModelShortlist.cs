@@ -6,22 +6,24 @@ using Newtonsoft.Json;
 namespace vMenuClient
 {
     /// <summary>
-    /// A short list of vehicle model hashes: the spawner's Favourite Vehicles (added by the player)
-    /// and Recent Vehicles (most recent first). Stored as a JSON array in one KVP each; the keys
-    /// start with "vmenu" so MainMenu's one-off KVP cleanup keeps them, and save backups include
-    /// them. Kept free of game calls so it can be tested.
+    /// A short list of model hashes: Favourite and Recent Vehicles in the spawner, and Favourite and
+    /// Recent Peds in Spawn Peds. Favourites are added by the player; recents are most recent first.
+    /// Stored as a JSON array in one KVP each; the keys start with "vmenu" so MainMenu's one-off KVP
+    /// cleanup keeps them, and save backups include them. Kept free of game calls so it can be tested.
     /// </summary>
-    internal sealed class VehicleShortlist
+    internal sealed class ModelShortlist
     {
-        internal const string FavouritesKey = "vmenu_vehicle_favourites";
-        internal const string RecentKey = "vmenu_vehicle_recent";
+        internal const string VehicleFavouritesKey = "vmenu_vehicle_favourites";
+        internal const string VehicleRecentKey = "vmenu_vehicle_recent";
+        internal const string PedFavouritesKey = "vmenu_ped_favourites";
+        internal const string PedRecentKey = "vmenu_ped_recent";
         internal const int MaxFavourites = 50;
         internal const int MaxRecent = 10;
 
         private readonly List<uint> models;
         private readonly int capacity;
 
-        private VehicleShortlist(IEnumerable<uint> models, int capacity)
+        private ModelShortlist(IEnumerable<uint> models, int capacity)
         {
             this.capacity = capacity;
             this.models = models.Distinct().Take(capacity).ToList();
@@ -70,7 +72,7 @@ namespace vMenuClient
         /// <summary>
         /// Reads a stored list; a missing or damaged one is empty.
         /// </summary>
-        internal static VehicleShortlist Parse(string json, int capacity)
+        internal static ModelShortlist Parse(string json, int capacity)
         {
             List<uint> stored = null;
             if (!string.IsNullOrWhiteSpace(json))
@@ -83,7 +85,7 @@ namespace vMenuClient
                 {
                 }
             }
-            return new VehicleShortlist((stored ?? new List<uint>()).Where(model => model != 0), capacity);
+            return new ModelShortlist((stored ?? new List<uint>()).Where(model => model != 0), capacity);
         }
     }
 }

@@ -73,6 +73,93 @@ namespace vMenuClient.menus
         private MenuItem liveriesBackButton;
         #endregion
 
+        // The vehicle whose windows the key binding rolled down.
+        private int windowsDownVehicle;
+
+        /// <summary>
+        /// Key bindings for the vehicle you're in (Settings > Key Bindings > FiveM), unbound until the
+        /// player picks keys. Each needs the same permission as its menu item.
+        /// </summary>
+        private void RegisterVehicleKeyBindings()
+        {
+            var keyMappingId = MainMenu.GetKeyMappingId();
+            void Bind(string name, string description, Action action)
+            {
+                var command = $"vMenu:{keyMappingId}:{name}";
+                RegisterCommand(command, new Action<int, List<object>, string>((source, args, rawCommand) => action()), false);
+                RegisterKeyMapping(command, description, "keyboard", "");
+            }
+
+            if (IsAllowed(Permission.VOEngine))
+            {
+                Bind("VehEngine", "vMenu Vehicle Engine On/Off", () => WithDrivenVehicle(veh => SetVehicleEngineOn(veh.Handle, !veh.IsEngineRunning, false, true)));
+            }
+            if (IsAllowed(Permission.VODoors))
+            {
+                Bind("VehHood", "vMenu Vehicle Hood", () => WithDrivenVehicle(veh => ToggleVehicleDoor(veh, 4)));
+                Bind("VehTrunk", "vMenu Vehicle Trunk", () => WithDrivenVehicle(veh => ToggleVehicleDoor(veh, 5)));
+            }
+            if (IsAllowed(Permission.VOWindows))
+            {
+                Bind("VehWindows", "vMenu Vehicle Windows Up/Down", () => WithDrivenVehicle(ToggleVehicleWindows));
+            }
+            if (IsAllowed(Permission.VOCycleSeats))
+            {
+                Bind("VehSeat", "vMenu Next Vehicle Seat", () =>
+                {
+                    if (Game.PlayerPed.IsInVehicle())
+                    {
+                        CycleThroughSeats();
+                    }
+                });
+            }
+        }
+
+        // Like the menu items: only the driver changes the vehicle. On foot the key does nothing.
+        private static void WithDrivenVehicle(Action<Vehicle> action)
+        {
+            var veh = GetVehicle();
+            if (veh == null || !veh.Exists() || veh.IsDead)
+            {
+                return;
+            }
+            if (veh.Driver != Game.PlayerPed)
+            {
+                Notify.Error("You have to be the driver of a vehicle to do this.");
+                return;
+            }
+            action(veh);
+        }
+
+        private static void ToggleVehicleDoor(Vehicle veh, int door)
+        {
+            if (GetVehicleDoorAngleRatio(veh.Handle, door) > 0.1f)
+            {
+                SetVehicleDoorShut(veh.Handle, door, false);
+            }
+            else
+            {
+                SetVehicleDoorOpen(veh.Handle, door, false, false);
+            }
+        }
+
+        private void ToggleVehicleWindows(Vehicle veh)
+        {
+            var down = windowsDownVehicle != veh.Handle;
+            for (var window = 0; window < 4; window++)
+            {
+                if (down)
+                {
+                    RollDownWindow(veh.Handle, window);
+                }
+                else
+                {
+                    RollUpWindow(veh.Handle, window);
+                }
+            }
+            windowsDownVehicle = down ? veh.Handle : 0;
+        }
+
         /// <summary>
         /// Saves the current vehicle's extras and livery as the player's preset for its model.
         /// </summary>
@@ -1851,6 +1938,16 @@ namespace vMenuClient.menus
 
                     }
                 }
+            };
+
+            RegisterVehicleKeyBindings();
+
+            // A saved vehicle changed in this menu visit gets an offer to update its save (MainMenu).
+            menu.OnMenuOpen += (m) =>
+            {
+                var current = GetVehicle();
+                SavedVehicleChanges.BeginVisit(current != null && current.Exists() && current.Driver == Game.PlayerPed ? current.Handle : 0,
+                    () => VehicleLook(current));
             };
 
             // Registered once: this used to be added on every open, so Go Back went back several menus.

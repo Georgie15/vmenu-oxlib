@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: fixes and player features release E |
-| `build/vMenu/vMenuClient.net.dll` | `8b05f1f47c1cc660aca62f337d6fe0e6d3ac0b56a8d196e75fdc2ca35164d7c8` |
+| Latest change | October 21, 2026: player features release F |
+| `build/vMenu/vMenuClient.net.dll` | `38bac5d98528d7a5663fd7adee888af6ef9fb62b9cb1d7fc61ada6d48f1e635d` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -889,3 +889,146 @@ these steps instead:
    "Save backups are enabled."
 7. Work through the runtime acceptance list of each release, A to E. If something
    breaks, put the backup from step 2 back.
+
+## October 21, 2026: player features release F (client DLL, Lua, config)
+
+Built on the local `next` branch after release E. Client only: the server DLL is
+release B's.
+
+**New for players:**
+- **"Save your changes?" for saved vehicles.**
+  - When you spawn a saved vehicle (or save one), vMenu remembers which save it
+    is. It records how the vehicle looks when you open Vehicle Options.
+  - When you close the menu, if you changed it, vMenu asks whether to save the
+    changes to that save.
+  - It stays quiet if nothing changed, if you're in another vehicle or on foot,
+    if the save was renamed or deleted, or if you already saved.
+  - Saving uses the same code as Replace Vehicle (moved into
+    `CaptureVehicleInfo`), so the CAD token and category are kept.
+- **Saved Outfits** (MP Ped Customization):
+  - Save what you're wearing under a name, then Wear, Update or Delete it.
+  - Only clothing slots change; face, hair and tattoos stay. Wearing one also
+    updates the character you're editing, so saving the character keeps it.
+  - Outfits are kept per body type, not per character: your male characters
+    share theirs, and so do your female ones. Stored as `vmenu_outfit_<name>`
+    and included in backups.
+- **Favourite and Recent Peds** (Spawn Peds), like the vehicle ones from
+  release E: up to 50 favourites and your last 10 peds. MP characters aren't
+  listed.
+  - Becoming one goes through `SetPlayerSkin`, so the ped pack check still
+    applies. Animals still need animals to be allowed, and water animals still
+    need water.
+  - Included in backups.
+- **Ped pack: browse and preview.**
+  - Players without the pack can now open the Ped Pack list. Before, they went
+    straight to the store prompt and bought blind.
+  - Each ped has Preview, and Get It In The Store instead of Spawn.
+  - Preview puts the ped in front of you for 20 seconds as a local,
+    non-networked ped: nobody else sees it, and you get nothing to keep. It
+    goes when you leave the ped's menu.
+- **Auto-Lock When I Walk Away** (Personal Vehicle, needs the lock permission):
+  your car locks once you walk more than 15 m from it, if nobody is inside and
+  it isn't already locked. It re-arms when you come back within 10 m.
+- **Key bindings for the vehicle you're in**, unbound by default:
+  - "vMenu Vehicle Engine On/Off", "Hood", "Trunk", "Windows Up/Down" and "Next
+    Vehicle Seat".
+  - Each needs the same permission as its menu item.
+  - Engine, doors and windows need you to be the driver, like the menu.
+- **Photo Mode** (Misc Settings, plus an unbound "vMenu Photo Mode" key):
+  - A free camera with the HUD hidden: mouse to look, WASD to move, Space/Ctrl
+    for up/down, scroll to zoom, Shift for faster, H to hide the help,
+    Backspace to leave.
+  - The camera stays within 15 m of your ped's head, and only moves where the
+    head has a clear line of sight, so it can't look through walls or into
+    closed rooms.
+  - Your ped can't move meanwhile, and it won't start in a moving vehicle.
+  - Needs `setr vmenu_photo_mode true`.
+- **What's New In vMenu:** a short list of recent features, shown once the first
+  time a player opens the menu after an update. It is also in Misc Settings.
+  - It only mentions backups and photo mode when the server has them on.
+  - Edit the list in `client/whatsNew.lua`, and change `VERSION` so everyone
+    sees it again.
+
+**Fix: locking and unlocking your personal vehicle.**
+- The double-tap-horn shortcut and release D's "vMenu PV Lock/Unlock" key
+  decided between lock and unlock with `GetVehicleDoorsLockedForPlayer`, but
+  passed your ped handle where it takes a player ID. So they most likely always
+  saw "unlocked" and could only lock.
+- Both now read the car's own lock status (`IsVehicleLocked`). Auto-lock uses
+  it too.
+
+**Other changes:**
+- `VehicleShortlist` is now `ModelShortlist` (it serves peds too), and its test
+  moved from `tests/vehicle-shortlists` to `tests/model-shortlists`. The storage
+  keys didn't change.
+- `permissions.cfg` gains `setr vmenu_photo_mode true`.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `38bac5d98528d7a5663fd7adee888af6ef9fb62b9cb1d7fc61ada6d48f1e635d` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release E's client DLL shows only the members
+  above: `SavedVehicleTracker`, `PersonalVehicleAutoLock`, `SavedOutfit`,
+  `ModelShortlist` (the renamed class), `CaptureVehicleInfo`,
+  `IsVehicleLocked`, `OfferToUpdateSavedVehicle`, the auto-lock tick, the
+  vehicle key bindings, and the ped menus and preview. Everything else is
+  renumbered compiler-generated local functions.
+- New tests:
+  - `dotnet run --project tests/vehicle-conveniences`: when the update offer
+    appears, auto-lock (once per walk away, never with someone inside), and the
+    wiring of both, the lock-state fix and the key binding permissions.
+  - `dotnet run --project tests/saved-outfits`: clothing slots only, wearing,
+    damaged storage, the menu (MP characters only, current body type, never
+    overwrites, delete asks) and backups.
+  - `lua tests/photo-mode/test_photo_mode.lua`: the 15 m limit, walls, zoom,
+    help, leaving, the convar, the moving-vehicle refusal and the key binding.
+  - `lua tests/whats-new/test_whats_new.lua`: once per version, on demand, and
+    only switched-on features listed.
+- Extended tests:
+  - `tests/model-shortlists`: the ped menus, animal rules and recording only
+    real model changes.
+  - `tests/client-guards`: ped pack browse and preview (local ped, spawn still
+    locked).
+  - `tests/save-backups`: outfits and ped lists backed up; auto-lock and
+    what's-new keys not.
+  - `tests/vehicle-spawn-placement`: saved vehicles are tracked for the update
+    offer; fresh spawns aren't.
+  - `tests/client-features`: release D's lock-key check now expects the
+    lock-state fix.
+- All twenty-four tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy** (on top of release E, or with the A-E steps in "releases B-E merged"):
+1. Hash the live client DLL. It must be release E's
+   (`8b05f1f47c1cc660aca62f337d6fe0e6d3ac0b56a8d196e75fdc2ca35164d7c8`), unless
+   you're deploying A-F together. The server must be release B's
+   (`003e0932…`), or `e17419b8…` when deploying with B.
+2. Add `setr vmenu_photo_mode true` to the live `permissions.cfg` if you want
+   photo mode (below `setr vmenu_backups true`). Without it, photo mode stays
+   hidden.
+3. Copy `vMenuClient.net.dll`, `client/backups.lua`, `server/backups.lua`, and the
+   new `client/photoMode.lua` and `client/whatsNew.lua`.
+4. Restart the server (or the resource, after running `setr vmenu_photo_mode true`
+   in the console).
+
+**Runtime acceptance:**
+- Spawn a saved car, change its colour in Vehicle Options, and close the menu:
+  vMenu asks to save the changes. Yes updates the save; No leaves it. Close the
+  menu without changes: no question.
+- Save an outfit on an MP character, change clothes, then Wear it: the clothes
+  come back and your face and hair don't change. Update and Delete work.
+- Become a few peds: they appear in Recent Peds. Favourite one and become it
+  from Favourite Peds.
+- Without the ped pack: open Ped Pack, preview a ped (only you see it, and it
+  goes after 20 s), and Get It In The Store opens the store. With the pack,
+  Spawn Ped works.
+- Turn on Auto-Lock When I Walk Away, leave your car and walk away: it chirps
+  and locks. With a friend inside, it doesn't.
+- Double-tap the horn near your car, and use the PV Lock/Unlock key: each
+  toggles between locked and unlocked.
+- Bind the vehicle keys and try each one as the driver.
+- Photo Mode: move around, try to pass through a wall (you can't), go far (it
+  stops at 15 m), zoom, hide the help, leave with Backspace.
+- The first menu open shows What's New once; Misc Settings shows it again.

@@ -4,7 +4,7 @@
     <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../vMenu/VehicleShortlist.cs" Link="VehicleShortlist.cs" />
+    <Compile Include="../../vMenu/SavedOutfit.cs" Link="SavedOutfit.cs" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>../../dependencies/shared/Newtonsoft.Json.dll</HintPath>
     </Reference>

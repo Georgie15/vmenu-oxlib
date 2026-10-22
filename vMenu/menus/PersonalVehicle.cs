@@ -19,6 +19,8 @@ namespace vMenuClient.menus
         private Menu menu;
         private MenuItem currentVehicleInfoItem;
         public bool BlipOnExit { get; private set; } = UserDefaults.PVBlipOnExit;
+        // Personal Vehicle > Auto-Lock When I Walk Away (FunctionsController locks the car).
+        public bool AutoLock { get; private set; } = GetResourceKvpInt("vmenu_pv_autolock") == 1;
 
         // Empty constructor
         public PersonalVehicle() { }
@@ -60,6 +62,7 @@ namespace vMenuClient.menus
             var soundHorn = new MenuItem("Sound Horn", "Sounds the horn of the vehicle.");
             var toggleAlarm = new MenuItem("Toggle Alarm Sound", "Toggles the vehicle alarm sound on or off. This does not set an alarm. It only toggles the current sounding status of the alarm.");
             var blipOnExit = new MenuCheckboxItem("Vehicle Blip On Exit", "When enabled, a blip is shown for your personal vehicle only while no driver is inside. The blip is removed if anyone is driving.", BlipOnExit);
+            var autoLock = new MenuCheckboxItem("Auto-Lock When I Walk Away", "Locks your personal vehicle when you walk more than 15 m away from it and nobody is inside.", AutoLock);
             var exclusiveDriver = new MenuCheckboxItem("Exclusive Driver", "If enabled, then you will be the only one that can enter the drivers seat. Other players will not be able to drive the car. They can still be passengers.", false) { Style = MenuCheckboxItem.CheckboxStyle.Cross };
             //submenu
             VehicleDoorsMenu = new Menu("Vehicle Doors", "Vehicle Doors Management");
@@ -114,6 +117,7 @@ namespace vMenuClient.menus
             {
                 menu.AddMenuItem(lockDoors);
                 menu.AddMenuItem(unlockDoors);
+                menu.AddMenuItem(autoLock);
             }
 
             if (IsAllowed(Permission.PVDoors))
@@ -196,7 +200,12 @@ namespace vMenuClient.menus
             // Handle checkbox changes
             menu.OnCheckboxChange += (sender, item, index, _checked) =>
             {
-                if (item == blipOnExit)
+                if (item == autoLock)
+                {
+                    AutoLock = _checked;
+                    SetResourceKvpInt("vmenu_pv_autolock", _checked ? 1 : 0);
+                }
+                else if (item == blipOnExit)
                 {
                     BlipOnExit = _checked;
                     if (BlipOnExit)
@@ -497,7 +506,7 @@ namespace vMenuClient.menus
             if (veh != null)
             {
                 PressKeyFob(veh);
-                LockOrUnlockDoors(veh, !GetVehicleDoorsLockedForPlayer(veh.Handle, Game.PlayerPed.Handle));
+                LockOrUnlockDoors(veh, !IsVehicleLocked(veh));
             }
         }
 

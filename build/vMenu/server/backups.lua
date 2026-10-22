@@ -14,11 +14,11 @@ local SEND_BPS = 128000
 -- Must match client/backups.lua.
 local BACKUP_PREFIXES = {
     'veh_', 'saved_veh_category_', 'ped_', 'mp_ped_', 'mp_character_category_',
-    'vmenu_string_saved_weapon_loadout_', 'vmenu_vehicle_preset_',
+    'vmenu_string_saved_weapon_loadout_', 'vmenu_vehicle_preset_', 'vmenu_outfit_',
 }
 local BACKUP_KEYS = {
     'vmenu_default_character', 'vmenu_last_character', 'vmenu_string_default_loadout',
-    'vmenu_vehicle_favourites', 'vmenu_vehicle_recent',
+    'vmenu_vehicle_favourites', 'vmenu_vehicle_recent', 'vmenu_ped_favourites', 'vmenu_ped_recent',
 }
 
 local exactKeys = {}

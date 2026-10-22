@@ -230,6 +230,12 @@ namespace vMenuClient
         #endregion
 
         #region lock or unlock vehicle doors
+        /// <summary>
+        /// Whether a vehicle's doors are locked (LockOrUnlockDoors sets status 2 to lock, 1 to unlock).
+        /// GetVehicleDoorsLockedForPlayer, used before, takes a player id, not a ped handle.
+        /// </summary>
+        public static bool IsVehicleLocked(Vehicle veh) => GetVehicleDoorLockStatus(veh.Handle) >= 2;
+
         public static async void LockOrUnlockDoors(Vehicle veh, bool lockDoors)
         {
             if (veh != null && veh.Exists())
@@ -1234,6 +1240,7 @@ namespace vMenuClient
             {
                 ApplyVehicleModsDelayed(vehicle, vehicleInfo, 500);
                 await BaseScript.Delay(650);
+                SavedVehicleChanges.Track(vehicle.Handle, saveName, vehicleInfo.Category);
             }
             else
             {
@@ -1490,6 +1497,149 @@ namespace vMenuClient
 
         #region Save Vehicle
         /// <summary>
+        /// Reads a vehicle's setup the way Saved Vehicles stores it (without the CAD save token).
+        /// </summary>
+        internal static VehicleInfo CaptureVehicleInfo(Vehicle veh, string category)
+        {
+            var mods = new Dictionary<int, int>();
+
+            foreach (var mod in GetAllVehicleMods(veh))
+            {
+                mods.Add((int)mod.ModType, mod.Index);
+            }
+
+            #region colors
+            var colors = new Dictionary<string, int>();
+            var primaryColor = 0;
+            var secondaryColor = 0;
+            var pearlescentColor = 0;
+            var wheelColor = 0;
+            var dashColor = 0;
+            var trimColor = 0;
+            GetVehicleExtraColours(veh.Handle, ref pearlescentColor, ref wheelColor);
+            GetVehicleColours(veh.Handle, ref primaryColor, ref secondaryColor);
+            GetVehicleDashboardColour(veh.Handle, ref dashColor);
+            GetVehicleInteriorColour(veh.Handle, ref trimColor);
+            colors.Add("primary", primaryColor);
+            colors.Add("secondary", secondaryColor);
+            colors.Add("pearlescent", pearlescentColor);
+            colors.Add("wheels", wheelColor);
+            colors.Add("dash", dashColor);
+            colors.Add("trim", trimColor);
+            var neonR = 255;
+            var neonG = 255;
+            var neonB = 255;
+            if (veh.Mods.HasNeonLights)
+            {
+                GetVehicleNeonLightsColour(veh.Handle, ref neonR, ref neonG, ref neonB);
+            }
+            colors.Add("neonR", neonR);
+            colors.Add("neonG", neonG);
+            colors.Add("neonB", neonB);
+            var tyresmokeR = 0;
+            var tyresmokeG = 0;
+            var tyresmokeB = 0;
+            GetVehicleTyreSmokeColor(veh.Handle, ref tyresmokeR, ref tyresmokeG, ref tyresmokeB);
+            colors.Add("tyresmokeR", tyresmokeR);
+            colors.Add("tyresmokeG", tyresmokeG);
+            colors.Add("tyresmokeB", tyresmokeB);
+            int customPrimaryR = -1;
+            int customPrimaryG = -1;
+            int customPrimaryB = -1;
+            bool primaryColorIsCustom = GetIsVehiclePrimaryColourCustom(veh.Handle);
+
+            if (primaryColorIsCustom)
+            {
+                GetVehicleCustomPrimaryColour(veh.Handle, ref customPrimaryR, ref customPrimaryG, ref customPrimaryB);
+            }
+            colors.Add("customPrimaryR", customPrimaryR);
+            colors.Add("customPrimaryG", customPrimaryG);
+            colors.Add("customPrimaryB", customPrimaryB);
+            colors.Add("customPrimary", primaryColorIsCustom ? 1 : 0);
+            int customSecondaryR = -1;
+            int customSecondaryG = -1;
+            int customSecondaryB = -1;
+
+            bool secondaryColorIsCustom = GetIsVehicleSecondaryColourCustom(veh.Handle);
+
+            if (secondaryColorIsCustom)
+            {
+                GetVehicleCustomSecondaryColour(veh.Handle, ref customSecondaryR, ref customSecondaryG, ref customSecondaryB);
+            }
+            colors.Add("customSecondaryR", customSecondaryR);
+            colors.Add("customSecondaryG", customSecondaryG);
+            colors.Add("customSecondaryB", customSecondaryB);
+            colors.Add("customSecondary", secondaryColorIsCustom ? 1 : 0);
+            #endregion
+
+            var extras = new Dictionary<int, bool>();
+            for (var i = 0; i < 20; i++)
+            {
+                if (veh.ExtraExists(i))
+                {
+                    extras.Add(i, veh.IsExtraOn(i));
+                }
+            }
+
+            return new VehicleInfo()
+            {
+                colors = colors,
+                customWheels = GetVehicleModVariation(veh.Handle, 23),
+                extras = extras,
+                livery = GetVehicleLivery(veh.Handle),
+                model = (uint)GetEntityModel(veh.Handle),
+                mods = mods,
+                name = GetLabelText(GetDisplayNameFromVehicleModel((uint)GetEntityModel(veh.Handle))),
+                neonBack = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Back),
+                neonFront = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Front),
+                neonLeft = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Left),
+                neonRight = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Right),
+                plateText = veh.Mods.LicensePlate,
+                plateStyle = (int)veh.Mods.LicensePlateStyle,
+                turbo = IsToggleModOn(veh.Handle, 18),
+                tyreSmoke = IsToggleModOn(veh.Handle, 20),
+                version = 1,
+                wheelType = GetVehicleWheelType(veh.Handle),
+                windowTint = (int)veh.Mods.WindowTint,
+                xenonHeadlights = IsToggleModOn(veh.Handle, 22),
+                bulletProofTires = !veh.CanTiresBurst,
+                headlightColor = VehicleOptions.GetHeadlightsColorForVehicle(veh),
+                enveffScale = GetVehicleEnveffScale(veh.Handle),
+                Category = string.IsNullOrEmpty(category) ? "Uncategorized" : category
+            };
+        }
+
+        /// <summary>
+        /// The saved vehicle the player is in, and how it looked when Vehicle Options opened.
+        /// </summary>
+        internal static readonly SavedVehicleTracker SavedVehicleChanges = new();
+
+        /// <summary>
+        /// A vehicle's saved setup as one string, for noticing that it changed.
+        /// </summary>
+        internal static string VehicleLook(Vehicle veh) => JsonConvert.SerializeObject(CaptureVehicleInfo(veh, null));
+
+        /// <summary>
+        /// Called when every menu closes: if the saved vehicle the player is driving was changed
+        /// during this menu visit, offer to save the changes to it.
+        /// </summary>
+        internal static async void OfferToUpdateSavedVehicle()
+        {
+            var veh = GetVehicle();
+            var handle = veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed ? veh.Handle : 0;
+            if (!SavedVehicleChanges.EndVisit(handle, () => VehicleLook(veh), saveName => !string.IsNullOrEmpty(GetResourceKvpString("veh_" + saveName)),
+                out var name, out var category))
+            {
+                return;
+            }
+            if (await GetUserConfirmation("Saved Vehicle", $"You changed **{name}**. Save these changes to it?"))
+            {
+                SaveVehicle(name, category);
+                Notify.Success($"Saved your changes to {name}.");
+            }
+        }
+
+        /// <summary>
         /// Saves the vehicle the player is currently in to the client's kvp storage.
         /// </summary>
         public static async void SaveVehicle(string updateExistingSavedVehicleName = null, string existingCatergory = null)
@@ -1502,116 +1652,8 @@ namespace vMenuClient
                 // Make sure the entity is actually a vehicle and it still exists, and it's not dead.
                 if (veh != null && veh.Exists() && !veh.IsDead && veh.IsDriveable)
                 {
-                    #region new saving method
-                    var mods = new Dictionary<int, int>();
-
-                    foreach (var mod in GetAllVehicleMods(veh))
-                    {
-                        mods.Add((int)mod.ModType, mod.Index);
-                    }
-
-                    #region colors
-                    var colors = new Dictionary<string, int>();
-                    var primaryColor = 0;
-                    var secondaryColor = 0;
-                    var pearlescentColor = 0;
-                    var wheelColor = 0;
-                    var dashColor = 0;
-                    var trimColor = 0;
-                    GetVehicleExtraColours(veh.Handle, ref pearlescentColor, ref wheelColor);
-                    GetVehicleColours(veh.Handle, ref primaryColor, ref secondaryColor);
-                    GetVehicleDashboardColour(veh.Handle, ref dashColor);
-                    GetVehicleInteriorColour(veh.Handle, ref trimColor);
-                    colors.Add("primary", primaryColor);
-                    colors.Add("secondary", secondaryColor);
-                    colors.Add("pearlescent", pearlescentColor);
-                    colors.Add("wheels", wheelColor);
-                    colors.Add("dash", dashColor);
-                    colors.Add("trim", trimColor);
-                    var neonR = 255;
-                    var neonG = 255;
-                    var neonB = 255;
-                    if (veh.Mods.HasNeonLights)
-                    {
-                        GetVehicleNeonLightsColour(veh.Handle, ref neonR, ref neonG, ref neonB);
-                    }
-                    colors.Add("neonR", neonR);
-                    colors.Add("neonG", neonG);
-                    colors.Add("neonB", neonB);
-                    var tyresmokeR = 0;
-                    var tyresmokeG = 0;
-                    var tyresmokeB = 0;
-                    GetVehicleTyreSmokeColor(veh.Handle, ref tyresmokeR, ref tyresmokeG, ref tyresmokeB);
-                    colors.Add("tyresmokeR", tyresmokeR);
-                    colors.Add("tyresmokeG", tyresmokeG);
-                    colors.Add("tyresmokeB", tyresmokeB);
-                    int customPrimaryR = -1;
-                    int customPrimaryG = -1;
-                    int customPrimaryB = -1;
-                    bool primaryColorIsCustom = GetIsVehiclePrimaryColourCustom(veh.Handle);
-
-                    if (primaryColorIsCustom)
-                    {
-                        GetVehicleCustomPrimaryColour(veh.Handle, ref customPrimaryR, ref customPrimaryG, ref customPrimaryB);
-                    }
-                    colors.Add("customPrimaryR", customPrimaryR);
-                    colors.Add("customPrimaryG", customPrimaryG);
-                    colors.Add("customPrimaryB", customPrimaryB);
-                    colors.Add("customPrimary", primaryColorIsCustom ? 1 : 0);
-                    int customSecondaryR = -1;
-                    int customSecondaryG = -1;
-                    int customSecondaryB = -1;
-
-                    bool secondaryColorIsCustom = GetIsVehicleSecondaryColourCustom(veh.Handle);
-
-                    if (secondaryColorIsCustom)
-                    {
-                        GetVehicleCustomSecondaryColour(veh.Handle, ref customSecondaryR, ref customSecondaryG, ref customSecondaryB);
-                    }
-                    colors.Add("customSecondaryR", customSecondaryR);
-                    colors.Add("customSecondaryG", customSecondaryG);
-                    colors.Add("customSecondaryB", customSecondaryB);
-                    colors.Add("customSecondary", secondaryColorIsCustom ? 1 : 0);
-                    #endregion
-
-                    var extras = new Dictionary<int, bool>();
-                    for (var i = 0; i < 20; i++)
-                    {
-                        if (veh.ExtraExists(i))
-                        {
-                            extras.Add(i, veh.IsExtraOn(i));
-                        }
-                    }
-
-                    var vi = new VehicleInfo()
-                    {
-                        colors = colors,
-                        customWheels = GetVehicleModVariation(veh.Handle, 23),
-                        extras = extras,
-                        livery = GetVehicleLivery(veh.Handle),
-                        model = (uint)GetEntityModel(veh.Handle),
-                        mods = mods,
-                        name = GetLabelText(GetDisplayNameFromVehicleModel((uint)GetEntityModel(veh.Handle))),
-                        neonBack = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Back),
-                        neonFront = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Front),
-                        neonLeft = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Left),
-                        neonRight = veh.Mods.IsNeonLightsOn(VehicleNeonLight.Right),
-                        plateText = veh.Mods.LicensePlate,
-                        cadSaveToken = IdentityBridge.VehicleSaveToken(veh.Handle),
-                        plateStyle = (int)veh.Mods.LicensePlateStyle,
-                        turbo = IsToggleModOn(veh.Handle, 18),
-                        tyreSmoke = IsToggleModOn(veh.Handle, 20),
-                        version = 1,
-                        wheelType = GetVehicleWheelType(veh.Handle),
-                        windowTint = (int)veh.Mods.WindowTint,
-                        xenonHeadlights = IsToggleModOn(veh.Handle, 22),
-                        bulletProofTires = !veh.CanTiresBurst,
-                        headlightColor = VehicleOptions.GetHeadlightsColorForVehicle(veh),
-                        enveffScale = GetVehicleEnveffScale(veh.Handle),
-                        Category = string.IsNullOrEmpty(existingCatergory) ? "Uncategorized" : existingCatergory
-                    };
-
-                    #endregion
+                    var vi = CaptureVehicleInfo(veh, existingCatergory);
+                    vi.cadSaveToken = IdentityBridge.VehicleSaveToken(veh.Handle);
 
                     // Re-saving the same live vehicle retains its token; a new vehicle gets a new token.
                     if (string.IsNullOrEmpty(vi.cadSaveToken)) vi.cadSaveToken = Guid.NewGuid().ToString("N");
@@ -1628,6 +1670,7 @@ namespace vMenuClient
                             // If the save was successfull:
                             if (StorageManager.SaveVehicleInfo("veh_" + saveName, vi, false))
                             {
+                                SavedVehicleChanges.Track(veh.Handle, saveName, vi.Category);
                                 Notify.Success($"Vehicle {saveName} saved.");
                             }
                             // If the save was not successfull:
@@ -1646,6 +1689,7 @@ namespace vMenuClient
                     else
                     {
                         StorageManager.SaveVehicleInfo("veh_" + updateExistingSavedVehicleName, vi, true);
+                        SavedVehicleChanges.Track(veh.Handle, updateExistingSavedVehicleName, vi.Category);
                     }
 
                 }
@@ -2541,6 +2585,7 @@ namespace vMenuClient
 
                     // set the model
                     SetPlayerModel(Game.Player.Handle, modelHash);
+                    PlayerAppearance.RememberRecentPed(modelHash);
 
                     Game.Player.MaxArmor = maxArmour;
                     Game.PlayerPed.MaxHealth = maxHealth;
