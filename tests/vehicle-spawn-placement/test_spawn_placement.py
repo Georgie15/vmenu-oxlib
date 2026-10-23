@@ -23,6 +23,7 @@ with tempfile.TemporaryDirectory(prefix='vmenu-spawn-placement-') as temp:
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup>
 </Project>''', encoding='utf-8')
     (work / 'VehicleSpawnPlacement.cs').write_bytes((root / 'vMenu/VehicleSpawnPlacement.cs').read_bytes())
+    (work / 'VehicleSpawnGate.cs').write_bytes((root / 'vMenu/VehicleSpawnGate.cs').read_bytes())
     (work / 'Harness.cs').write_bytes((Path(__file__).parent / 'Harness.cs').read_bytes())
     (work / 'SpawnCore.cs').write_text('''using System;
 using System.Linq;

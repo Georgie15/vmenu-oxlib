@@ -28,6 +28,7 @@ namespace vMenuClient
             // Models recorded in Recent Vehicles.
             public static readonly List<uint> Recent = new List<uint>();
             public static void RememberRecent(uint model) => Recent.Add(model);
+            public static string GetVehicleName(uint model) => "car" + model;
         }
         static class UserDefaults { public static int VehicleDefaultRadio = 0; }
         class IdentityStub
@@ -39,7 +40,10 @@ namespace vMenuClient
         static Task<T> WaitForVehicleIdentity<T>(Task<T> task, T fallback, string stage) => task;
         static bool CanDoInteraction(string action) => true;
         static bool IsAllowed(Permission permission) => true;
-        static Task<bool> LoadModel(uint model) => Task.FromResult(true);
+        static VehicleSpawnGate SpawnGate = new VehicleSpawnGate(() => Now);
+        // The model loader's result; a pending task models a model that is still streaming.
+        static Func<Task<bool>> ModelLoad = () => Task.FromResult(true);
+        static Task<bool> LoadModel(uint model, VehicleSpawnAttempt attempt) => ModelLoad();
         static Vehicle GetVehicle() => Game.PlayerPed.CurrentVehicle;
         static void SendNotification(string text) { }
         static void Log(string text) { }
@@ -69,10 +73,17 @@ namespace vMenuClient
             PresetsApplied.Clear();
             VehicleSpawner.Recent.Clear();
             SavedVehicleChanges.Tracked.Clear();
+            SpawnGate = new VehicleSpawnGate(() => Now);
+            ModelLoad = () => Task.FromResult(true);
         }
         static Task<int> Spawn(bool inside = true, bool replace = true, string save = null,
             float x = 0, float y = 0, float z = 0)
-            => SpawnVehicleCore(123, inside, replace, false, new VehicleInfo(), save, x, y, z, -1);
+            => SpawnVehicleCore(new VehicleSpawnAttempt(123, save), 123, inside, replace, false, new VehicleInfo(), save, x, y, z, -1);
+        // Through the gate, so a later request can replace this one while it loads.
+        static Task<int> GateSpawn(uint model, string save = null)
+            => SpawnGate.TrySpawnAsync(model, save,
+                attempt => SpawnVehicleCore(attempt, model, true, true, false, new VehicleInfo(), save, 0, 0, 0, -1),
+                1000, (block, current) => throw new Exception("unexpected block: " + block));
 
         static async Task Main()
         {
@@ -195,6 +206,37 @@ namespace vMenuClient
             Check(VehicleSpawner.Recent.Count == 0, "saved vehicles aren't recorded in Recent Vehicles");
             Check(SavedVehicleChanges.Tracked.Count == 1 && SavedVehicleChanges.Tracked[0].EndsWith(":saved"), "a saved vehicle is tracked under its save name");
             Console.WriteLine("PASS: presets and Recent Vehicles cover fresh spawns; saved vehicles are tracked for the update prompt");
+
+            // The model finished loading, but the player chose another vehicle before the spawn resumed.
+            foreach (bool sameModel in new[] { false, true })
+            {
+                Reset(); Surfaces.Add(new Surface(-20));
+                var oldHandle2 = CreateVehicle(123, 100, 200, -19, 90, true, false);
+                var kept = new Vehicle(oldHandle2) { PreviouslyOwnedByPlayer = true };
+                Game.PlayerPed.SetIntoVehicle(kept, VehicleSeat.Driver);
+                _previousVehicle = kept;
+                var loading = new TaskCompletionSource<bool>();
+                ModelLoad = () => loading.Task;
+                var replaced = GateSpawn(123, "first");
+                var next = new TaskCompletionSource<bool>();
+                ModelLoad = () => next.Task;
+                var replacement2 = GateSpawn(sameModel ? 123u : 124u, "second");
+                loading.SetResult(true);
+                Check(await replaced == 0 && kept.Exists() && Positions.Count == 1, "a replaced request deletes and creates nothing");
+                Check(Events.Count == 0 && !IdentityClaimed, "a replaced request asks for no telemetry or CAD identity");
+                Check(ModelReleased != sameModel, "the replaced model is released unless the replacement uses it");
+                next.SetResult(true);
+                Check(await replacement2 != 0 && !kept.Exists(), "the replacement spawns normally");
+            }
+            Console.WriteLine("PASS: a request replaced after its model loaded stops before touching any vehicle");
+
+            Reset(); Surfaces.Add(new Surface(-20)); FailCreate = true;
+            var none = await Spawn();
+            Check(none == 0 && Positions.Count == 0 && SeatCalls == 0, "a vehicle the game didn't create isn't used");
+            Check(Events.Count == 2 && Events[1] == "vMenu:telemetry:vehicleSpawned(0)@0", "telemetry is told the vehicle wasn't created");
+            Check(ModelReleased && PresetsApplied.Count == 0 && VehicleSpawner.Recent.Count == 0 && !IdentityClaimed,
+                "a failed create releases the model and isn't recorded as spawned");
+            Console.WriteLine("PASS: CreateVehicle returning no vehicle is reported, not carried on with");
         }
     }
 }
@@ -250,6 +292,7 @@ namespace CitizenFX.Core
         }
     }
     public static class Game { public static Ped PlayerPed = new Ped(); }
+    public static class Debug { public static void WriteLine(string message) { } }
     public class BaseScript
     {
         public static Task Delay(int milliseconds)
@@ -274,7 +317,7 @@ namespace CitizenFX.Core.Native
         public static int ProbeStarts, Requests, LastFlags, LastIgnored, PendingPolls, PlaceCalls, SeatCalls, ModelClass, ModsApplied;
         static int polls, nextHandle;
         public static float LastRayTop, LastRayBottom, MinimumZ;
-        public static bool InvalidRay, PlacementBeforeSeating, HeliBlades, ModelReleased, IdentityClaimed;
+        public static bool InvalidRay, PlacementBeforeSeating, HeliBlades, ModelReleased, IdentityClaimed, FailCreate;
         public static Surface ForcedHit;
         public static Vector3 PlayerPosition, SeatedAt;
         public static List<Surface> Surfaces = new List<Surface>();
@@ -284,7 +327,7 @@ namespace CitizenFX.Core.Native
         public static void ResetWorld(float playerZ)
         {
             Now = 0; CollisionReadyAt = 0; ProbeStarts = Requests = LastFlags = LastIgnored = PendingPolls = PlaceCalls = SeatCalls = ModelClass = ModsApplied = polls = 0;
-            MinimumZ = -0.5f; InvalidRay = HeliBlades = ModelReleased = IdentityClaimed = false; PlacementBeforeSeating = true;
+            MinimumZ = -0.5f; InvalidRay = HeliBlades = ModelReleased = IdentityClaimed = FailCreate = false; PlacementBeforeSeating = true;
             nextHandle = 100; ForcedHit = null; Surfaces.Clear(); Positions.Clear(); Rotations.Clear();
             PlayerPosition = new Vector3(100, 200, playerZ); SeatedAt = Vector3.Zero; Game.PlayerPed = new Ped();
             Snap = v => true;
@@ -309,7 +352,11 @@ namespace CitizenFX.Core.Native
         public static void GetModelDimensions(uint hash, ref Vector3 min, ref Vector3 max)
         { min = new Vector3(-1, -2, MinimumZ); max = new Vector3(1, 2, 1); }
         public static int CreateVehicle(uint hash, float x, float y, float z, float heading, bool networked, bool mission)
-        { var handle = nextHandle++; Positions[handle] = new Vector3(x, y, z); Rotations[handle] = new Vector3(0, 0, heading); return handle; }
+        {
+            if (FailCreate) return 0;
+            var handle = nextHandle++; Positions[handle] = new Vector3(x, y, z); Rotations[handle] = new Vector3(0, 0, heading); return handle;
+        }
+        public static bool DoesEntityExist(int handle) => Positions.ContainsKey(handle);
         public static Vector3 GetEntityCoords(int handle, bool alive) => handle == 1
             ? (Game.PlayerPed.IsInVehicle() ? Positions[Game.PlayerPed.CurrentVehicle.Handle] : PlayerPosition) : Positions[handle];
         public static void SetEntityCoordsNoOffset(int handle, float x, float y, float z, bool tasks, bool ik, bool warp)

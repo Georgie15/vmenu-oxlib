@@ -138,9 +138,11 @@ local integrations = readFile('build/vMenu/client/integrations.lua')
 check(not integrations:find('vMenu:telemetry:queueVehicleSpawn', 1, true), 'canDoInteraction no longer starts telemetry')
 local core = readFile('vMenu/CommonFunctions.cs')
 local queueAt = core:find('TriggerEvent("vMenu:telemetry:queueVehicleSpawn");', 1, true)
-local createAt = core:find('new Vehicle(CreateVehicle(vehicleHash', 1, true)
+local createAt = core:find('var vehicleHandle = CreateVehicle(vehicleHash', 1, true)
+local failedAt = core:find('TriggerEvent("vMenu:telemetry:vehicleSpawned", 0);', 1, true)
 local spawnedAt = core:find('TriggerEvent("vMenu:telemetry:vehicleSpawned", vehicle.Handle);', 1, true)
 check(queueAt and createAt and spawnedAt and queueAt < createAt and createAt < spawnedAt, 'spawn core: queue, create, then hand over the vehicle')
+check(failedAt and createAt < failedAt and failedAt < spawnedAt, 'spawn core: a vehicle that was not created is handed over as 0')
 print('PASS: wiring')
 
 -- Server: one ticket per spawn. Requests closer together than half the spawner cooldown are refused,

@@ -410,7 +410,7 @@ namespace vMenuClient.menus
             SetResourceKvp(ModelShortlist.VehicleRecentKey, recent.ToJson());
         }
 
-        private static string GetVehicleName(uint model)
+        internal static string GetVehicleName(uint model)
         {
             var displayName = GetDisplayNameFromVehicleModel(model);
             var label = GetLabelText(displayName);

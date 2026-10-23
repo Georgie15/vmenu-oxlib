@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 21, 2026: frame-cost release G |
-| `build/vMenu/vMenuClient.net.dll` | `2d0178c6cdea02dfbf88378b0336d382fe43a0150679821b796073f808d3a02e` |
+| Latest change | October 23, 2026: vehicle spawner "on cooldown" while loading |
+| `build/vMenu/vMenuClient.net.dll` | `1e29abeef567056226a69209e4aa5a3b1389bd5ea22b33f961c12ed118aa6f17` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -1151,3 +1151,76 @@ has not been measured; profile again to confirm.
   and no first person as an animal.
 - Run `profiler record 1000` in the same spot as before, then `profiler saveJSON`,
   and compare vMenu's time.
+
+## October 23, 2026: vehicle spawner "on cooldown" while loading (client DLL)
+
+Players got "Vehicle spawner is on cooldown." on every click, on foot, with no
+vehicle appearing. The cooldown interval wasn't the cause. The spawn gate showed
+that message for two different states: a request still in progress, and the
+interval after a vehicle was created. A request is in progress before any
+vehicle exists while it streams the model (up to 15 s), asks CAD for an identity
+ticket (up to 10 s) and probes the ground (up to 1 s). Add-on models download on
+first use and can take seconds; a broken one never loads. Nothing showed it was
+loading, so every further click said "on cooldown", and a model that never
+loaded blocked every other vehicle for 15 s per attempt. This dates from the
+September 12 gate, not release G. Details are in
+[vehicle-spawn-cooldown.md](vehicle-spawn-cooldown.md). Client only: the server
+DLL is release B's.
+
+**Changes:**
+- A blocked click says why: "Still loading *name*. Choosing a different vehicle
+  cancels it.", "*name* is still spawning.", or "Vehicle spawner is on cooldown."
+  only after a vehicle was created.
+- Choosing a different vehicle (another model or another saved vehicle) while
+  one is still loading replaces it. Nothing has been deleted or created then, and
+  the replaced request stops before the old vehicle is removed, CAD is asked or a
+  vehicle is created.
+- GTA's loading spinner shows "Loading *name*" while a model streams.
+- The 15 s model timeout stays; its message names the vehicle.
+- If `CreateVehicle` returns no vehicle, the player is told, and the model isn't
+  added to Recent Vehicles or claimed with CAD. Before, this failed silently.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `1e29abeef567056226a69209e4aa5a3b1389bd5ea22b33f961c12ed118aa6f17` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against release G's client DLL shows only `VehicleSpawnGate`,
+  the new `VehicleSpawnAttempt` and `VehicleSpawnBlock`, both `SpawnVehicle`
+  overloads, `SpawnVehicleCore`, `LoadModel`, the new `NotifySpawnBlocked`, the
+  removed `VehicleSpawnerCooldownEnabled` and `VehicleSpawner.GetVehicleName`
+  (now internal). `TeleportToCoordsCore` differs only by a renumbered
+  compiler-generated local function with an identical body.
+- `tests/vehicle-spawn-cooldown` gains a frame-by-frame scheduler and covers
+  the loading message, the spinner, replacing a loading vehicle (cached or
+  streaming), saved vehicles of the same model, a request past loading not being
+  replaced, and the cooldown starting only after a vehicle is created.
+- `tests/vehicle-spawn-placement` runs the real spawn core: a request replaced
+  after its model loaded deletes, creates and claims nothing and releases its
+  model unless the replacement uses it; a `CreateVehicle` failure is reported.
+- Removing the gate's replacement, or the core's post-load check, makes these
+  tests fail.
+- `tests/spawn-provenance` follows the split `CreateVehicle` line and checks a
+  failed create hands telemetry 0.
+- All twenty-five tests pass. The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy** (on top of release G):
+1. Hash the live client DLL. It must be release G's
+   (`2d0178c6cdea02dfbf88378b0336d382fe43a0150679821b796073f808d3a02e`). If it
+   isn't, stop: the server runs a build this file doesn't record.
+2. Copy `vMenuClient.net.dll`.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- Spawn an add-on car you haven't used this session. The spinner shows
+  "Loading *name*" until it appears. Click it again while loading: "Still
+  loading *name*", not "on cooldown".
+- While it loads, pick a different car: the new one spawns and the first never
+  appears.
+- Once a car appears, click again within a second: "Vehicle spawner is on
+  cooldown." A second later it spawns.
+- If a player reports a car that never appears, their F8 shows which case it
+  was: `did not load within 15000ms` (the model never streamed) or
+  `CreateVehicle returned no vehicle` (the game refused the entity).

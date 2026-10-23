@@ -64,6 +64,55 @@ For the October 6 client DLL and deployment notes, see
 output directory and copy only its DLL into the package, avoiding the build
 cleanup/config-copy traps documented there. No live server was changed.
 
+## October 23: "on cooldown" while a vehicle is still loading
+
+Players reported "Vehicle spawner is on cooldown." on every click, on foot, with
+no vehicle appearing. The cooldown interval was not the cause. The gate showed
+the same message for two different states:
+
+- a request still in progress (`_spawning`)
+- the configured interval after a vehicle was created
+
+A request is in progress before any vehicle exists while it streams the model
+(up to 15 s), asks CAD for an identity ticket (up to 10 s) and probes the ground
+(up to 1 s). Add-on models download from the server the first time they are used
+and can take seconds; a broken one never loads. Nothing showed it was loading, so
+players clicked again and every click said "on cooldown". A model that never
+loaded blocked every other vehicle for 15 s per attempt. Separately, if
+`CreateVehicle` returned no vehicle, the spawn carried on with an empty handle:
+no vehicle, no message, and the model was still added to Recent Vehicles.
+
+Changes (client only):
+
+- The gate records the request it holds (`VehicleSpawnAttempt`: model, save name)
+  and reports why a click was turned away (`VehicleSpawnBlock`):
+  - **Loading** the model: "Still loading *name*. Choosing a different vehicle
+    cancels it."
+  - **Spawning** (past loading): "*name* is still spawning."
+  - **Cooldown**, only after a vehicle was created: "Vehicle spawner is on
+    cooldown." as before.
+- **A different vehicle replaces one that is still loading.** "Different" means
+  another model or another saved vehicle; the same request again just says it is
+  still loading. Nothing has been deleted or created at that point. The replaced
+  request stops at its next frame. If its model had already loaded, the core's
+  `attempt.TryBeginCreating()` check stops it. That check comes before the old
+  vehicle is deleted, the CAD ticket is requested or anything is created, so at
+  most one request ever reaches those steps. A replaced request leaves the gate,
+  the cooldown and the spinner to the request that replaced it. It releases its
+  model unless the replacement uses the same one.
+- While a model streams, GTA's loading spinner shows "Loading *name*". It goes
+  when the model loads, times out or is replaced.
+- The 15 s timeout stays. Its message now names the vehicle, and it is not shown
+  for a replaced request.
+- If `CreateVehicle` returns no vehicle, the player is told it couldn't be
+  created. The model is released, telemetry gets handle 0, and nothing is added
+  to Recent Vehicles or claimed with CAD. No cooldown starts.
+- Spawn By Name still opens while a vehicle is loading; it is refused with the
+  matching message while one is spawning or on cooldown.
+
+Not changed: the CAD and ground-probe waits keep their timeouts, and repeated
+clicks still each show a notification.
+
 ## Build and verification
 
 From the repository root:

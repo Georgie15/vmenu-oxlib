@@ -108,13 +108,14 @@ namespace vMenuClient
         private static bool _respawnDebuffActive = false;
 
         private static readonly VehicleSpawnGate SpawnGate = new VehicleSpawnGate(() => unchecked((uint)GetGameTimer()));
-        public static bool VehicleSpawnerCooldownEnabled => SpawnGate.IsBlocked;
         public static int VehicleSpawnerCooldown = vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown) != -1
             ? vMenuShared.ConfigManager.GetSettingsInt(vMenuShared.ConfigManager.Setting.vmenu_vehicle_spawner_cooldown)
             : 1000;
 
         private const uint VehicleModelLoadTimeoutMilliseconds = 15000;
         private const int VehicleIdentityTimeoutMilliseconds = 10000;
+        // The spawn request whose model the loading spinner is showing.
+        private static VehicleSpawnAttempt _loadingSpinnerOwner;
 
         private static uint _vehicleAllDoorsCooldownStartedAt;
         private static bool _vehicleAllDoorsCooldownStarted;
@@ -1005,9 +1006,11 @@ namespace vMenuClient
                 return 0;
             }
 
-            if (VehicleSpawnerCooldownEnabled)
+            // A vehicle that is still loading doesn't stop the player choosing another one.
+            var block = SpawnGate.Block;
+            if (block == VehicleSpawnBlock.Spawning || block == VehicleSpawnBlock.Cooldown)
             {
-                Notify.Error("Vehicle spawner is on cooldown.");
+                NotifySpawnBlocked(block, SpawnGate.Current);
                 return 0;
             }
 
@@ -1049,13 +1052,33 @@ namespace vMenuClient
         /// <param name="saveName">Used to get/set info about the saved vehicle data.</param>
         public static async Task<int> SpawnVehicle(uint vehicleHash, bool spawnInside, bool replacePrevious, bool skipLoad, VehicleInfo vehicleInfo, string saveName = null, float x = 0f, float y = 0f, float z = 0f, float heading = -1f)
         {
-            return await SpawnGate.TrySpawnAsync(
-                () => SpawnVehicleCore(vehicleHash, spawnInside, replacePrevious, skipLoad, vehicleInfo, saveName, x, y, z, heading),
+            return await SpawnGate.TrySpawnAsync(vehicleHash, saveName,
+                attempt => SpawnVehicleCore(attempt, vehicleHash, spawnInside, replacePrevious, skipLoad, vehicleInfo, saveName, x, y, z, heading),
                 VehicleSpawnerCooldown,
-                () => Notify.Error("Vehicle spawner is on cooldown."));
+                NotifySpawnBlocked);
         }
 
-        private static async Task<int> SpawnVehicleCore(uint vehicleHash, bool spawnInside, bool replacePrevious, bool skipLoad, VehicleInfo vehicleInfo, string saveName, float x, float y, float z, float heading)
+        /// <summary>
+        /// Tells the player why their spawn request was turned away. Only a completed spawn starts
+        /// the cooldown; a request still loading or creating its vehicle says so.
+        /// </summary>
+        private static void NotifySpawnBlocked(VehicleSpawnBlock block, VehicleSpawnAttempt current)
+        {
+            if (block == VehicleSpawnBlock.Loading)
+            {
+                Notify.Info($"Still loading {VehicleSpawner.GetVehicleName(current.Model)}. Choosing a different vehicle cancels it.");
+            }
+            else if (block == VehicleSpawnBlock.Spawning)
+            {
+                Notify.Info($"{VehicleSpawner.GetVehicleName(current.Model)} is still spawning.");
+            }
+            else
+            {
+                Notify.Error("Vehicle spawner is on cooldown.");
+            }
+        }
+
+        private static async Task<int> SpawnVehicleCore(VehicleSpawnAttempt attempt, uint vehicleHash, bool spawnInside, bool replacePrevious, bool skipLoad, VehicleInfo vehicleInfo, string saveName, float x, float y, float z, float heading)
         {
 
             if (!CanDoInteraction("spawnvehicle"))
@@ -1105,11 +1128,22 @@ namespace vMenuClient
                     Notify.Error(CommonErrors.InvalidModel);
                     return 0;
                 }
-                if (!await LoadModel(vehicleHash))
+                if (!await LoadModel(vehicleHash, attempt) && !attempt.IsCancelled)
                 {
-                    Notify.Error("Vehicle model loading timed out. Please try again or choose another vehicle.");
+                    Notify.Error($"{VehicleSpawner.GetVehicleName(vehicleHash)} didn't load in time. Please try again or choose another vehicle.");
                     return 0;
                 }
+            }
+
+            // From here vehicles are deleted and created, so a newer request can no longer replace this one.
+            if (!attempt.TryBeginCreating())
+            {
+                // Replaced by a different vehicle while loading. Leave the model loaded if that request uses it too.
+                if (SpawnGate.Current?.Model != vehicleHash)
+                {
+                    SetModelAsNoLongerNeeded(vehicleHash);
+                }
+                return 0;
             }
 
             Log("Spawning of vehicle is NOT cancelled, if this model is invalid then there's something wrong.");
@@ -1200,8 +1234,20 @@ namespace vMenuClient
             // from inside canDoInteraction (twice per spawn) and then scanned every vehicle for 3 s.
             TriggerEvent("vMenu:telemetry:queueVehicleSpawn");
 
+            var vehicleHandle = CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false);
+            if (vehicleHandle == 0 || !DoesEntityExist(vehicleHandle))
+            {
+                // The model loaded but the game didn't create the vehicle. This used to carry on with
+                // no vehicle and no message.
+                TriggerEvent("vMenu:telemetry:vehicleSpawned", 0);
+                SetModelAsNoLongerNeeded(vehicleHash);
+                Debug.WriteLine($"[vMenu] CreateVehicle returned no vehicle for model {vehicleHash}.");
+                Notify.Error($"{VehicleSpawner.GetVehicleName(vehicleHash)} couldn't be created. Please try again.");
+                return 0;
+            }
+
             // Create the new vehicle and remove the need to hotwire the car.
-            var vehicle = new Vehicle(CreateVehicle(vehicleHash, pos.X, pos.Y, pos.Z, heading, true, false))
+            var vehicle = new Vehicle(vehicleHandle)
             {
                 NeedsToBeHotwired = false,
                 PreviouslyOwnedByPlayer = true,
@@ -1762,30 +1808,58 @@ namespace vMenuClient
         /// Check and load a model.
         /// </summary>
         /// <param name="modelHash"></param>
-        /// <returns>True if model is valid & loaded, false if model is invalid.</returns>
-        private static async Task<bool> LoadModel(uint modelHash)
+        /// <returns>True if model is valid & loaded, false if model is invalid, timed out or <paramref name="attempt"/> was replaced.</returns>
+        private static async Task<bool> LoadModel(uint modelHash, VehicleSpawnAttempt attempt)
         {
             // Check if the model exists in the game.
             if (IsModelInCdimage(modelHash))
             {
                 // Load the model.
                 RequestModel(modelHash);
-                var startedAt = unchecked((uint)GetGameTimer());
-                // Wait until it's loaded.
-                while (!HasModelLoaded(modelHash))
+                if (HasModelLoaded(modelHash))
                 {
-                    if (unchecked((uint)GetGameTimer() - startedAt) >= VehicleModelLoadTimeoutMilliseconds)
-                    {
-                        // Return through the gate's finally block. Never unlock the
-                        // gate around a still-running spawn that could create later.
-                        SetModelAsNoLongerNeeded(modelHash);
-                        Debug.WriteLine($"[vMenu] Vehicle model {modelHash} did not load within {VehicleModelLoadTimeoutMilliseconds}ms; spawn cancelled.");
-                        return false;
-                    }
-                    await Delay(0);
+                    return true;
                 }
-                // Model is loaded, return true.
-                return true;
+
+                // Add-on models download on first use and can take seconds, or never load. Show that
+                // it's loading; nothing has appeared yet, so the player would otherwise click again.
+                _loadingSpinnerOwner = attempt;
+                BeginTextCommandBusyspinnerOn("STRING");
+                AddTextComponentSubstringPlayerName($"Loading {VehicleSpawner.GetVehicleName(modelHash)}");
+                EndTextCommandBusyspinnerOn(4);
+                try
+                {
+                    var startedAt = unchecked((uint)GetGameTimer());
+                    // Wait until it's loaded.
+                    while (!HasModelLoaded(modelHash))
+                    {
+                        // The player chose a different vehicle. The caller releases the model.
+                        if (attempt.IsCancelled)
+                        {
+                            return false;
+                        }
+                        if (unchecked((uint)GetGameTimer() - startedAt) >= VehicleModelLoadTimeoutMilliseconds)
+                        {
+                            // Return through the gate's finally block. Never unlock the
+                            // gate around a still-running spawn that could create later.
+                            SetModelAsNoLongerNeeded(modelHash);
+                            Debug.WriteLine($"[vMenu] Vehicle model {modelHash} did not load within {VehicleModelLoadTimeoutMilliseconds}ms; spawn cancelled.");
+                            return false;
+                        }
+                        await Delay(0);
+                    }
+                    // Model is loaded, return true.
+                    return true;
+                }
+                finally
+                {
+                    // A request that replaced this one may be showing its own model now.
+                    if (_loadingSpinnerOwner == attempt)
+                    {
+                        _loadingSpinnerOwner = null;
+                        BusyspinnerOff();
+                    }
+                }
             }
             // Model is not valid or is not loaded correctly.
             else
