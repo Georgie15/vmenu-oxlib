@@ -51,6 +51,15 @@ assert blips.count('SetBlipNameToPlayerName(') == 1 and blips.index('if (style.S
     'blip name/colour/category set when the sprite is new, not every frame'
 print('PASS: wiring (load timeouts, Extras menu, teleport, spawner, glow, blips)')
 
+# PSRP_DeathScript's fake death: a dead ped is alive again ~1.5 s after the fall, so the after-death
+# restore (which swaps the model) must also wait for the `dead` state bag to clear.
+restore = member(fc, r'^        private async Task RestorePlayerAfterBeingDead\(.*?^        }$')
+assert 'while (Game.PlayerPed.IsDead || IsLogicallyDead() ||' in restore, 'after-death restore waits for the logical death'
+logical = member(fc, r'^        private static bool IsLogicallyDead\(.*?^        }$')
+assert 'Game.Player.State["dead"]' in logical and 'is bool flag' in logical and '== 1' in logical, \
+    'IsLogicallyDead reads the dead state bag as true or 1'
+print('PASS: after-death restore waits for PSRP_DeathScript')
+
 # --- streaming helper behaviour ---------------------------------------------------------------
 helper = member(common, r'^        internal static async Task<bool> WaitForStreamingAsync\(.*?^        }$')
 wrappers = '\n'.join(re.findall(r'^        internal static Task<bool> Load(?:AnimDict|Model)Async\(.*?;$', common, re.M | re.S))

@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 23, 2026: vehicle spawner "on cooldown" while loading |
-| `build/vMenu/vMenuClient.net.dll` | `1e29abeef567056226a69209e4aa5a3b1389bd5ea22b33f961c12ed118aa6f17` |
+| Latest change | October 23, 2026: after-death restore waits for PSRP_DeathScript |
+| `build/vMenu/vMenuClient.net.dll` | `129a407f03d79ce2132a1a9675c9bad8562367e6a1fada591e2bc556f7f6b934` |
 | `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
 
 Check a checkout with
@@ -1224,3 +1224,47 @@ DLL is release B's.
 - If a player reports a car that never appears, their F8 shows which case it
   was: `did not load within 15000ms` (the model never streamed) or
   `CreateVehicle returned no vehicle` (the game refused the entity).
+
+## October 23, 2026: after-death restore waits for PSRP_DeathScript (client DLL)
+
+PSRP_DeathScript's fake death (PSRP-Development `24267e5e`) brings a dead
+player's ped back to life about 1.5 s after the fall, invincible and held in a
+lying clip, so bodies sync between clients. `RestorePlayerAfterBeingDead` waited
+only for `Game.PlayerPed.IsDead` to clear, then swapped the model
+(`SetPlayerModel` via `RestorePreferredMpAppearance`) and reapplied clothing and
+weapons. Under fake death that swap would run under the lying body, so others
+would see it stand up in default clothes and lie down again. The same swap is
+likely what PSRP_DeathScript's README records as an unexplained "ped replaced"
+during the hospital bed scene and mid-drag. Client only: the server DLL is
+release B's.
+
+**Change:** the wait also holds while the `dead` state bag (true or 1) is set,
+via the new `IsLogicallyDead()`. The restore now runs after the real revive or
+respawn, as it did before fake death.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `129a407f03d79ce2132a1a9675c9bad8562367e6a1fada591e2bc556f7f6b934` |
+| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against the previous client DLL shows only
+  `RestorePlayerAfterBeingDead` (one added call in its wait condition) and the
+  new `IsLogicallyDead`. `SnowballPickupHelpMessageTask` differs only by a
+  renumbered compiler-generated local function with an identical body.
+- `tests/client-fixes` checks the wait condition and the state bag read.
+  `client-guards`, `client-features`, `frame-costs` and `permission-table` pass.
+  The client builds with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Deploy** (with the PSRP-Development fake death deploy):
+1. Hash the live client DLL. It must be the October 23 vehicle spawner build
+   (`1e29abeef567056226a69209e4aa5a3b1389bd5ea22b33f961c12ed118aa6f17`). If it
+   isn't, stop: the server runs a build this file doesn't record.
+2. Copy `vMenuClient.net.dll`.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- With a saved MP character loaded, die and wait a few seconds: the body stays
+  lying in the same clothes. Revive or respawn: the appearance and weapons
+  restore then, as before.

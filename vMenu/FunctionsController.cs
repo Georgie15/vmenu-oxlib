@@ -1980,6 +1980,19 @@ namespace vMenuClient
 
         #region Restore player skin & weapons after respawning.
         /// <summary>
+        /// PSRP_DeathScript's `dead` state bag (true or 1) is set until a revive or respawn.
+        /// </summary>
+        private static bool IsLogicallyDead()
+        {
+            object dead = Game.Player.State["dead"];
+            if (dead is bool flag)
+            {
+                return flag;
+            }
+            return (dead is int || dead is long || dead is double) && Convert.ToDouble(dead) == 1;
+        }
+
+        /// <summary>
         /// Restores player appearance after dying.
         /// </summary>
         /// <returns></returns>
@@ -2016,7 +2029,10 @@ namespace vMenuClient
                     }
                 }
 
-                while (Game.PlayerPed.IsDead || IsScreenFadedOut() || IsScreenFadingOut())
+                // PSRP_DeathScript's fake death brings the dead ped back to life about
+                // 1.5 s after the fall and holds it in a lying clip, so IsDead alone would
+                // swap the model under the body long before a revive or respawn.
+                while (Game.PlayerPed.IsDead || IsLogicallyDead() || IsScreenFadedOut() || IsScreenFadingOut())
                 {
                     await Delay(0);
                 }
