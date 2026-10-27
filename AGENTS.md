@@ -29,6 +29,9 @@ Instructions for any AI agent or developer working in this repository.
   the client DLL. Shipping a new server DLL needs the owner's OK.
 - After any build, run `git status` and restore every file you did not mean to
   change.
+- On macOS the client's Windows-only `postbuild.cmd` step fails the build. Skip
+  it from the command line as described under "Building on macOS" in
+  [docs/current-build.md](docs/current-build.md).
 - Lua, config, `storage.html` and every other deployed file exist only in
   `build/vMenu/`. Edit them there.
 
@@ -60,6 +63,7 @@ dotnet run --project tests/saved-outfits
 lua tests/photo-mode/test_photo_mode.lua
 lua tests/whats-new/test_whats_new.lua
 python tests/frame-costs/test_frame_costs.py
+python tests/telemetry-leases/test_telemetry_leases.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

@@ -8,9 +8,9 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 23, 2026: after-death restore waits for PSRP_DeathScript |
-| `build/vMenu/vMenuClient.net.dll` | `129a407f03d79ce2132a1a9675c9bad8562367e6a1fada591e2bc556f7f6b934` |
-| `build/vMenu/vMenuServer.net.dll` | `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9` (built from this source; see release B) |
+| Latest change | October 27, 2026: noclip telemetry lease and vitals after a model swap |
+| `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` |
+| `build/vMenu/vMenuServer.net.dll` | `39e47fa503dcc0ff8eb92d50cc234ed523f9e12094f3c45f67695e3a24cfb3d2` (built from this source) |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
@@ -1268,3 +1268,131 @@ respawn, as it did before fake death.
 - With a saved MP character loaded, die and wait a few seconds: the body stays
   lying in the same clothes. Revive or respawn: the appearance and weapons
   restore then, as before.
+
+## October 27, 2026: noclip telemetry lease and vitals after a model swap (client DLL, server DLL)
+
+Two fixes for psrp_telemetry false alerts. The owner approved shipping a new client
+and a new server DLL.
+
+**Noclip lease.** vMenu noclip (`vMenu/Noclip.cs`) sets the noclip entity
+invincible every frame. On foot that entity is the player's ped, so OneSync's
+invincibility bit is set and psrp_telemetry raised god mode alerts for staff in
+noclip. Telemetry rightly ignores the `vmenu_noclip_active` state bag, because the
+client writes it about itself. Noclip now gets the same server-owned lease as vMenu
+god mode:
+
+| | God mode (August 17, 2026) | Noclip (this release) |
+| --- | --- | --- |
+| Client event | `vMenu:PSRP:GodmodeState` | `vMenu:PSRP:NoclipState` |
+| Client reports active when | permissions set up, Player Options god mode on, `POGod` allowed | permissions set up, noclip on (`NoClip.IsNoclipActive()`), `NoClip` allowed |
+| Server ACE (any one) | `vMenu.PlayerOptions.God`, `vMenu.PlayerOptions.All`, `vMenu.Everything` | `vMenu.NoClip`, `vMenu.Everything` |
+| Lease | `GrantInvincibilityGrace(src, 4, "vMenu god mode")` | `GrantInvincibilityGrace(src, 4, "vMenu noclip")` |
+
+Both work the same way:
+- The client (`vMenu/GodmodeTelemetry.cs`) polls every 500 ms in one tick. Each
+  state is sent on the first poll, whenever it changes and every 2 s while active.
+- The server (`vMenuServer/GodmodeTelemetry.cs`) renews leases every 1 s in one
+  tick, only while the heartbeat is at most 6 s old, the player holds one of the
+  ACEs above and `GetPlayerInvincible(src)` is true. A failed check, an inactive
+  report or `playerDropped` clears the request; the client's next heartbeat starts
+  it again. With nothing requested the tick does no work. psrp_telemetry must be
+  started.
+- `vMenu.NoClip` is a global permission: its only parent is `vMenu.Everything`
+  (`PermissionsManager.GetPermissionAndParentPermissions`).
+- Noclip in a vehicle makes the vehicle invincible, not the player, so the bit
+  check fails and no noclip lease is issued.
+- The client still writes `vmenu_noclip_active`. It grants nothing for
+  invincibility.
+- A player in both modes gets both leases. An older client sends only the god
+  mode event, which the server still handles as before.
+
+**Vitals after a model swap.** Create Male / Create Female (MP Characters) and
+`SpawnSavedPed` called `SetPlayerModel`, awaited the weapon restore, and only then
+put back max armour, max health, health and armour. During that await the new ped
+had the model's default full health: telemetry could read it as a refill, and an
+injured player was healed for a moment. The vitals are now restored straight after
+`SetPlayerModel`, before any await, as `CommonFunctions.SetPlayerSkin` already did.
+These are the only `SetPlayerModel` calls in `vMenu/`. `vMenu:PedChange:Before`,
+the weapon save and restore and `vMenu:PedChange:After` keep their order;
+`PedChange:After` handlers now see the restored vitals.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` |
+| `build/vMenu/vMenuServer.net.dll` | `39e47fa503dcc0ff8eb92d50cc234ed523f9e12094f3c45f67695e3a24cfb3d2` |
+
+**Validation:**
+- `tools/ilcompare` client, against the October 23 client DLL: the intended
+  changes are `GodmodeTelemetry` (state fields moved into the new nested
+  `Heartbeat` type with its constructor and `Publish`, the tick's state machine
+  and the constructor), the MP Characters menu lambda (vitals moved before the
+  await; its four hoisted vitals fields are gone, as they no longer live across an
+  await) and `SpawnSavedPed`. The rest is Mac build noise (below): the version
+  attribute and seven methods.
+- `tools/ilcompare` server, against release B's server DLL: only
+  `GodmodeTelemetry` changed (new `Heartbeats` type, `OnNoclipState`, `Entry`,
+  `ForgetIfIdle`, `GrantLease`, `IsFresh`, `HasNoclipPermission`, the two reason
+  constants, and the changed handlers, constructor and renewal tick), plus the
+  version attribute.
+- New test `python tests/telemetry-leases/test_telemetry_leases.py` compiles both
+  production files against fake natives. The real `Permission` enum,
+  `GetPermissionAndParentPermissions` and `GetAceName` decide which ACEs count. It
+  checks each ACE alone for each event, heartbeat age (6 s renews, 7 s doesn't),
+  the invincibility bit, clearing (inactive, revoked ACE, dropped, missing player),
+  a telemetry restart, both modes together, the older client's event, the client
+  heartbeat timing, one tick each side and the exact reasons. It also checks that
+  every `SetPlayerModel` in `vMenu/` restores the vitals once, before its first
+  await.
+- All twenty-six tests pass on macOS (Lua 5.5), and all twenty-five passed there
+  before the change. Both DLLs build with 0 warnings.
+- No FiveM runtime testing was done.
+
+**Building on macOS.** With .NET 9 from Homebrew (keg-only):
+```
+export DOTNET_ROOT=/opt/homebrew/opt/dotnet@9/libexec PATH=/opt/homebrew/opt/dotnet@9/bin:$PATH DOTNET_CLI_TELEMETRY_OPTOUT=1
+printf '<Project><Target Name="PostBuild" /></Project>\n' > /tmp/skip-postbuild.targets
+dotnet build vMenu/vMenuClient.csproj -c Release --nologo -p:CustomAfterMicrosoftCommonTargets=/tmp/skip-postbuild.targets
+dotnet build vMenuServer/vMenuServer.csproj -c Release --nologo
+```
+The client project's `PostBuild` target runs `postbuild.cmd` through cmd syntax
+(`if exist ...`), which fails on macOS (MSB3073). `-p:PostBuildEvent=` doesn't
+help, because the target is a custom `Exec`, not the `PostBuildEvent` property.
+The targets file above is imported after the project and replaces that target with
+an empty one. The project file is unchanged. A Mac build of unchanged source,
+compared with the Windows-built package, differs only in:
+- the `AssemblyInformationalVersion` git hash (both DLLs)
+- client only, seven methods where the compiler emits a slightly different but
+  equivalent body: `CommonFunctions.GetAllVehicleMods`,
+  `EntitySpawner.FinishPlacement`, `FunctionsController.ManageCamera`, the
+  `Dispose` of the `InfinityPlayerList` and two `NativePlayerList` enumerators,
+  and an async lambda in `PlayerOptions.CreateMenu`
+- client only, the embedded `overlays` resource (`vMenu/data/overlays.json`,
+  tattoo data) has LF line endings instead of CRLF, because git checks it out
+  with the platform's line endings. The text is otherwise identical, and
+  `TattoosData` only parses it as JSON. This is why a Mac-built client DLL is
+  about 23 KB smaller. `ilcompare` doesn't compare resources.
+
+Treat those as noise when comparing a Mac build.
+
+**Known issue, not changed:** when noclip ends it calls
+`SetEntityInvincible(entity, false)`. That doesn't turn vMenu god mode off for
+long: the god mode latch re-applies invincibility every frame while the option is
+on, so it is back by the next frame. It does clear invincibility that another
+resource set on the ped or vehicle and doesn't re-apply every frame.
+
+**Deploy** (both DLLs, together with or after the psrp_telemetry change):
+1. Hash the live DLLs. They must be the previous package: client
+   `129a407f03d79ce2132a1a9675c9bad8562367e6a1fada591e2bc556f7f6b934` (October 23),
+   server `003e0932bed3ee2195f052e292b8f5d63e2f30fd8beace5ce46e728daa5c66e9`
+   (release B). If either differs, stop: the server runs a build this file doesn't
+   record.
+2. Copy `vMenuClient.net.dll` and `vMenuServer.net.dll`.
+3. Restart the resource.
+
+**Runtime acceptance:**
+- A staff member with `vMenu.NoClip` noclips on foot for a minute: no god mode
+  alert in psrp_telemetry. Noclip in a vehicle also raises none.
+- A player without the ACE who forces the state bag or the event gets no lease.
+- vMenu god mode alone still raises no alert.
+- Injured (for example 50 health), create a male or female MP character, or load a
+  saved one: health stays at 50 throughout, with no refill alert.

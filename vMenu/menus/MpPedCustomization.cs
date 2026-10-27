@@ -2008,12 +2008,12 @@ namespace vMenuClient.menus
 
                     SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
                     SetPlayerModel(Game.Player.Handle, model);
-                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
-
+                    // Restore vitals before awaiting: the new ped spawns at full health.
                     Game.Player.MaxArmor = maxArmour;
                     Game.PlayerPed.MaxHealth = maxHealth;
                     Game.PlayerPed.Health = health;
                     Game.PlayerPed.Armor = armour;
+                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
 
                     ClearPedDecorations(Game.PlayerPed.Handle);
                     ClearPedFacialDecorations(Game.PlayerPed.Handle);
@@ -2040,12 +2040,12 @@ namespace vMenuClient.menus
 
                     SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
                     SetPlayerModel(Game.Player.Handle, model);
-                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
-
+                    // Restore vitals before awaiting: the new ped spawns at full health.
                     Game.Player.MaxArmor = maxArmour;
                     Game.PlayerPed.MaxHealth = maxHealth;
                     Game.PlayerPed.Health = health;
                     Game.PlayerPed.Armor = armour;
+                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
 
                     ClearPedDecorations(Game.PlayerPed.Handle);
                     ClearPedFacialDecorations(Game.PlayerPed.Handle);
@@ -2217,13 +2217,13 @@ namespace vMenuClient.menus
                 await BaseScript.Delay(0); // yield so external Lua handlers can save addon weapons
                 SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
                 SetPlayerModel(Game.Player.Handle, currentCharacter.ModelHash);
-                await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
-                TriggerEvent("vMenu:PedChange:After");
-
+                // Restore vitals before awaiting: the new ped spawns at full health.
                 Game.Player.MaxArmor = maxArmour;
                 Game.PlayerPed.MaxHealth = maxHealth;
                 Game.PlayerPed.Health = health;
                 Game.PlayerPed.Armor = armour;
+                await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
+                TriggerEvent("vMenu:PedChange:After");
 
                 ClearPedDecorations(Game.PlayerPed.Handle);
                 ClearPedFacialDecorations(Game.PlayerPed.Handle);
