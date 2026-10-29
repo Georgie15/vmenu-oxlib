@@ -8,9 +8,9 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 28, 2026: PSRP purge mode drops non-bypass staff out of noclip (Lua only) |
+| Latest change | October 28, 2026: god mode / noclip lease renewal no longer scans every player by name (server DLL) |
 | `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` |
-| `build/vMenu/vMenuServer.net.dll` | `39e47fa503dcc0ff8eb92d50cc234ed523f9e12094f3c45f67695e3a24cfb3d2` (built from this source) |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
@@ -1425,3 +1425,54 @@ purge mode change.
 **Runtime acceptance:** with purge mode on, a clocked-in moderator in vMenu
 noclip is taken out of it with a notice (they fall if airborne); a `psrp.clockin.bypass` holder
 keeps noclip. Not checked in game yet.
+
+## October 28, 2026: lease renewal player lookup (server DLL)
+
+The owner asked for this fix after two server profiles taken on October 28 (217
+players). `RenewValidatedLeases` in `vMenuServer/GodmodeTelemetry.cs` checked
+`Players[handle] != null` with the handle string. The CitizenFX server
+`PlayerList[string]` indexer looks a player up by **name**: it calls
+`GetPlayerName` for every online player. A server id never matches a name, so:
+
+- each renewal cost about 18 ms per requesting staff member at 217 players. The
+  profiles showed 18/36/55/74 ms ticks every ~1 s (36–44% of all server script
+  time, and every one of the worst ticks over 60 ms)
+- the lookup always returned null, so the request was dropped and **no god mode
+  or noclip lease ever reached psrp_telemetry** (since August 17). The client's
+  next heartbeat re-added the request, so the scan repeated forever.
+
+The check is now `DoesPlayerExist(handle)`, as `MainServer.GetPlayerFromServerId`
+already does. No other `Players[...]` use in `vMenuServer/` takes a string.
+
+**Behaviour change:** psrp_telemetry now receives `"vMenu god mode"` and
+`"vMenu noclip"` leases as designed in the October 27 section. Staff in vMenu
+god mode or on-foot noclip get the 4 s grace that was always intended.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` (unchanged) |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` |
+
+**Validation:**
+- `tools/ilcompare` server, against the October 27 server DLL: only
+  `RenewValidatedLeases` changed (`get_Players` + `PlayerList::get_Item(String)`
+  replaced by `API::DoesPlayerExist(String)`), plus the version attribute's git hash.
+- `python tests/telemetry-leases/test_telemetry_leases.py` passes. Its fake
+  `PlayerList` used to treat the string as a server id, which is why it passed with
+  the bug. The fake now matches by name like the runtime, `DoesPlayerExist` is
+  faked, and a source check refuses any `Players[` in the server file. With the old
+  lookup and the new fake, the behaviour checks fail (no leases granted).
+
+**Deploy** (server DLL only):
+1. Hash the live `vMenuServer.net.dll`. It must be the October 27 package
+   `39e47fa503dcc0ff8eb92d50cc234ed523f9e12094f3c45f67695e3a24cfb3d2`. If it
+   differs, stop: the server runs a build this file doesn't record.
+2. Copy `build/vMenu/vMenuServer.net.dll`.
+3. Restart vMenu.
+
+**Runtime acceptance:**
+- With a staff member in vMenu god mode, a server profile shows no repeating
+  18 ms+ `c# tasks → task iteration` spike every ~1 s.
+- That staff member raises no god mode alert in psrp_telemetry; noclip on foot
+  raises none either.
+- Not checked in game yet.

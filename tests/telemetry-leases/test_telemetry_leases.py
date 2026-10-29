@@ -51,7 +51,9 @@ assert 'SetEntityInvincible(noclipEntity, true);' in noclip, 'noclip still sets 
 renew = member(server, r'^        internal async Task RenewValidatedLeases\(\).*?^        }$')
 assert renew.index('await Delay(RenewalIntervalMs);') < renew.index('if (requested.Count == 0)') < renew.index('GetResourceState('), \
     'no work when nothing is requested'
-print('PASS: wiring (one tick each side, events, reasons, idle skip)')
+assert 'Players[' not in server.replace('// Never Players[handle]', ''), \
+    'server: Players[string] is a by-name scan of every player; use DoesPlayerExist(handle)'
+print('PASS: wiring (one tick each side, events, reasons, idle skip, no by-name player lookup)')
 
 # --- vitals restored before the first await after every SetPlayerModel ---------------------------
 vitals = ['Game.Player.MaxArmor = maxArmour;', 'Game.PlayerPed.MaxHealth = maxHealth;',
@@ -100,7 +102,21 @@ namespace CitizenFX.Core
     [AttributeUsage(AttributeTargets.Method)] public class EventHandlerAttribute : Attribute { public EventHandlerAttribute(string name) { } }
     [AttributeUsage(AttributeTargets.Parameter)] public class FromSourceAttribute : Attribute { }
     public class Player { public string Handle; }
-    public class PlayerList { public Player this[string handle] => World.Online.Contains(handle) ? new Player { Handle = handle } : null; }
+    // Like the real CitizenFX server PlayerList: the string indexer matches by player
+    // NAME (one GetPlayerName per online player), never by server id.
+    public class PlayerList
+    {
+        public Player this[string name]
+        {
+            get
+            {
+                World.NativeCalls += World.Online.Count;
+                var handle = World.Online.FirstOrDefault(h => "Player " + h == name);
+                return handle == null ? null : new Player { Handle = handle };
+            }
+        }
+        public Player this[int id] => new Player { Handle = id.ToString() };
+    }
     public class ExportDictionary { public dynamic this[string resource] => World.Telemetry; }
     public static class Debug { public static void WriteLine(string text) { World.Log.Add(text); } }
     public abstract class BaseScript
@@ -119,6 +135,7 @@ namespace CitizenFX.Core.Native
         public static int GetGameTimer() => World.Now;
         public static bool IsPlayerAceAllowed(string source, string ace) { World.NativeCalls++; return World.Aces.Contains(source + "|" + ace); }
         public static bool GetPlayerInvincible(string source) { World.NativeCalls++; return World.Invincible.Contains(source); }
+        public static bool DoesPlayerExist(string source) { World.NativeCalls++; return World.Online.Contains(source); }
         public static string GetResourceState(string resource) { World.NativeCalls++; return World.TelemetryState; }
     }
 }

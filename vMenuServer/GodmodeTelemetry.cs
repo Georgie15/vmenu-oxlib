@@ -106,7 +106,10 @@ namespace vMenuServer
             {
                 var handle = entry.Key;
                 var beats = entry.Value;
-                var invincible = Players[handle] != null && GetPlayerInvincible(handle);
+                // Never Players[handle]: the string indexer looks a player up by
+                // NAME, a GetPlayerName scan of every player (~18 ms at 217) that
+                // finds no one, so every lease was dropped and the tick stalled.
+                var invincible = DoesPlayerExist(handle) && GetPlayerInvincible(handle);
 
                 var godmodeValid = invincible
                     && IsFresh(beats.Godmode, now)
