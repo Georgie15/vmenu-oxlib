@@ -94,6 +94,31 @@ dutyAllows = function()
     return getClockinExport("IsClockedIn")
 end
 
+-- PSRP_Framework purge mode (GlobalState.purgeActive): staff without the
+-- clock-in bypass are dropped out of noclip. Outside the purge leaving noclip
+-- stays their own choice (see canDoInteraction). The toggle goes through
+-- vMenu's own key-mapping command, which allows switching off while active.
+-- The clock-out events and the purge state bag can each call this, so a
+-- queued drop runs once.
+local noclipDropQueued = false
+
+local function dropNoclipForPurge()
+    if noclipDropQueued or not noclipActive or GlobalState.purgeActive ~= true then
+        return
+    end
+
+    noclipDropQueued = true
+    CreateThread(function()
+        Wait(0)
+        if noclipActive and GlobalState.purgeActive == true and not dutyAllows() then
+            ExecuteCommand(("vMenu:%s:NoClip"):format(GetConvar("vmenu_keymapping_id", "Default")))
+            Config.Notify("vMenu", "Noclip was turned off because the purge has started.", "error", 6500)
+        end
+        Wait(500)
+        noclipDropQueued = false
+    end)
+end
+
 enforceOffIfDisallowed = function()
     if dutyAllows() then
         return
@@ -101,7 +126,17 @@ enforceOffIfDisallowed = function()
 
     TriggerEvent("vMenu:Integrations:SetPlayerNames", false)
     TriggerEvent("vMenu:Integrations:SetPlayerBlips", false)
+    dropNoclipForPurge()
 end
+
+AddStateBagChangeHandler("purgeActive", "global", function()
+    -- The handler runs before GlobalState holds the new value.
+    SetTimeout(0, function()
+        if not dutyAllows() then
+            dropNoclipForPurge()
+        end
+    end)
+end)
 
 local function isTruthy(value)
     if value == true then

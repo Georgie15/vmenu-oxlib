@@ -8,7 +8,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 27, 2026: noclip telemetry lease and vitals after a model swap |
+| Latest change | October 28, 2026: PSRP purge mode drops non-bypass staff out of noclip (Lua only) |
 | `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` |
 | `build/vMenu/vMenuServer.net.dll` | `39e47fa503dcc0ff8eb92d50cc234ed523f9e12094f3c45f67695e3a24cfb3d2` (built from this source) |
 
@@ -1396,3 +1396,32 @@ resource set on the ped or vehicle and doesn't re-apply every frame.
 - vMenu god mode alone still raises no alert.
 - Injured (for example 50 health), create a male or female MP character, or load a
   saved one: health stays at 50 throughout, with no refill alert.
+
+## October 28, 2026: purge mode noclip drop (Lua only)
+
+PSRP-Development added a console-switched purge mode (`purge on` / `purge off` in
+PSRP_Framework, read as `GlobalState.purgeActive`). While it is on, clock-in is
+blocked, so only `psrp.clockin.bypass` holders keep staff powers. vMenu already
+refuses noclip, names and blips to staff who are not clocked in, but leaving
+noclip never depends on clock-in, so a staff member flying when the purge
+started could stay in it.
+
+`build/vMenu/client/integrations.lua` now drops a non-bypass player out of
+vMenu noclip when they are clocked out or the purge state bag changes, but only
+while purge mode is on. It runs vMenu's own `vMenu:<keymapping id>:NoClip`
+command, which `canDoInteraction` already allows while noclip is active, and
+tells the player why. The clock-out events and the state bag can arrive in
+either order, so a queued drop runs once. Outside the purge nothing changes.
+
+No DLL changed; the hashes in the table above are the October 27 package.
+Test: `lua tests/purge-noclip/test_purge_noclip.lua` (runs the real
+`integrations.lua` with stubbed natives).
+
+**Deploy:** copy `build/vMenu/client/integrations.lua` over the live file (check
+the live copy matches `git show build-2026-10-27:build/vMenu/client/integrations.lua`,
+ignoring line endings, first), then restart vMenu. Deploy with the PSRP-Development
+purge mode change.
+
+**Runtime acceptance:** with purge mode on, a clocked-in moderator in vMenu
+noclip is taken out of it with a notice (they fall if airborne); a `psrp.clockin.bypass` holder
+keeps noclip. Not checked in game yet.

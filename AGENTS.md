@@ -62,6 +62,7 @@ dotnet run --project tests/vehicle-conveniences
 dotnet run --project tests/saved-outfits
 lua tests/photo-mode/test_photo_mode.lua
 lua tests/whats-new/test_whats_new.lua
+lua tests/purge-noclip/test_purge_noclip.lua
 python tests/frame-costs/test_frame_costs.py
 python tests/telemetry-leases/test_telemetry_leases.py
 ```
