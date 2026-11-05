@@ -1,3 +1,6 @@
+using System;
+using System.Threading.Tasks;
+
 using CitizenFX.Core;
 
 using MenuAPI;
@@ -10,8 +13,63 @@ namespace vMenuClient.menus
 {
     public class Recording
     {
-        // Variables
+        private const int PhotoSucceeded = 0;
+        private const int PhotoPending = 1;
+
         private Menu menu;
+        private bool takingPhoto;
+
+        private static async Task<bool> WaitForPhotoOperation(Func<int> getStatus)
+        {
+            int status;
+            do
+            {
+                await BaseScript.Delay(0);
+                status = getStatus();
+            }
+            while (status == PhotoPending);
+
+            return status == PhotoSucceeded;
+        }
+
+        private async Task TakePhoto()
+        {
+            if (takingPhoto)
+            {
+                Notify.Alert("A photo is already in progress.");
+                return;
+            }
+
+            if (!BeginTakeHighQualityPhoto())
+            {
+                Notify.Alert("Could not start taking a photo.");
+                return;
+            }
+
+            takingPhoto = true;
+            try
+            {
+                // GTA finishes capture and save on later frames. Keep the buffer alive through both.
+                if (!await WaitForPhotoOperation(GetStatusOfTakeHighQualityPhoto))
+                {
+                    Notify.Alert("Could not capture the photo.");
+                    return;
+                }
+
+                if (!SaveHighQualityPhoto(-1) || !await WaitForPhotoOperation(GetStatusOfSaveHighQualityPhoto))
+                {
+                    Notify.Alert("Could not save the photo to the Pause Menu gallery.");
+                    return;
+                }
+
+                Notify.Info("Photo saved to the Pause Menu gallery.");
+            }
+            finally
+            {
+                FreeMemoryForHighQualityPhoto();
+                takingPhoto = false;
+            }
+        }
 
         private void CreateMenu()
         {
@@ -52,9 +110,7 @@ namespace vMenuClient.menus
                 }
                 else if (item == takePic)
                 {
-                    BeginTakeHighQualityPhoto();
-                    SaveHighQualityPhoto(-1);
-                    FreeMemoryForHighQualityPhoto();
+                    await TakePhoto();
                 }
                 else if (item == stopRec)
                 {

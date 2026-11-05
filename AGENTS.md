@@ -61,6 +61,7 @@ python tests/client-guards/test_client_guards.py
 dotnet run --project tests/vehicle-conveniences
 dotnet run --project tests/saved-outfits
 lua tests/photo-mode/test_photo_mode.lua
+dotnet run --project tests/take-photo
 lua tests/whats-new/test_whats_new.lua
 lua tests/purge-noclip/test_purge_noclip.lua
 python tests/frame-costs/test_frame_costs.py

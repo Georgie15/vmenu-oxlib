@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | October 28, 2026: god mode / noclip lease renewal no longer scans every player by name (server DLL) |
-| `build/vMenu/vMenuClient.net.dll` | `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30` |
+| Latest change | November 5, 2026 — Take Photo waits for capture and save before freeing the photo buffer (client DLL) |
+| `build/vMenu/vMenuClient.net.dll` | `23a83de485ae760cc8630f809d6f659232644300a1c5f60c33dce22d9fef09ad` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
@@ -19,6 +19,33 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 5, 2026 — Take Photo crash (client DLL)
+
+Recording > Take Photo used to start capture, ask GTA to save the image and
+free the photo buffer in the same frame. Capture and save both complete on
+later frames. vMenu now waits for a successful capture before requesting the
+save and keeps the buffer allocated until the save finishes. The button accepts
+one request at a time and reports whether it saved to the Pause Menu gallery.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `23a83de485ae760cc8630f809d6f659232644300a1c5f60c33dce22d9fef09ad` |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` |
+
+The client DLL was built with the Windows .NET SDK 9.0.123. `tools/ilcompare`
+found changes confined to `Recording` and the assembly version's commit hash.
+All 28 suites in `AGENTS.md` passed. The Take Photo regression runs the menu
+with stubbed natives and checks frame order, repeat presses and failed capture
+or save requests. It fails against the previous same-frame implementation.
+
+1. Hash the live `vMenuClient.net.dll`. Proceed only if it matches
+   `650000eb17e8f6e477df8d6bb8d9d5d889fa38d641cd0831638b100a53b51e30`.
+2. Copy the packaged `build/vMenu/vMenuClient.net.dll` over the live DLL and
+   restart vMenu.
+3. In FiveM, use Recording > Take Photo, then Open Gallery and verify the new
+   image appears. Try again with quick repeat presses. In-game verification
+   is pending.
 
 ## September 27, 2026: combined snapshot
 
