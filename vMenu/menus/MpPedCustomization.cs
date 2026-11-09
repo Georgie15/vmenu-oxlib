@@ -127,6 +127,11 @@ namespace vMenuClient.menus
         private int _facialExpressionSelection;
 
         private MultiplayerPedData currentCharacter = new();
+
+        // Slots of the character on the player ped that couldn't be matched when it was put on.
+        // Captures that only record the current look (the after-death snapshot) keep the saved
+        // entry for these instead of whatever the ped shows there.
+        private HashSet<ClothingSlot> unresolvedSlots = new();
         private MpCharacterCategory currentCategory = new();
 
         private Ped _clone;
@@ -148,6 +153,7 @@ namespace vMenuClient.menus
                 currentCharacter.Version = 1;
                 currentCharacter.ModelHash = male ? (uint)GetHashKey("mp_m_freemode_01") : (uint)GetHashKey("mp_f_freemode_01");
                 currentCharacter.IsMale = male;
+                unresolvedSlots.Clear();
                 faceSelection.Reset(male);
                 currentCharacter.PedHeadBlendData = Game.PlayerPed.GetHeadBlendData();
 
@@ -529,8 +535,10 @@ namespace vMenuClient.menus
             {
                 if (i is not 0 and not 2)
                 {
-                    var currentVariationIndex = editPed && currentCharacter.DrawableVariations.clothes.ContainsKey(i) ? currentCharacter.DrawableVariations.clothes[i].Key : GetPedDrawableVariation(Game.PlayerPed.Handle, i);
-                    var currentVariationTextureIndex = editPed && currentCharacter.DrawableVariations.clothes.ContainsKey(i) ? currentCharacter.DrawableVariations.clothes[i].Value : GetPedTextureVariation(Game.PlayerPed.Handle, i);
+                    // The ped was just dressed from the save (Edit spawns it first), so it shows the
+                    // current number of every matched piece; saved numbers can be from an older layout.
+                    var currentVariationIndex = GetPedDrawableVariation(Game.PlayerPed.Handle, i);
+                    var currentVariationTextureIndex = GetPedTextureVariation(Game.PlayerPed.Handle, i);
 
                     var maxDrawables = GetNumberOfPedDrawableVariations(Game.PlayerPed.Handle, i);
 
@@ -558,8 +566,8 @@ namespace vMenuClient.menus
                     propId += 3;
                 }
 
-                var currentProp = editPed && currentCharacter.PropVariations.props.ContainsKey(propId) ? currentCharacter.PropVariations.props[propId].Key : GetPedPropIndex(Game.PlayerPed.Handle, propId);
-                var currentPropTexture = editPed && currentCharacter.PropVariations.props.ContainsKey(propId) ? currentCharacter.PropVariations.props[propId].Value : GetPedPropTextureIndex(Game.PlayerPed.Handle, propId);
+                var currentProp = GetPedPropIndex(Game.PlayerPed.Handle, propId);
+                var currentPropTexture = GetPedPropTextureIndex(Game.PlayerPed.Handle, propId);
 
                 var propsList = new List<string>();
                 for (var i = 0; i < GetNumberOfPedPropDrawableVariations(Game.PlayerPed.Handle, propId); i++)
@@ -742,6 +750,13 @@ namespace vMenuClient.menus
             tattoosMenu.RefreshIndex();
         }
 
+        /// <summary>Records what the player ped now wears in one slot, after the editor changed it.</summary>
+        private void RecordEditedSlot(ClothingSlot slot)
+        {
+            currentCharacter = ClothingService.SetCharacterSlot(currentCharacter, Game.PlayerPed.Handle, slot);
+            unresolvedSlots.Remove(slot);
+        }
+
         /// <summary>
         /// Saves the mp character and quits the editor if successful.
         /// </summary>
@@ -749,6 +764,9 @@ namespace vMenuClient.menus
         private async Task<bool> SavePed()
         {
             currentCharacter.PedHeadBlendData = Game.PlayerPed.GetHeadBlendData();
+            // Slots the editor never touched (a new character's defaults) get references from the ped.
+            // Unmatched pieces of a loaded character keep their saved entry.
+            currentCharacter = ClothingService.CompleteFromPed(currentCharacter, Game.PlayerPed.Handle);
             if (isEdidtingPed)
             {
                 var json = JsonConvert.SerializeObject(currentCharacter);
@@ -1236,6 +1254,7 @@ namespace vMenuClient.menus
                 var maxTextures = GetNumberOfPedTextureVariations(Game.PlayerPed.Handle, componentIndex, newSelectionIndex);
 
                 currentCharacter.DrawableVariations.clothes[componentIndex] = new KeyValuePair<int, int>(newSelectionIndex, newTextureIndex);
+                RecordEditedSlot(ClothingSlot.Component(componentIndex));
                 listItem.Description = $"Select a drawable using the arrow keys and press ~o~enter~s~ to cycle through all available textures. Currently selected texture: #{newTextureIndex + 1} (of {maxTextures}).";
                 RefreshCurrentCharacterSnapshot();
             };
@@ -1256,6 +1275,7 @@ namespace vMenuClient.menus
                 var maxTextures = GetNumberOfPedTextureVariations(Game.PlayerPed.Handle, componentIndex, listIndex);
 
                 currentCharacter.DrawableVariations.clothes[componentIndex] = new KeyValuePair<int, int>(listIndex, newTextureIndex);
+                RecordEditedSlot(ClothingSlot.Component(componentIndex));
                 listItem.Description = $"Select a drawable using the arrow keys and press ~o~enter~s~ to cycle through all available textures. Currently selected texture: #{newTextureIndex + 1} (of {maxTextures}).";
                 RefreshCurrentCharacterSnapshot();
             };
@@ -1298,6 +1318,7 @@ namespace vMenuClient.menus
                         listItem.Description = $"Select a prop using the arrow keys and press ~o~enter~s~ to cycle through all available textures. Currently selected texture: #{textureIndex + 1} (of {maxPropTextures}).";
                     }
                 }
+                RecordEditedSlot(ClothingSlot.PropSlot(propIndex));
                 RefreshCurrentCharacterSnapshot();
             };
 
@@ -1339,6 +1360,7 @@ namespace vMenuClient.menus
                     }
                 }
                 //propsMenu.UpdateScaleform();
+                RecordEditedSlot(ClothingSlot.PropSlot(propIndex));
                 RefreshCurrentCharacterSnapshot();
             };
             #endregion
@@ -2127,7 +2149,18 @@ namespace vMenuClient.menus
                 return false;
             }
 
-            character = ReplacePedDataClothing(character);
+            if (character.ModelHash != (uint)GetEntityModel(Game.PlayerPed.Handle))
+            {
+                return false;
+            }
+
+            // Only the current look: pieces that couldn't be matched keep their saved entry.
+            var otherCharacter = string.IsNullOrEmpty(currentCharacter.SaveName) || GetMpCharacterKey(currentCharacter.SaveName) != lastChar;
+            if (otherCharacter)
+            {
+                unresolvedSlots.Clear(); // they belong to another character
+            }
+            character = ReplacePedDataClothing(character, keepUnresolved: true);
             return SaveMpCharacterSnapshot(character);
         }
 
@@ -2232,7 +2265,7 @@ namespace vMenuClient.menus
                 SetPedEyeColor(Game.PlayerPed.Handle, 0);
                 ClearAllPedProps(Game.PlayerPed.Handle);
 
-                await AppySavedDataToPed(currentCharacter, Game.PlayerPed.Handle);
+                currentCharacter = await AppySavedDataToPed(currentCharacter, Game.PlayerPed.Handle);
             }
 
             // Set the facial expression, or set it to 'normal' if it wasn't saved/set before.
@@ -2484,8 +2517,16 @@ namespace vMenuClient.menus
                     {
                         saveCurrentPedAsCharacter.Label = "";
                         var tmpCharacter = StorageManager.GetSavedMpCharacterData("mp_ped_" + selectedSavedCharacterManageName);
+                        if (tmpCharacter.ModelHash != (uint)GetEntityModel(Game.PlayerPed.Handle))
+                        {
+                            Notify.Error("You're not using this character's body type, so its clothing wasn't changed.");
+                            return;
+                        }
 
-                        tmpCharacter = ReplacePedDataClothing(tmpCharacter);
+                        // Pieces of this character that couldn't be matched when it was put on keep
+                        // their saved entry; everything else is what you're wearing now.
+                        var wearingThisCharacter = GetMpCharacterKey(currentCharacter.SaveName) == GetMpCharacterKey(tmpCharacter.SaveName);
+                        tmpCharacter = ReplacePedDataClothing(tmpCharacter, keepUnresolved: wearingThisCharacter);
 
                         if (StorageManager.SaveJsonData(tmpCharacter.SaveName, JsonConvert.SerializeObject(tmpCharacter), true))
                         {
@@ -2823,7 +2864,7 @@ namespace vMenuClient.menus
 
                 int cloneHandle = _clone.Handle;
 
-                await AppySavedDataToPed(character, cloneHandle);
+                await AppySavedDataToPed(character, cloneHandle, notifyClothingIssues: false);
 
                 SetEntityCanBeDamaged(cloneHandle, false);
                 SetPedAoBlobRendering(cloneHandle, false);
@@ -3210,9 +3251,12 @@ namespace vMenuClient.menus
             SavedOutfit CaptureOutfit()
             {
                 var ped = Game.PlayerPed.Handle;
+                var runtime = ClothingService.Runtime(ped);
                 return SavedOutfit.Capture((uint)GetEntityModel(ped),
                     slot => GetPedDrawableVariation(ped, slot), slot => GetPedTextureVariation(ped, slot),
-                    slot => GetPedPropIndex(ped, slot), slot => GetPedPropTextureIndex(ped, slot));
+                    slot => GetPedPropIndex(ped, slot), slot => GetPedPropTextureIndex(ped, slot),
+                    (slot, global, texture) => ClothingResolver.Capture(slot, global, texture, ClothingService.Layouts, runtime),
+                    runtime.LayoutPrint);
             }
 
             void Rebuild()
@@ -3271,17 +3315,22 @@ namespace vMenuClient.menus
                 var key = SavedOutfit.KeyFor(name);
                 if (listIndex == 0)
                 {
-                    var outfit = SavedOutfit.Parse(GetResourceKvpString(key));
-                    if (outfit == null || outfit.Model != (uint)GetEntityModel(Game.PlayerPed.Handle))
+                    var ped = Game.PlayerPed.Handle;
+                    var save = ClothingSaves.Read(ClothingSaves.Kind.Outfit, GetResourceKvpString(key));
+                    if (save == null || save.Model != (uint)GetEntityModel(ped))
                     {
                         Notify.Error("This outfit can't be worn by this character.");
                         return;
                     }
-                    var ped = Game.PlayerPed.Handle;
-                    outfit.Apply((slot, drawable, texture) => SetPedComponentVariation(ped, slot, drawable, texture, 0),
-                        slot => ClearPedProp(ped, slot),
-                        (slot, drawable, texture) => SetPedPropIndex(ped, slot, drawable, texture, true));
-                    currentCharacter = ReplacePedDataClothing(currentCharacter);
+                    var resolution = ClothingService.Resolve(save, ClothingResolver.OutfitSlots, ped);
+                    ClothingService.Apply(resolution, ped, 0);
+                    // Slots the outfit set are now the player's choice; unmatched ones keep what was worn.
+                    foreach (var piece in resolution.Pieces)
+                    {
+                        unresolvedSlots.Remove(piece.Slot);
+                    }
+                    currentCharacter = ReplacePedDataClothing(currentCharacter, keepUnresolved: true);
+                    ClothingService.Report($"Outfit {name}", resolution, true);
                     Notify.Success($"Changed into {name}. Save your character to make it their usual look.");
                 }
                 else if (listIndex == 1)
@@ -3298,9 +3347,34 @@ namespace vMenuClient.menus
             };
         }
 
-        private MultiplayerPedData ReplacePedDataClothing(MultiplayerPedData character)
+        /// <summary>
+        /// The character with the clothes and props the player ped wears now. With
+        /// <paramref name="keepUnresolved"/>, slots that couldn't be matched when the character was put
+        /// on keep their saved entry (so a snapshot never turns an unmatched piece into whatever
+        /// the ped shows there).
+        /// </summary>
+        private MultiplayerPedData ReplacePedDataClothing(MultiplayerPedData character, bool keepUnresolved = false)
         {
             int handle = Game.PlayerPed.Handle;
+            if (character.ModelHash != 0 && (uint)GetEntityModel(handle) != character.ModelHash)
+            {
+                return character; // never record a look worn by another body
+            }
+            var saved = ClothingService.FromCharacter(character);
+            var refs = saved.Refs?.Clone() ?? new ClothingRefSet { Model = character.ModelHash };
+            refs.Model = character.ModelHash;
+            var keep = new HashSet<ClothingSlot>();
+            foreach (var slot in keepUnresolved ? unresolvedSlots : new HashSet<ClothingSlot>())
+            {
+                if (refs.Get(slot) == null && saved.GlobalsLayout == null && saved.TryGetGlobal(slot, out var oldDrawable, out var oldTexture))
+                {
+                    refs.Set(slot, ClothingRef.Pending(oldDrawable, oldTexture, "unmatched"));
+                }
+                if (refs.Get(slot) != null)
+                {
+                    keep.Add(slot);
+                }
+            }
 
             if (character.DrawableVariations.clothes == null)
             {
@@ -3324,18 +3398,36 @@ namespace vMenuClient.menus
                     continue;
                 }
 
+                var slot = ClothingSlot.Component(i);
+                if (keep.Contains(slot))
+                {
+                    continue;
+                }
                 int drawable = GetPedDrawableVariation(handle, i);
                 int texture = GetPedTextureVariation(handle, i);
                 character.DrawableVariations.clothes[i] = new KeyValuePair<int, int>(drawable, texture);
+                refs.Set(slot, ClothingService.CaptureRef(handle, slot));
             }
 
             for (int i = 0; i < 8; i++)
             {
+                var slot = ClothingSlot.PropSlot(i);
+                if (keep.Contains(slot))
+                {
+                    continue;
+                }
                 int prop = GetPedPropIndex(handle, i);
                 int texture = GetPedPropTextureIndex(handle, i);
                 character.PropVariations.props[i] = new KeyValuePair<int, int>(prop, texture);
+                refs.Set(slot, ClothingService.CaptureRef(handle, slot));
             }
 
+            refs.Clothes.Remove(0);
+            refs.Clothes.Remove(2);
+            character.ClothingRefs = refs;
+            // Numbers that aren't current (kept unmatched pieces) have their own entry, so the
+            // cache is stamped with the running layout.
+            character.ClothingLayout = ClothingService.LayoutPrint(handle);
             return character;
         }
 
@@ -3561,7 +3653,11 @@ namespace vMenuClient.menus
             return menu;
         }
 
-        internal async Task AppySavedDataToPed(MultiplayerPedData character, int pedHandle)
+        /// <summary>
+        /// Dresses a ped as a saved character. Returns the character with its clothing references
+        /// current (and the global numbers cache updated for what was put on).
+        /// </summary>
+        internal async Task<MultiplayerPedData> AppySavedDataToPed(MultiplayerPedData character, int pedHandle, bool notifyClothingIssues = true)
         {
             #region headblend
             PedHeadBlendData data = character.PedHeadBlendData;
@@ -3636,33 +3732,18 @@ namespace vMenuClient.menus
 
             #endregion
 
-            #region Clothing Data
-            if (character.DrawableVariations.clothes != null && character.DrawableVariations.clothes.Count > 0)
+            #region Clothing and Props Data
+            // Through the shared clothing resolver: collection references, or old numbers read with
+            // the captured baseline. Pieces that can't be matched are left off; the save keeps them.
+            var clothingSave = ClothingService.FromCharacter(character);
+            var resolution = ClothingService.Resolve(clothingSave, ClothingSaves.CharacterSlots(clothingSave), pedHandle);
+            ClothingService.Apply(resolution, pedHandle, 0);
+            character = ClothingService.WithResolution(character, resolution);
+            if (pedHandle == Game.PlayerPed.Handle)
             {
-                foreach (var cd in character.DrawableVariations.clothes)
-                {
-                    if (cd.Key is 0 or 2)
-                    {
-                        continue;
-                    }
-
-                    SetPedComponentVariation(pedHandle, cd.Key, cd.Value.Key, cd.Value.Value, 0);
-                }
+                unresolvedSlots = new HashSet<ClothingSlot>(resolution.Issues.Select(i => i.Slot));
             }
-            #endregion
-
-            #region Props Data
-            if (character.PropVariations.props != null && character.PropVariations.props.Count > 0)
-            {
-                foreach (var cd in character.PropVariations.props)
-                {
-                    if (cd.Value.Key > -1)
-                    {
-                        int textureIndex = cd.Value.Value > -1 ? cd.Value.Value : 0;
-                        SetPedPropIndex(pedHandle, cd.Key, cd.Value.Key, textureIndex, true);
-                    }
-                }
-            }
+            ClothingService.Report(string.IsNullOrEmpty(character.SaveName) ? "Character" : character.SaveName.Replace("mp_ped_", ""), resolution, notifyClothingIssues);
             #endregion
 
             #region Tattoos
@@ -3725,6 +3806,8 @@ namespace vMenuClient.menus
                 SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
             }
             #endregion
+
+            return character;
         }
 
         public struct MpCharacterCategory

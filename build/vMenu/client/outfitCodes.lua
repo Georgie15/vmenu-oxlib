@@ -21,6 +21,25 @@ local function readOutfitCode(text)
     return { Clothes = slots(code.Clothes), Props = slots(code.Props) }
 end
 
+-- The clothing itself (collection references, old codes read with the captured pre-change
+-- layout, model checks) is handled by vMenu's C# side; see docs/clothing-refs.md.
+local function clothing(name, ...)
+    local ok, reply = pcall(function(...)
+        local resource = exports[GetCurrentResourceName()]
+        return resource[name](resource, ...)
+    end, ...)
+    local decoded = nil
+    if ok and type(reply) == "string" then
+        local read, value = pcall(json.decode, reply)
+        decoded = read and value or nil
+    end
+    if type(decoded) ~= "table" then
+        lib.print.error(format("clothing export %s failed: %s", name, tostring(reply)))
+        return { ok = false, message = "Error loading outfit, please try again!" }
+    end
+    return decoded
+end
+
 ---@class loadSharedOutfit
 ---@param name string
 exports("loadSharedOutfit", function(name)
@@ -62,7 +81,7 @@ exports("loadSharedOutfit", function(name)
         return false
     end
 
-    local Valid = lib.callback.await("vMenu:Outfits:Request", false, code)
+    local Valid, created = lib.callback.await("vMenu:Outfits:Request", false, code)
     Cooldown = true
     SetTimeout(5000, function()
         Cooldown = false
@@ -74,49 +93,20 @@ exports("loadSharedOutfit", function(name)
         return false
     end
 
-    Valid = readOutfitCode(Valid)
-    if not Valid then
+    if type(Valid) ~= "string" or not readOutfitCode(Valid) then
         Config.Notify("vMenu", "This outfit code is damaged and can't be loaded.", "error", 6500)
         return false
     end
 
-    local Data = json.decode(Existing)
-    Data.DrawableVariations = Data.DrawableVariations or {}
-    Data.DrawableVariations.clothes = Data.DrawableVariations.clothes or {}
-    Data.PropVariations = Data.PropVariations or {}
-    Data.PropVariations.props = Data.PropVariations.props or {}
-    for k, v in pairs(Valid.Clothes) do
-        local component = tonumber(k)
-        if component ~= 0 and component ~= 2 then
-            if Data.DrawableVariations.clothes[k] then
-                Data.DrawableVariations.clothes[k].Key = v.Item
-                Data.DrawableVariations.clothes[k].Value = v.Texture
-            else
-                Data.DrawableVariations.clothes[k] = { Key = v.Item, Value = v.Texture }
-            end
-        end
+    -- Face, hair, tattoos and everything else come from this character; the code's clothes and
+    -- props replace its own. Saved under the new name (and SaveName), never over the source.
+    local reply = clothing("vMenuImportOutfitCode", Valid, tonumber(created) or 0, format("mp_ped_%s", name), format("mp_ped_%s", newName))
+    if not reply.ok then
+        Config.Notify("vMenu", reply.message or "Error loading outfit, please try again!", "error", 6500)
+        return false
     end
 
-    -- Head and hair are appearance data, including in older saved characters.
-    Data.DrawableVariations.clothes["0"] = nil
-    Data.DrawableVariations.clothes["2"] = nil
-
-    for k, v in pairs(Valid.Props) do
-        if Data.PropVariations.props[k] then
-            Data.PropVariations.props[k].Key = v.Item
-            Data.PropVariations.props[k].Value = v.Texture
-        else
-            Data.PropVariations.props[k] = { Key = v.Item, Value = v.Texture }
-        end
-    end
-
-    -- The copied data still carries the source character's SaveName; if left
-    -- stale, editing this character later saves over the source character.
-    Data.SaveName = format("mp_ped_%s", newName)
-
-    SetResourceKvp(format("mp_ped_%s", newName), json.encode(Data))
-
-    Config.Notify("vMenu", "Outfit has been successfully loaded!", "success", 6500)
+    Config.Notify("vMenu", reply.message or "Outfit has been successfully loaded!", "success", 6500)
 
     return true
 end)
@@ -129,39 +119,23 @@ exports("loadOutfitFromCode", function(outfitCode)
         return lib.print.error("export: Tried to load outfit failed, invalid code provided. (not a number)")
     end
 
-    local Valid = lib.callback.await("vMenu:Outfits:Request", false, outfitCode)
+    local Valid, created = lib.callback.await("vMenu:Outfits:Request", false, outfitCode)
     if not Valid then
         lib.print.debug(format("export: Failed to load outfit with code: %s", outfitCode))
         return false
     end
 
-    local validData = readOutfitCode(Valid)
-    if not validData then
+    if type(Valid) ~= "string" or not readOutfitCode(Valid) then
         lib.print.debug(format("export: Outfit code %s is damaged", outfitCode))
         return false
     end
 
-    for i = 0, 11 do
-        if i ~= 0 and i ~= 2 then
-            SetPedComponentVariation(PlayerPedId(), i, 0, 0, 0)
-        end
+    -- Resolved and validated before anything is changed; pieces that can't be matched are left off.
+    local reply = clothing("vMenuApplyOutfitCode", Valid, tonumber(created) or 0)
+    if not reply.ok then
+        Config.Notify("vMenu", reply.message or "This outfit code can't be loaded.", "error", 6500)
+        return false
     end
-
-    for i = 0, 12 do
-        ClearPedProp(PlayerPedId(), i)
-    end
-
-    for k, v in pairs(validData.Clothes) do
-        local component = tonumber(k)
-        if component ~= 0 and component ~= 2 then
-            SetPedComponentVariation(PlayerPedId(), component, v.Item, v.Texture, 0)
-        end
-    end
-
-    for k, v in pairs(validData.Props) do
-        SetPedPropIndex(PlayerPedId(), tonumber(k), v.Item, v.Texture, true)
-    end
-
 
     return true
 end)
@@ -197,22 +171,13 @@ AddEventHandler("vMenu:Outfits:GenerateCode", function(name)
         return
     end
 
-    local Data = json.decode(Existing)
-
-    local ToSave = {
-        Clothes = {},
-        Props = {}
-    }
-    for k, v in pairs(Data.DrawableVariations.clothes) do
-        local component = tonumber(k)
-        if component ~= 0 and component ~= 2 then
-            ToSave.Clothes[k] = { Item = v.Key, Texture = v.Value }
-        end
+    -- The character's clothes and props (no head or hair), with its model and collection references.
+    local reply = clothing("vMenuBuildOutfitCode", format("mp_ped_%s", name))
+    if not reply.ok or type(reply.code) ~= "table" then
+        Config.Notify("vMenu", reply.message or "Failed to generate outfit code!", "error", 6500)
+        return
     end
-
-    for k, v in pairs(Data.PropVariations.props) do
-        ToSave.Props[k] = { Item = v.Key, Texture = v.Value }
-    end
+    local ToSave = reply.code
 
     local Generated, errorMessage = lib.callback.await("vMenu:Outfits:Generate", false, ToSave)
     GenerateCooldown = true

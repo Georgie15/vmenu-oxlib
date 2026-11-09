@@ -116,6 +116,11 @@ namespace vMenuClient
             public string WalkingStyle;
             public string FacialExpression;
             public string Category;
+
+            // What the clothes and props are, by collection (ClothingRefs.cs). DrawableVariations and
+            // PropVariations keep the global numbers as a cache, written under ClothingLayout.
+            public ClothingRefSet ClothingRefs;
+            public string ClothingLayout;
         }
     }
 }

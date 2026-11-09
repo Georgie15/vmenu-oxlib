@@ -66,6 +66,8 @@ lua tests/whats-new/test_whats_new.lua
 lua tests/purge-noclip/test_purge_noclip.lua
 python tests/frame-costs/test_frame_costs.py
 python tests/telemetry-leases/test_telemetry_leases.py
+dotnet run --project tests/clothing-refs
+python tests/clothing-layouts/test_clothing_layouts.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

@@ -43,7 +43,8 @@ local function newServer()
     end
     function db.query_async(_, query, params)
         local row = s.rows[params[1]]
-        return row and { { data = row.data } } or {}
+        assert(query:find('UNIX_TIMESTAMP(`created`)', 1, true), 'the creation time is read')
+        return row and { { data = row.data, created = 1762700000 } } or {}
     end
     _G.exports = { oxmysql = db }
     assert(load(readFile('build/vMenu/server/oufitCodes.lua'), '@server/oufitCodes.lua'))()
@@ -115,17 +116,69 @@ for what, spoil in pairs(badVehicles) do
 end
 check(s.nextId == 4, 'no refused vehicle was stored')
 
-check(s.call('vMenu:Outfits:Request', 1, 1) ~= false, 'a code can be loaded')
+local function outfitV2()
+    local o = outfit()
+    o.v, o.Model, o.Layout = 2, 1885233650, '0123456789abcdef'
+    o.Refs = { v = 2, model = 1885233650,
+        clothes = { ['3'] = { col = '', drw = 15, tex = 1, lp = 'aaaaaaaaaaaaaaaa' },
+                    ['11'] = { col = 'mp_m_deptmerge2', drw = 40, tex = 4, rev = 'psrp-eup-2026-11-06', pp = '0123456789abcdef', lp = 'bbbbbbbbbbbbbbbb' } },
+        props = { ['0'] = { empty = true }, ['1'] = { col = 'mp_m_business_01', drw = 5, tex = 2 } } }
+    return o
+end
+local v2 = s.call('vMenu:Outfits:Generate', 1, outfitV2())
+check(type(v2) == 'number' and json.decode(s.rows[v2].data).Refs.clothes['11'].col == 'mp_m_deptmerge2', 'a v2 outfit (model and collection references) is stored')
+s.expire()
+local badV2 = {
+    ['references without a version'] = function(o) o.v = nil end,
+    ['a version without references'] = function(o) o.Refs = nil end,
+    ['references for another model'] = function(o) o.Refs.model = 2627665880 end,
+    ['an unknown reference field'] = function(o) o.Refs.clothes['3'].owner = 'x' end,
+    ['a piece still waiting for review'] = function(o) o.Refs.clothes['3'] = { legacy = { 15, 1 }, why = 'not-in-baseline' } end,
+    ['a collection name with odd characters'] = function(o) o.Refs.clothes['3'].col = 'x/../y' end,
+    ['an empty prop with a drawable'] = function(o) o.Refs.props['0'].drw = 3 end,
+    ['a negative drawable'] = function(o) o.Refs.clothes['3'].drw = -1 end,
+    ['a layout that is not hex'] = function(o) o.Layout = 'zz' end,
+    ['a reference slot past 15'] = function(o) o.Refs.props['16'] = { empty = true } end,
+}
+for what, spoil in pairs(badV2) do
+    local o = outfitV2()
+    spoil(o)
+    local ok, message = s.call('vMenu:Outfits:Generate', 1, o)
+    check(ok == false and message == "This outfit can't be shared.", 'v2 outfit refused: ' .. what)
+end
+
+local data, created = s.call('vMenu:Outfits:Request', 1, 1)
+check(type(data) == 'string' and created == 1762700000, 'a code is loaded with its creation time')
 check(s.call('vMenu:Outfits:Request', 2, 1) == false, 'reconnecting does not reset the load limit')
 s.expire()
 s.enabled = false
 check(select(2, s.call('vMenu:Vehicles:Generate', 1, vehicle())):find('disabled', 1, true), 'refused while the convar is off')
 print('PASS: server stores only real outfits and saved vehicles, limits per license')
 
--- Client: importing a code that was stored before the server checked them.
-local function newClient(reply)
-    local c = { exports = {}, handlers = {}, kvps = {}, notes = {}, reply = reply, ped = {} }
-    _G.exports = function(name, fn) c.exports[name] = fn end
+-- Client: the Lua side fetches codes and hands them to vMenu's C# exports, which resolve the
+-- clothing (tests/clothing-refs). Damaged codes are refused before reaching them.
+local function newClient(reply, created)
+    local c = { exports = {}, handlers = {}, kvps = {}, notes = {}, reply = reply, created = created, calls = {}, sent = nil }
+    c.csharp = {
+        vMenuImportOutfitCode = function(_, code, made, from, to)
+            c.calls[#c.calls + 1] = { 'import', code, made, from, to }
+            c.kvps[to] = json.encode({ SaveName = to })
+            return json.encode({ ok = true, message = 'Outfit has been successfully loaded!' })
+        end,
+        vMenuApplyOutfitCode = function(_, code, made)
+            c.calls[#c.calls + 1] = { 'apply', code, made }
+            return c.applyReply or json.encode({ ok = true, message = '' })
+        end,
+        vMenuBuildOutfitCode = function(_, key)
+            c.calls[#c.calls + 1] = { 'build', key }
+            return c.buildReply
+        end,
+    }
+    _G.exports = setmetatable({}, {
+        __call = function(_, name, fn) c.exports[name] = fn end,
+        __index = function(_, resource) assert(resource == 'vMenu'); return c.csharp end,
+    })
+    _G.GetCurrentResourceName = function() return 'vMenu' end
     _G.AddEventHandler = function(name, fn) c.handlers[name] = fn end
     _G.RegisterCommand = function() end
     _G.TriggerEvent = function() end
@@ -135,17 +188,20 @@ local function newClient(reply)
     _G.Config = { OutfitSharing = { CommandEnabled = false }, Notify = function(_, msg, kind) c.notes[#c.notes + 1] = { msg = msg, kind = kind } end }
     _G.lib = {
         inputDialog = function() return { 7, 'Imported' } end,
-        callback = { await = function() return c.reply end },
+        callback = { await = function(name, _, payload)
+            if name == 'vMenu:Outfits:Generate' then c.sent = payload; return 42 end
+            return c.reply, c.created
+        end },
         print = { debug = function() end, error = function() end },
+        setClipboard = function() end,
     }
     _G.GetVehicleClassFromName = function() return 18 end
     _G.IsModelInCdimage = function() return true end
     _G.IsModelValid = function() return true end
     _G.GetLabelText = function() return 'Emergency' end
     _G.PlayerPedId = function() return 1 end
-    _G.SetPedComponentVariation = function(_, slot, item) c.ped['c' .. slot] = item end
-    _G.ClearPedProp = function(_, slot) c.ped['p' .. slot] = nil end
-    _G.SetPedPropIndex = function(_, slot, item) c.ped['p' .. slot] = item end
+    _G.SetPedComponentVariation = function() error('outfit codes must not set clothing from Lua') end
+    _G.SetPedPropIndex = function() error('outfit codes must not set props from Lua') end
     assert(load(readFile('build/vMenu/client/vehicleCodes.lua'), '@client/vehicleCodes.lua'))()
     assert(load(readFile('build/vMenu/client/outfitCodes.lua'), '@client/outfitCodes.lua'))()
     function c.lastNote() return c.notes[#c.notes] or { msg = '' } end
@@ -164,21 +220,39 @@ local character = json.encode({ SaveName = 'mp_ped_Main', DrawableVariations = {
 for what, reply in pairs({ ['not JSON'] = '{', ['no clothes'] = '{"Props":{}}', ['clothes that are text'] = '{"Clothes":"x","Props":{}}' }) do
     c = newClient(reply)
     c.kvps.mp_ped_Main = character
-    check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().msg:find('damaged', 1, true) and c.kvps.mp_ped_Imported == nil,
+    check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().msg:find('damaged', 1, true) and c.kvps.mp_ped_Imported == nil and #c.calls == 0,
         'a damaged outfit code is reported, not saved: ' .. what)
 end
-c = newClient(json.encode({ Clothes = { ['3'] = { Item = 15, Texture = 1 }, ['4'] = { Item = 'x' }, ['2'] = { Item = 9, Texture = 0 } },
-    Props = { ['0'] = { Item = 6, Texture = 0 } } }))
+local code = json.encode({ Clothes = { ['3'] = { Item = 15, Texture = 1 } }, Props = { ['0'] = { Item = 6, Texture = 0 } } })
+c = newClient(code, 1762700000)
 c.kvps.mp_ped_Main = character
-check(c.exports.loadSharedOutfit('mp_ped_Main') == true, 'an outfit with some bad entries still loads')
-local imported = json.decode(c.kvps.mp_ped_Imported)
-check(imported.DrawableVariations.clothes['3'].Key == 15 and imported.DrawableVariations.clothes['4'] == nil
-    and imported.DrawableVariations.clothes['2'] == nil and imported.PropVariations.props['0'].Key == 6,
-    'good entries applied, bad ones and hair dropped, missing prop data created')
-check(imported.SaveName == 'mp_ped_Imported', 'the copy saves under its own name')
+check(c.exports.loadSharedOutfit('mp_ped_Main') == true and c.lastNote().kind == 'success', 'an outfit code is imported')
+local call = c.calls[1]
+check(call[1] == 'import' and call[2] == code and call[3] == 1762700000 and call[4] == 'mp_ped_Main' and call[5] == 'mp_ped_Imported',
+    'the code, its creation time, the source character and the new name go to vMenu')
+c = newClient(code)
+c.kvps.mp_ped_Main = character
+c.csharp.vMenuImportOutfitCode = function() return json.encode({ ok = false, message = 'This outfit code is for a female character.' }) end
+check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().msg:find('female', 1, true), 'a refusal from vMenu is shown')
+c.csharp.vMenuImportOutfitCode = function() error('boom') end
+check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().kind == 'error', 'an export error is a message, not a Lua error')
 
 c = newClient('{')
-check(c.exports.loadOutfitFromCode(7) == false, 'a damaged code applied directly is refused')
-c = newClient(json.encode({ Clothes = { ['11'] = { Item = 20, Texture = 0 } }, Props = { ['0'] = { Item = 3, Texture = 1 } } }))
-check(c.exports.loadOutfitFromCode(7) == true and c.ped.c11 == 20 and c.ped.p0 == 3, 'a good code applied directly dresses the ped')
-print('PASS: client reports damaged codes instead of erroring, and keeps the good parts of an outfit')
+check(c.exports.loadOutfitFromCode(7) == false and #c.calls == 0, 'a damaged code applied directly is refused')
+c = newClient(code, 5)
+check(c.exports.loadOutfitFromCode(7) == true and c.calls[1][1] == 'apply' and c.calls[1][2] == code and c.calls[1][3] == 5, 'a good code applied directly goes to vMenu with its creation time')
+c.applyReply = json.encode({ ok = false, message = "None of this outfit's pieces could be matched on this server." })
+check(c.exports.loadOutfitFromCode(7) == false and c.lastNote().msg:find('matched', 1, true), 'nothing matched: refused with a message')
+
+-- Generating: vMenu builds the payload from the saved character.
+c = newClient()
+c.kvps.mp_ped_Main = character
+c.buildReply = json.encode({ ok = true, message = '', code = { v = 2, Model = 1885233650, Clothes = {}, Props = {}, Refs = { v = 2, model = 1885233650, clothes = {}, props = {} } } })
+c.handlers['vMenu:Outfits:GenerateCode']('mp_ped_Main')
+check(c.calls[1][1] == 'build' and c.calls[1][2] == 'mp_ped_Main' and c.sent and c.sent.v == 2 and c.sent.Model == 1885233650, 'the generated code is the payload vMenu built')
+c = newClient()
+c.kvps.mp_ped_Main = character
+c.buildReply = json.encode({ ok = false, message = 'Some pieces of this character need review before it can be shared.' })
+c.handlers['vMenu:Outfits:GenerateCode']('mp_ped_Main')
+check(c.sent == nil and c.lastNote().msg:find('review', 1, true), 'a character with unmatched pieces is not shared')
+print('PASS: client checks codes, hands them to vMenu, and reports refusals instead of erroring')

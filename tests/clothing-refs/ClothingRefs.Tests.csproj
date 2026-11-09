@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../vMenu/ClothingRefs.cs" Link="ClothingRefs.cs" />
+    <Compile Include="../../vMenu/ClothingSaves.cs" Link="ClothingSaves.cs" />
+    <Compile Include="../../vMenu/SavedOutfit.cs" Link="SavedOutfit.cs" />
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../dependencies/shared/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -27,19 +27,24 @@ static class Program
         var stored = SavedOutfit.Parse(outfit.ToJson());
         Check(stored != null && stored.Model == 0x705E61F2 && stored.Clothes[4][0] == 40 && stored.Props[6][0] == 3, "round trips through storage");
 
-        var components = new Dictionary<int, (int, int)>();
-        var props = new Dictionary<int, (int, int)>();
-        var cleared = new List<int>();
-        stored.Apply((slot, d, t) => components[slot] = (d, t), slot => cleared.Add(slot), (slot, d, t) => props[slot] = (d, t));
+        // Wearing goes through the shared resolver (tests/clothing-refs covers it in depth). On a
+        // game where every slot is the base collection, an outfit puts on exactly its numbers.
+        var game = new FakeRuntime(0x705E61F2);
+        foreach (var slot in ClothingSlot.AllLayoutSlots) game.Fill(slot.Key, "", 120, 12);
+        var layouts = ClothingLayouts.Empty();
+        var worn = ClothingResolver.Resolve(ClothingSaves.Read(ClothingSaves.Kind.Outfit, stored.ToJson()), ClothingResolver.OutfitSlots, layouts, game);
+        var components = worn.Pieces.Where(p => !p.Slot.Prop).ToDictionary(p => p.Slot.Index, p => (p.Global, p.Texture));
+        var props = worn.Pieces.Where(p => p.Slot.Prop && !p.Clear).ToDictionary(p => p.Slot.Index, p => (p.Global, p.Texture));
+        var cleared = worn.Pieces.Where(p => p.Slot.Prop && p.Clear).Select(p => p.Slot.Index).ToList();
         Check(components.Count == 10 && !components.ContainsKey(0) && !components.ContainsKey(2) && components[11] == (110, 11), "wearing sets the clothing slots only");
         Check(props.Count == 2 && props[0] == (12, 2) && props[6] == (3, 1), "worn props are put on");
         Check(cleared.OrderBy(s => s).SequenceEqual(new[] { 1, 2, 3, 4, 5, 7 }), "props the outfit doesn't have are taken off");
 
-        var damaged = SavedOutfit.Parse("{\"model\":1,\"clothes\":{\"0\":[5,5],\"2\":[9,9],\"3\":[4],\"4\":null,\"5\":[-2,0],\"6\":[7,1]},\"props\":{\"0\":[1,-5],\"1\":[3]}}");
-        components.Clear(); props.Clear(); cleared.Clear();
-        damaged.Apply((slot, d, t) => components[slot] = (d, t), slot => cleared.Add(slot), (slot, d, t) => props[slot] = (d, t));
-        Check(components.Count == 1 && components[6] == (7, 1), "damaged, negative, face and hair entries are skipped");
-        Check(props.Count == 1 && props[0] == (1, 0) && cleared.Count == 0, "a bad prop texture becomes 0; a damaged prop is left alone");
+        var damaged = ClothingSaves.Read(ClothingSaves.Kind.Outfit, "{\"model\":1885233650,\"clothes\":{\"0\":[5,5],\"2\":[9,9],\"3\":[4],\"4\":null,\"5\":[-2,0],\"6\":[7,1]},\"props\":{\"0\":[1,-5],\"1\":[3]}}");
+        worn = ClothingResolver.Resolve(damaged, ClothingResolver.OutfitSlots, layouts, game);
+        Check(worn.Pieces.Count(p => !p.Slot.Prop) == 1 && worn.Pieces.Single(p => !p.Slot.Prop).Slot.Index == 6, "damaged, negative, face and hair entries are skipped");
+        Check(worn.Pieces.Count(p => p.Slot.Prop) == 1 && worn.Pieces.Single(p => p.Slot.Prop) is { Global: 1, Texture: 0 }, "a bad prop texture becomes 0; a damaged prop is left alone");
+        Check(worn.Issues.Single().Slot.Index == 5, "the damaged piece is reported");
         foreach (var bad in new[] { null, "", "{", "{\"clothes\":{}}", "[]", "{\"model\":0}" })
         {
             Check(SavedOutfit.Parse(bad) == null, "unreadable or model-less storage is ignored: " + bad);
@@ -55,8 +60,10 @@ static class Program
         var mp = Read("vMenu", "menus", "MpPedCustomization.cs");
         var menu = Regex.Match(mp, @"private void CreateSavedOutfitsMenu\(Menu outfitsMenu\).*?\n        \}\n", RegexOptions.Singleline).Value;
         Check(mp.Contains("CreateSavedOutfitsMenu(savedOutfitsMenu);"), "MP Ped Customization has the menu");
-        Check(menu.Contains("if (!IsCurrentPedMpFreemode())") && menu.Contains("outfit.Model == model"), "only for MP characters, and only outfits of the current body type");
-        Check(menu.Contains("currentCharacter = ReplacePedDataClothing(currentCharacter);"), "wearing updates the character being edited, so saving keeps it");
+        Check(menu.Contains("if (!IsCurrentPedMpFreemode())") && menu.Contains("outfit.Model == model") && menu.Contains("save.Model != (uint)GetEntityModel(ped)"), "only for MP characters, and only outfits of the current body type");
+        Check(menu.Contains("currentCharacter = ReplacePedDataClothing(currentCharacter, keepUnresolved: true);"), "wearing updates the character being edited, so saving keeps it");
+        Check(menu.Contains("ClothingService.Resolve(save, ClothingResolver.OutfitSlots, ped)") && menu.Contains("ClothingService.Report($\"Outfit {name}\", resolution, true);"), "wearing resolves by collection and reports pieces left off");
+        Check(menu.Contains("(slot, global, texture) => ClothingResolver.Capture(slot, global, texture, ClothingService.Layouts, runtime)"), "saving records collection references");
         Check(menu.Contains("await GetUserConfirmation(\"Delete Outfit\""), "deleting asks first");
         Check(Regex.IsMatch(menu, @"if \(!string\.IsNullOrEmpty\(GetResourceKvpString\(SavedOutfit\.KeyFor\(name\)\)\)\)\s*\{\s*Notify\.Error"), "saving never overwrites an outfit");
         foreach (var side in new[] { "client", "server" })

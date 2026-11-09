@@ -12,6 +12,8 @@ local REPLY_TIMEOUT_MS = 60000
 local BACKUP_PREFIXES = {
     'veh_', 'saved_veh_category_', 'ped_', 'mp_ped_', 'mp_character_category_',
     'vmenu_string_saved_weapon_loadout_', 'vmenu_vehicle_preset_', 'vmenu_outfit_',
+    -- Originals of saves upgraded to collection references (docs/clothing-refs.md).
+    'vmenu_clothing_backup_',
 }
 local BACKUP_KEYS = {
     'vmenu_default_character', 'vmenu_last_character', 'vmenu_string_default_loadout',

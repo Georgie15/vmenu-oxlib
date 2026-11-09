@@ -3,12 +3,21 @@ local function outfitCodesEnabled()
     return GetConvarBool("vmenu_outfitcodes", false)
 end
 
--- An outfit code is only clothes and props: { Clothes = { ["3"] = { Item = 4, Texture = 0 } }, Props = { ... } }.
+-- An outfit code is clothes and props: { Clothes = { ["3"] = { Item = 4, Texture = 0 } }, Props = { ... } }.
+-- Codes made since collection references (version 2) also carry the ped model, the layout the
+-- numbers were written under and the references themselves:
+--   { v = 2, Model = 1885233650, Layout = "<print>", Clothes = ..., Props = ...,
+--     Refs = { v = 2, model = 1885233650, clothes = { ["11"] = { col = "mp_m_deptmerge2", drw = 40, tex = 2, rev = "...", pp = "..." } },
+--              props = { ["0"] = { empty = true } } } }
 -- Anything else is refused, so an importer never receives data vMenu can't apply.
 local MAX_OUTFIT_BYTES = 8192
 
 local function isWholeNumber(value, min, max)
     return type(value) == "number" and value == math.floor(value) and value >= min and value <= max
+end
+
+local function isText(value, max, pattern)
+    return type(value) == "string" and #value <= max and value:match(pattern) ~= nil
 end
 
 local function validSlots(slots)
@@ -24,10 +33,52 @@ local function validSlots(slots)
     return true
 end
 
+-- One collection reference. A shared code never carries pieces still waiting for review.
+local REF_FIELDS = { col = true, drw = true, tex = true, empty = true, rev = true, pp = true, lp = true }
+local function validRef(item)
+    if type(item) ~= "table" then return false end
+    for key in pairs(item) do
+        if not REF_FIELDS[key] then return false end
+    end
+    if item.empty ~= nil then
+        return item.empty == true and item.col == nil and item.drw == nil and item.tex == nil
+    end
+    return isText(item.col, 64, "^[%w_%-%.]*$") and isWholeNumber(item.drw, 0, 4096) and isWholeNumber(item.tex, 0, 255)
+        and (item.rev == nil or isText(item.rev, 64, "^[%w_%-%.]+$"))
+        and (item.pp == nil or isText(item.pp, 32, "^%x+$"))
+        and (item.lp == nil or isText(item.lp, 32, "^%x+$"))
+end
+
+local function validRefSlots(slots)
+    if type(slots) ~= "table" then return false end
+    local count = 0
+    for key, item in pairs(slots) do
+        count = count + 1
+        if count > 16 or not isWholeNumber(tonumber(key), 0, 15) or not validRef(item) then
+            return false
+        end
+    end
+    return true
+end
+
+local function validRefs(refs, model)
+    if type(refs) ~= "table" or refs.v ~= 2 or refs.model ~= model then return false end
+    for key in pairs(refs) do
+        if key ~= "v" and key ~= "model" and key ~= "clothes" and key ~= "props" then return false end
+    end
+    return validRefSlots(refs.clothes) and validRefSlots(refs.props)
+end
+
+local OUTFIT_FIELDS = { Clothes = true, Props = true, v = true, Model = true, Layout = true, Refs = true }
 local function validOutfit(data)
     if type(data) ~= "table" or not validSlots(data.Clothes) or not validSlots(data.Props) then return false end
     for key in pairs(data) do
-        if key ~= "Clothes" and key ~= "Props" then return false end
+        if not OUTFIT_FIELDS[key] then return false end
+    end
+    if data.v ~= nil or data.Model ~= nil or data.Layout ~= nil or data.Refs ~= nil then
+        -- Version 2: the model and references come together.
+        if data.v ~= 2 or not isWholeNumber(data.Model, 1, 4294967295) or not validRefs(data.Refs, data.Model) then return false end
+        if data.Layout ~= nil and not isText(data.Layout, 32, "^%x+$") then return false end
     end
     return #json.encode(data) <= MAX_OUTFIT_BYTES
 end
@@ -65,7 +116,8 @@ lib.callback.register(
 
         userRequestCooldowns[key] = true
 
-        local response = exports.oxmysql:query_async('SELECT `data` FROM `vmenu_outfits` WHERE `id` = ?', {
+        -- The creation time tells the client whether an old code predates the captured clothing layout.
+        local response = exports.oxmysql:query_async('SELECT `data`, UNIX_TIMESTAMP(`created`) AS `created` FROM `vmenu_outfits` WHERE `id` = ?', {
             id
         })
 
@@ -74,7 +126,11 @@ lib.callback.register(
         end)
 
         if response then
-            return response[1] and response[1].data or false
+            local row = response[1]
+            if not row or not row.data then
+                return false
+            end
+            return row.data, tonumber(row.created) or 0
         end
 
         return false, "Failed to load outfit from database."

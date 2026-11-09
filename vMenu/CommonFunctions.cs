@@ -2357,6 +2357,11 @@ namespace vMenuClient
             public Dictionary<int, int> propTextures;
             public Dictionary<int, int> drawableVariations;
             public Dictionary<int, int> drawableVariationTextures;
+
+            // What the clothes and props are, by collection (ClothingRefs.cs); the numbers above
+            // were written under clothingLayout.
+            public ClothingRefSet clothingRefs;
+            public string clothingLayout;
         };
 
         public sealed class DpClothingAppearancePatch
@@ -2472,6 +2477,9 @@ namespace vMenuClient
 
                         pedInfo.drawableVariations[componentId] = componentEntry.Value.drawable;
                         pedInfo.drawableVariationTextures[componentId] = componentEntry.Value.texture;
+                        // dpclothing sends current global numbers: they win over the saved reference,
+                        // and the save's clothingLayout stamp (taken at death) says what they mean.
+                        pedInfo.clothingRefs?.Set(ClothingSlot.Component(componentId), null);
                     }
                 }
 
@@ -2486,6 +2494,7 @@ namespace vMenuClient
 
                         pedInfo.props[propId] = propEntry.Value.prop;
                         pedInfo.propTextures[propId] = propEntry.Value.texture;
+                        pedInfo.clothingRefs?.Set(ClothingSlot.PropSlot(propId), null);
                     }
                 }
             }
@@ -2695,14 +2704,19 @@ namespace vMenuClient
                 if (pedCustomizationOptions.version == 1)
                 {
                     var ped = Game.PlayerPed.Handle;
-                    for (var drawable = 0; drawable < 21; drawable++)
-                    {
-                        SetPedComponentVariation(ped, drawable, pedCustomizationOptions.drawableVariations[drawable],
-                            pedCustomizationOptions.drawableVariationTextures[drawable], 1);
-                    }
+                    // Components 0-11 and props 0-12 go through the shared clothing resolver
+                    // (collection references, or old numbers read with the captured baseline).
+                    var resolution = ClothingService.Resolve(ClothingService.FromPedInfo(pedCustomizationOptions, modelHash), ClothingResolver.SavedPedSlots, ped);
+                    ClothingService.Apply(resolution, ped, 1);
+                    ClothingService.Report("Saved ped", resolution, true);
 
-                    for (var i = 0; i < 21; i++)
+                    for (var i = 13; i < 21; i++)
                     {
+                        if (pedCustomizationOptions.props == null || pedCustomizationOptions.propTextures == null
+                            || !pedCustomizationOptions.props.ContainsKey(i) || !pedCustomizationOptions.propTextures.ContainsKey(i))
+                        {
+                            continue;
+                        }
                         var prop = pedCustomizationOptions.props[i];
                         var propTexture = pedCustomizationOptions.propTextures[i];
                         if (prop == -1 || propTexture == -1)
@@ -2818,6 +2832,10 @@ namespace vMenuClient
                 }
                 data.props = props;
                 data.propTextures = propTextures;
+
+                // What the ped wears by collection, so the save survives clothing packs renumbering.
+                data.clothingRefs = ClothingService.CaptureSet(ped, ClothingResolver.SavedPedSlots);
+                data.clothingLayout = ClothingService.LayoutPrint(ped);
 
                 data.isMpPed = model == (uint)GetHashKey("mp_f_freemode_01") || model == (uint)GetHashKey("mp_m_freemode_01");
                 if (data.isMpPed && name != "vMenu_tmp_saved_ped")

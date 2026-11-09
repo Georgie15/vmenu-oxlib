@@ -27,6 +27,7 @@ files {
     'config/locations.json',
     'config/addons.json',
     'config/pedpack.json',
+    'config/clothing-layouts.json',
     'storage.html'
 }
 

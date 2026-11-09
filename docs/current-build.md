@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 5, 2026 — Take Photo waits for capture and save before freeing the photo buffer (client DLL) |
-| `build/vMenu/vMenuClient.net.dll` | `23a83de485ae760cc8630f809d6f659232644300a1c5f60c33dce22d9fef09ad` |
+| Latest change | November 9, 2026 — clothing saved by collection, so EUP renumbering can't change saved uniforms (client DLL, Lua, config) |
+| `build/vMenu/vMenuClient.net.dll` | `6d3e33fff3252b3916163c1853dd0088a8b440198d80fdcea18a7164ce458f27` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
@@ -19,6 +19,55 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 9, 2026 — clothing saved by collection (client DLL, Lua, config)
+
+Saved uniforms used to be global drawable numbers, which move whenever any
+clothing pack is added, removed or repacked (the proposed FIB revamp would do
+all three). Every vMenu feature that saves clothing now stores collection
+references and resolves them through one policy. That covers Saved Outfits,
+MP characters (spawn, edit, default and last character, the after-death
+snapshot), Saved Peds and all three outfit-code paths. Old saves are read with
+a captured pre-change baseline and upgraded on join, with backups. Ambiguous,
+retired or replaced pieces are reported and left off, never substituted. The
+design, capture, migration, FIB rollout and rollback steps are in
+[clothing-refs.md](clothing-refs.md).
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `6d3e33fff3252b3916163c1853dd0088a8b440198d80fdcea18a7164ce458f27` |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (unchanged) |
+| `build/vMenu/config/clothing-layouts.json` (new, LF as committed) | `b8384ce6589b1c5772d74e17483ef3bf18ed964f3c9f37585d9aa05095f53c3f` |
+| `build/vMenu/server/clothingCapture.lua` (new, LF as committed) | `47c66ec2f9c47d548239ade169b15b094af702d65da73e11c71cd624221cc63f` |
+
+Also changed: `fxmanifest.lua` (ships the layouts file), `client/outfitCodes.lua`
+(codes resolved by the C# side), `server/oufitCodes.lua` (validates v2 codes,
+returns the creation time), and `client/backups.lua` and `server/backups.lua`
+(back up upgrade originals). `config/permissions.cfg` gains a commented
+`vMenu.ClothingCapture` example. The `vmenu_outfits` table and existing code ids
+are unchanged.
+
+The client DLL was built with SDK 9.0.320, because 9.0.123 is no longer
+installed. `tools/ilcompare` against the package also shows newer-compiler
+output in seven untouched methods: iterator `Dispose`, branch offsets and
+`GetAllVehicleMods`. Building unchanged `HEAD` with 9.0.320 gives the same
+seven. Against that same-SDK `HEAD` build, the only differences are the new
+clothing types, `MpPedCustomization`'s clothing paths, `SavedOutfit`, Saved
+Peds in `CommonFunctions`, and the new fields on `MultiplayerPedData` and
+`PedInfo`. All 30 suites in `AGENTS.md` pass. Two are new:
+`tests/clothing-refs` (144 checks) and `tests/clothing-layouts` (36 checks).
+
+**Deploy:** check each live file against
+`git show build-2026-11-05:<path>` (ignoring line endings) first. Then copy the
+DLL, `fxmanifest.lua`, the four changed Lua files, `clothingCapture.lua`,
+`clothing-layouts.json` and `permissions.cfg`, and restart vMenu. With the
+shipped layouts file (no baseline yet), old saves behave as before and nothing
+is rewritten; new saves get references. Then do the pre-swap capture in
+clothing-refs.md and deploy the resulting `clothing-layouts.json` **before any
+clothing pack changes**.
+
+**Runtime acceptance (not done):** see "Needs a FiveM test server" in
+clothing-refs.md.
 
 ## November 5, 2026 — Take Photo crash (client DLL)
 
