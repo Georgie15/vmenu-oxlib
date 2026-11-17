@@ -237,7 +237,7 @@ namespace vMenuClient
         /// </summary>
         public static bool IsVehicleLocked(Vehicle veh) => GetVehicleDoorLockStatus(veh.Handle) >= 2;
 
-        public static async void LockOrUnlockDoors(Vehicle veh, bool lockDoors)
+        public static async Task LockOrUnlockDoors(Vehicle veh, bool lockDoors)
         {
             if (veh != null && veh.Exists())
             {

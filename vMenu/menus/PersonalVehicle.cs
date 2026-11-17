@@ -18,6 +18,7 @@ namespace vMenuClient.menus
         // Variables
         private Menu menu;
         private MenuItem currentVehicleInfoItem;
+        private bool lockToggleInProgress;
         public bool BlipOnExit { get; private set; } = UserDefaults.PVBlipOnExit;
         // Personal Vehicle > Auto-Lock When I Walk Away (FunctionsController locks the car).
         public bool AutoLock { get; private set; } = GetResourceKvpInt("vmenu_pv_autolock") == 1;
@@ -77,7 +78,7 @@ namespace vMenuClient.menus
             var keyMappingId = MainMenu.GetKeyMappingId();
             if (IsAllowed(Permission.PVLockDoors))
             {
-                RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>((source, args, rawCommand) => ToggleLocksFromKey()), false);
+                RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>(async (source, args, rawCommand) => await ToggleLocksFromKey()), false);
                 RegisterKeyMapping($"vMenu:{keyMappingId}:PVLock", "vMenu PV Lock/Unlock", "keyboard", "");
             }
             if (IsAllowed(Permission.PVToggleEngine))
@@ -306,7 +307,7 @@ namespace vMenuClient.menus
                         {
                             PressKeyFob(CurrentPersonalVehicle);
                             var _lock = item == lockDoors;
-                            LockOrUnlockDoors(CurrentPersonalVehicle, _lock);
+                            await LockOrUnlockDoors(CurrentPersonalVehicle, _lock);
                         }
 
                         else if (item == soundHorn)
@@ -500,13 +501,26 @@ namespace vMenuClient.menus
             }
         }
 
-        private async void ToggleLocksFromKey()
+        internal async Task ToggleLocksFromKey()
         {
-            var veh = await GetControlledPersonalVehicle();
-            if (veh != null)
+            if (lockToggleInProgress)
             {
-                PressKeyFob(veh);
-                LockOrUnlockDoors(veh, !IsVehicleLocked(veh));
+                return;
+            }
+
+            // Either shortcut can fire on the same input as a tackle. Keep its feedback vehicle-only.
+            lockToggleInProgress = true;
+            try
+            {
+                var veh = await GetControlledPersonalVehicle();
+                if (veh != null)
+                {
+                    await LockOrUnlockDoors(veh, !IsVehicleLocked(veh));
+                }
+            }
+            finally
+            {
+                lockToggleInProgress = false;
             }
         }
 

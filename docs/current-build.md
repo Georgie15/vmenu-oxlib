@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 9, 2026 — clothing saved by collection, so EUP renumbering can't change saved uniforms (client DLL, Lua, config) |
-| `build/vMenu/vMenuClient.net.dll` | `6d3e33fff3252b3916163c1853dd0088a8b440198d80fdcea18a7164ce458f27` |
+| Latest change | November 16, 2026 — personal vehicle lock shortcuts leave tackle physics alone (client DLL) |
+| `build/vMenu/vMenuClient.net.dll` | `543003acae292219c9e3667d2ebe06cc93961faecff3370af5e48188efd0da79` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
@@ -19,6 +19,34 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 16, 2026 — personal vehicle lock shortcuts (client DLL)
+
+The `vMenu PV Lock/Unlock` binding and horn double-tap both used the key-fob
+animation, which clears the ped's tasks, forces a turn, and attaches a prop.
+Those actions can interrupt the PSRP_Framework `Shift+E` tackle dive and
+ragdoll. Both shortcuts now use the vehicle horn and lock status message for
+feedback. They share one lock operation, so presses received while it is
+running are ignored. A shared `E` binding can still toggle the car during a
+tackle. This fix ships in vMenu alone.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `543003acae292219c9e3667d2ebe06cc93961faecff3370af5e48188efd0da79` |
+
+Built with .NET SDK 9.0.321. `tools/ilcompare` shows the lock shortcut and
+its callers plus the assembly version metadata. The vMenu client feature,
+vehicle convenience, client guard, and client fix tests passed, as did both
+PSRP_Framework tackle Lua specs.
+
+Before deploying, verify the installed `vMenuClient.net.dll` against the
+November 9 entry below. Replace only that DLL and restart `vMenu`.
+In FiveM, bind `vMenu PV Lock/Unlock` to `E`, select a
+personal vehicle, and verify lock/unlock and horn feedback on foot. Then
+tackle another player beside the vehicle with `Shift+E` and repeatedly press
+`E` through the dive and recovery. Check that both players recover normally
+and that the car still toggles once per completed operation. Repeat with the
+horn double-tap shortcut. The in-game check is pending.
 
 ## November 9, 2026 — clothing saved by collection (client DLL, Lua, config)
 

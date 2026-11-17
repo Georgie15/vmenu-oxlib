@@ -2950,7 +2950,7 @@ namespace vMenuClient
             var occupied = GetVehicleNumberOfPassengers(veh.Handle) > 0 || !IsVehicleSeatFree(veh.Handle, -1);
             if (pvAutoLock.Update(personalVehicleMenu.AutoLock, (float)Math.Sqrt(distance), occupied, IsVehicleLocked(veh)))
             {
-                LockOrUnlockDoors(veh, true);
+                await LockOrUnlockDoors(veh, true);
             }
         }
 
@@ -3037,14 +3037,8 @@ namespace vMenuClient
                             // check if it was recently pressed (within the last 500 ms).
                             if (GetGameTimer() - time < 500)
                             {
-                                // lock or unlock the vehicle
-                                PressKeyFob(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle);
-                                await Delay(100);
-                                var lockDoors = !IsVehicleLocked(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle);
-                                LockOrUnlockDoors(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle, lockDoors);
-
-                                // reset the timer.
                                 time = 0;
+                                await MainMenu.PersonalVehicleMenu.ToggleLocksFromKey();
                             }
                             // otherwise count this as the first one.
                             else
