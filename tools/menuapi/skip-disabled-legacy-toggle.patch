@@ -1,0 +1,15 @@
+diff --git a/MenuAPI/MenuController.cs b/MenuAPI/MenuController.cs
+index bb044f5..65b86ba 100644
+--- a/MenuAPI/MenuController.cs
++++ b/MenuAPI/MenuController.cs
+@@ -475,2 +475,10 @@ namespace MenuAPI
+ #if FIVEM
++            // Match MenuAPI 3.2.4: an invalid control disables both legacy toggle paths.
++            int toggleControl = (int)MenuToggleKey;
++            if (toggleControl < 0 || toggleControl > 402)
++            {
++                await Delay(1_500);
++                return;
++            }
++
+             if (!Game.IsPaused && !IsPauseMenuRestarting() && IsScreenFadedIn() && !IsPlayerSwitchInProgress() && !Game.Player.IsDead && !DisableMenuButtons)

@@ -8,10 +8,10 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — disable MenuAPI's legacy keyboard toggle when vMenu supplies its own binding (MenuAPI DLL) |
+| Latest change | November 17, 2026 — backport the full upstream guard for MenuAPI's legacy menu toggle (MenuAPI DLL) |
 | `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
-| `build/vMenu/MenuAPI.dll` | `6ac2d121fc226bbb1df8d46535484b71849b20db661d6758522ef79cca918a59` |
+| `build/vMenu/MenuAPI.dll` | `c153b57b18f0c85f47a33b8d2684e9ae7ccbfa4a402fdee56506a8e5b2821067` |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll build/vMenu/MenuAPI.dll`.
@@ -20,6 +20,39 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — backport the full legacy menu toggle guard (MenuAPI DLL)
+
+Stock vMenu 3.8.7 uses [MenuAPI 3.2.4](https://github.com/TomGrobbe/vMenu/pull/584).
+With the legacy toggle set to `-1`, it
+[returns before polling either input path](https://github.com/TomGrobbe/MenuAPI/blob/v3.2.4/MenuAPI/MenuController.cs#L450-L464).
+The earlier PSRP patch guarded only keyboard input and the `V` report persisted.
+This backport applies the same early exit to MenuAPI 3.2.2. The explicit vMenu
+key mappings, including the `F1` default, are still registered by vMenu. The
+legacy controller hold is skipped with the rest of the legacy handler.
+
+Rebuild from [MenuAPI v3.2.2](https://github.com/TomGrobbe/MenuAPI/tree/v3.2.2)
+at `8787b7916204e605ed0827da7a93c4462282fa09` with .NET SDK 9.0.321 and
+[the legacy toggle patch](../tools/menuapi/skip-disabled-legacy-toggle.patch).
+Apply it with `git apply` inside that checkout. Build with
+`dotnet build MenuAPI/MenuAPI.csproj -c "Release FiveM" --nologo -p:IncludeSourceRevisionInInformationalVersion=false`
+and map the checkout path to `/_/MenuAPI` with `-p:PathMap`. The output is
+`MenuAPI/bin/Release FiveM/net452/MenuAPI.dll`.
+
+IL comparison against an unpatched build with the same SDK limits the change
+to `ProcessToggleMenuButton`. Local tests cover skipping both input paths for
+unset or out-of-range controls and preserving both paths for valid controls.
+The frame-cost, client-feature, vehicle-convenience and face-selection tests
+passed. In-game verification is pending.
+
+Verify the installed `MenuAPI.dll` against the earlier November 17 release
+(`6ac2d121fc226bbb1df8d46535484b71849b20db661d6758522ef79cca918a59`).
+If the keyboard-only patch was rolled back, the recorded stock hash is
+`8851e2ad462e2a7b8149802fd4a56522067e3ac6b122fcac4641d61800f1a472`.
+Replace only `MenuAPI.dll` and restart `vMenu`. On the affected artifact,
+verify `V` switches the camera, `F1` opens and closes vMenu, and any configured
+controller binding works. This package is tagged `build-2026-11-17-2` to
+preserve the first same-day release.
 
 ## November 17, 2026 — camera key opening vMenu (MenuAPI DLL)
 
@@ -32,7 +65,7 @@ explicit vMenu binding and MenuAPI's controller handling remain available.
 
 Build from the [MenuAPI v3.2.2 tag](https://github.com/TomGrobbe/MenuAPI/tree/v3.2.2)
 at `8787b7916204e605ed0827da7a93c4462282fa09` with .NET SDK 9.0.321. Apply
-[the keyboard toggle patch](../tools/menuapi/disable-legacy-keyboard-toggle.patch)
+[the keyboard toggle patch from the first November 17 release](https://github.com/Georgie15/vmenu-oxlib/blob/build-2026-11-17/tools/menuapi/disable-legacy-keyboard-toggle.patch)
 with `git apply` inside that checkout, then run
 `dotnet build MenuAPI/MenuAPI.csproj -c "Release FiveM" --nologo -p:IncludeSourceRevisionInInformationalVersion=false`.
 The output is `MenuAPI/bin/Release FiveM/net452/MenuAPI.dll`. The shipped
