@@ -47,9 +47,16 @@ local function newServer()
         return row and { { data = row.data, created = 1762700000 } } or {}
     end
     _G.exports = { oxmysql = db }
+    -- Both scripts register through the request guard; a fresh one per server. A second passes
+    -- between calls, as in the menu, so its rate limit (10 at once, then 3 a second) never decides these.
+    s.now = 100000
+    _G.GetGameTimer = function() return s.now end
+    _G.GetConvar = function(_, default) return default end
+    _G.GetConvarInt = function(_, default) return default end
+    dofile('tests/lua/request_guard.lua')()
     assert(load(readFile('build/vMenu/server/oufitCodes.lua'), '@server/oufitCodes.lua'))()
     assert(load(readFile('build/vMenu/server/vehicleCodes.lua'), '@server/vehicleCodes.lua'))()
-    function s.call(name, src, ...) return s.callbacks[name](src, ...) end
+    function s.call(name, src, ...) s.now = s.now + 1000; return s.callbacks[name](src, ...) end
     function s.expire() local fns = s.timeouts; s.timeouts = {}; for _, fn in ipairs(fns) do fn() end end
     return s
 end

@@ -84,7 +84,13 @@ local function validate(payload)
     return clean, count
 end
 
-lib.callback.register('vMenu:backups:info', function(source)
+-- Through the request guard (server/guard/requestGuard.lua). A refused request gets the usual
+-- "try again" reply; the payload checks stay below, where they have their own messages.
+local TRY_AGAIN = 'Please wait a moment and try again.'
+
+VMenuGuard.callback('vMenu:backups:info', {
+    reject = function() return false, TRY_AGAIN end,
+}, function(source)
     if not backupsEnabled() then return false, 'Save backups are disabled on this server.' end
     local license = licenseOf(source)
     if not license then return false, 'Your Rockstar license could not be read.' end
@@ -99,7 +105,9 @@ lib.callback.register('vMenu:backups:info', function(source)
     return { entries = row.entries, updated = row.updated }
 end)
 
-RegisterNetEvent('vMenu:backups:upload', function(payload)
+VMenuGuard.netEvent('vMenu:backups:upload', {
+    reject = function(src) TriggerClientEvent('vMenu:backups:uploadResult', src, false, TRY_AGAIN) end,
+}, function(payload)
     local src = source
     local function reply(ok, message)
         TriggerClientEvent('vMenu:backups:uploadResult', src, ok, message)
@@ -127,7 +135,9 @@ RegisterNetEvent('vMenu:backups:upload', function(payload)
     reply(true, ('Backed up %d saves to the server.'):format(countOrReason))
 end)
 
-RegisterNetEvent('vMenu:backups:download', function()
+VMenuGuard.netEvent('vMenu:backups:download', {
+    reject = function(src) TriggerClientEvent('vMenu:backups:restoreFailed', src, TRY_AGAIN) end,
+}, function()
     local src = source
     local function fail(message)
         TriggerClientEvent('vMenu:backups:restoreFailed', src, message)

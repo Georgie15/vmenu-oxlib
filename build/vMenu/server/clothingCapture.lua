@@ -8,16 +8,25 @@
 local MAX_BYTES = 4 * 1024 * 1024
 local lastCapture = {}
 
-RegisterNetEvent("vMenu:ClothingCapture:Save", function(payload)
+-- Through the request guard (server/guard/requestGuard.lua), which checks the ace and that the
+-- capture is text; a refused request gets the matching reply.
+local REFUSED = {
+    denied = "You aren't allowed to save clothing captures (vMenu.ClothingCapture).",
+    malformed = "That capture is too large or damaged.",
+    ["rate-limited"] = "Please wait a moment and try again.",
+}
+
+VMenuGuard.netEvent("vMenu:ClothingCapture:Save", {
+    permission = function(src) return IsPlayerAceAllowed(src, "vMenu.ClothingCapture") end,
+    permissionName = "vMenu.ClothingCapture",
+    args = { VMenuGuard.string() },
+    reject = function(src, why) TriggerClientEvent("vMenu:ClothingCapture:Saved", src, REFUSED[why]) end,
+}, function(payload)
     local src = source
     local function reply(message)
         TriggerClientEvent("vMenu:ClothingCapture:Saved", src, message)
     end
 
-    if not IsPlayerAceAllowed(src, "vMenu.ClothingCapture") then
-        reply("You aren't allowed to save clothing captures (vMenu.ClothingCapture).")
-        return
-    end
     local now = os.time()
     if lastCapture[src] and now - lastCapture[src] < 30 then
         reply("Wait 30 seconds between captures.")

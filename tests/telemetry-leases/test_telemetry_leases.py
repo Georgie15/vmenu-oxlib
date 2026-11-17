@@ -28,6 +28,8 @@ client = read('vMenu/GodmodeTelemetry.cs')
 server = read('vMenuServer/GodmodeTelemetry.cs')
 noclip = read('vMenu/Noclip.cs')
 perms = read('SharedClasses/PermissionsManager.cs')
+guard = read('vMenuServer/RequestGuard.cs')
+guard_core = read('vMenuServer/RequestGuardCore.cs')
 
 
 def member(source, pattern):
@@ -43,6 +45,7 @@ assert '"vMenu:PSRP:GodmodeState"' in client and '"vMenu:PSRP:NoclipState"' in c
 assert server.count('[Tick]') == 1, 'server: one renewal tick for both leases'
 assert '[EventHandler("vMenu:PSRP:GodmodeState")]' in server, 'server still accepts the older client god mode event'
 assert '[EventHandler("vMenu:PSRP:NoclipState")]' in server and '[EventHandler("playerDropped")]' in server
+assert server.count('RequestGuard.Admit(source, RequestGuard.') == 2, 'both heartbeats go through the request guard'
 assert 'private const string GodmodeReason = "vMenu god mode";' in server
 assert 'private const string NoclipReason = "vMenu noclip";' in server
 assert server.count('GrantInvincibilityGrace(') == 1, 'one export call site'
@@ -125,6 +128,7 @@ namespace CitizenFX.Core
         protected ExportDictionary Exports { get; } = new ExportDictionary();
         public static Task Delay(int ms) { World.Now += ms; return Task.CompletedTask; }
         public static void TriggerServerEvent(string name, params object[] args) { World.Sent.Add(name + "=" + args[0]); }
+        public static void TriggerEvent(string name, params object[] args) { World.Reports.Add(name + "=" + string.Join(",", args)); }
     }
 }
 
@@ -137,6 +141,9 @@ namespace CitizenFX.Core.Native
         public static bool GetPlayerInvincible(string source) { World.NativeCalls++; return World.Invincible.Contains(source); }
         public static bool DoesPlayerExist(string source) { World.NativeCalls++; return World.Online.Contains(source); }
         public static string GetResourceState(string resource) { World.NativeCalls++; return World.TelemetryState; }
+        // The request guard's convars: its rate limit is off here (tests/request-guard covers it).
+        public static string GetConvar(string name, string fallback) => name == "vmenu_guard_rate_limits" ? "false" : fallback;
+        public static int GetConvarInt(string name, int fallback) => fallback;
     }
 }
 
@@ -157,6 +164,7 @@ public static class World
     public static readonly List<string> Grants = new List<string>();
     public static readonly List<string> Sent = new List<string>();
     public static readonly List<string> Log = new List<string>();
+    public static readonly List<string> Reports = new List<string>();
     public static readonly FakeTelemetry Telemetry = new FakeTelemetry();
 }
 
@@ -290,7 +298,10 @@ static class Program
         World.Aces.Add("3|vMenu.NoClip");
         Check(Renew(s).Count == 0, "the revoked request was cleared");
         s.OnNoclipState(p, true);
-        s.OnPlayerDropped(p, "quit");
+        s.OnPlayerDropped("net:3");
+        Check(Renew(s).SequenceEqual(new[] { "3:4:vMenu noclip" }), "a client's copy of playerDropped is ignored");
+        s.OnNoclipState(p, true);
+        s.OnPlayerDropped("internal-net:3");
         World.NativeCalls = 0;
         Check(Renew(s).Count == 0 && World.NativeCalls == 0, "playerDropped clears the request");
         s.OnNoclipState(p, true);
@@ -303,7 +314,15 @@ static class Program
         Check(Renew(s).Count == 0, "psrp_telemetry not started: no export call");
         World.TelemetryState = "started";
         Check(Renew(s).SequenceEqual(new[] { "3:4:vMenu noclip" }), "the request survives a telemetry restart");
-        Console.WriteLine("PASS: cleared on inactive, revoked ACE, playerDropped and a missing player");
+        s.OnNoclipState(p, false);
+        World.Reports.Clear();
+        s.OnNoclipState(p, "yes");
+        s.OnGodmodeState(null, true);
+        Check(World.Reports.Count == 2 && World.Reports[0].StartsWith("vMenu:security:report=malformed,vMenu:PSRP:NoclipState,3,")
+            && World.Reports[1].StartsWith("vMenu:security:report=no-source,vMenu:PSRP:GodmodeState,0,"), "a malformed or sourceless heartbeat is logged: " + string.Join(" | ", World.Reports));
+        World.NativeCalls = 0;
+        Check(Renew(s).Count == 0 && World.NativeCalls == 0, "and changes nothing");
+        Console.WriteLine("PASS: cleared on inactive, revoked ACE, playerDropped (the server's, not a client's copy) and a missing player");
 
         // God mode and noclip together, and the older client's god mode event on its own.
         Reset();
@@ -374,5 +393,7 @@ with tempfile.TemporaryDirectory(prefix='vmenu-telemetry-leases-') as temp:
     (work / 'Program.cs').write_text(program, encoding='utf-8')
     (work / 'ClientGodmodeTelemetry.cs').write_text(client, encoding='utf-8')
     (work / 'ServerGodmodeTelemetry.cs').write_text(clocked, encoding='utf-8')
+    (work / 'RequestGuard.cs').write_text(guard, encoding='utf-8')
+    (work / 'RequestGuardCore.cs').write_text(guard_core, encoding='utf-8')
     subprocess.run(['dotnet', 'run', '--project', str(work / 'Tests.csproj'),
                     '--configuration', 'Release', '--verbosity', 'quiet'], check=True)
