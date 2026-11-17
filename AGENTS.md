@@ -46,7 +46,8 @@ Instructions for any AI agent or developer working in this repository.
 - MenuAPI 4 draws the menus on `build/vMenu/storage.html` with the web files in
   `build/vMenu/menuapi/`, copied from the MenuAPI.FiveM package of the same
   version as the DLL. Keep `storage.html`'s own styles scoped to
-  `#vmenu-storage`, so they can't restyle the menu.
+  `#vmenu-storage`, so they can't restyle the menu. The menu's skin is
+  `build/vMenu/themes/psrp-neon.css`, linked from `storage.html`.
 
 ## Tests
 

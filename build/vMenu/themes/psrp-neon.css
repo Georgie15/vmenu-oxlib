@@ -1,0 +1,31 @@
+/*
+  PSRP Neon: the vMenu skin. Purple-to-blue highlight on dark violet glass, to match the PSRP
+  banner. PSRP purple and blue are the same colours as the ped pack prompt in storage.html.
+
+  MenuAPI 4 reads these tokens; anything not set keeps MenuAPI's default (the GTA look).
+  Token reference: MenuAPI 4.1.3 docs, "Theming and banners". storage.html links this file
+  after MenuAPI's own stylesheets.
+*/
+#menuapi {
+  --menuapi-radius: 10px;
+  --menuapi-shadow: 0 0 0 1px rgb(138 43 226 / 55%), 0 10px 30px rgb(40 0 80 / 45%);
+  --menuapi-subtitle-bg: linear-gradient(90deg, rgb(34 12 64 / 97%), rgb(14 10 34 / 97%));
+  --menuapi-freemode: rgb(214 160 255);
+  --menuapi-rows-bg: rgb(18 10 34 / 84%);
+  --menuapi-row-text: rgb(236 230 250);
+  --menuapi-row-selected-bg: linear-gradient(90deg, rgb(138 43 226), rgb(74 92 255));
+  --menuapi-row-selected-text: rgb(255 255 255);
+  --menuapi-row-selected-disabled-text: rgb(215 195 245);
+  --menuapi-desc-bg: rgb(18 10 34 / 84%);
+  --menuapi-desc-rule: rgb(138 43 226 / 85%);
+  --menuapi-stat-upgrade: rgb(150 110 255);
+}
+
+/* The key hints in the bottom right. */
+#menuapi-buttons {
+  --menuapi-buttons-bg: rgb(18 10 34 / 90%);
+  --menuapi-buttons-radius: 10px;
+  --menuapi-buttons-border: 1px solid rgb(138 43 226 / 55%);
+  --menuapi-buttons-key-bg: rgb(138 43 226);
+  --menuapi-buttons-key-text: rgb(255 255 255);
+}

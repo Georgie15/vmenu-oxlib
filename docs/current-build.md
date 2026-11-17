@@ -8,7 +8,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release I: MenuAPI 4.1.3 (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`), on top of release H. **Testing on branch `perf/menuapi4`; `main` keeps `build-2026-11-17-3`** |
+| Latest change | November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`), on top of release H. **Testing on branch `perf/menuapi4`; `main` keeps `build-2026-11-17-3`** |
 | `build/vMenu/vMenuClient.net.dll` | `8219b71e57a0ce169eced482a4391b50d0fb39e661ef952efef073477bc1142f` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
@@ -21,7 +21,7 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
-## November 17, 2026 — release I: MenuAPI 4.1.3 (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`) — TESTING, branch `perf/menuapi4`
+## November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`) — TESTING, branch `perf/menuapi4`
 
 **Status: test build, not verified in game, not on `main`.** It is built on top
 of release H (`perf/closed-menu`), so testing it tests release H too. Until it
@@ -61,9 +61,21 @@ and its toggle key is a key binding, so the V-key bug can't happen.
     `showImportExport`. Before, any other message opened the import/export
     screen, and MenuAPI messages this page all the time. Nothing sends
     `showImportExport` (that screen was unreachable before as well).
-- **`fxmanifest.lua`** adds `menuapi/**/*` to `files`.
+- **`fxmanifest.lua`** adds `menuapi/**/*` and `themes/**/*` to `files`.
 - **`menuapi/`**: MenuAPI's web files from the MenuAPI.FiveM 4.1.3 package, and
   its license texts.
+- **The PSRP Neon skin**, `themes/psrp-neon.css`, chosen by the owner from four
+  previews. It sets MenuAPI 4's theme tokens:
+  - a purple-to-blue highlight (`#8a2be2` to `#4a5cff`, the ped pack prompt's
+    colours) with white text;
+  - dark violet rows, subtitle and description;
+  - a light purple subtitle;
+  - 10 px corners and a faint purple edge;
+  - a matching key hints bar.
+
+  `storage.html` links it after MenuAPI's own stylesheets. Removing that one
+  `<link>` line brings back the plain GTA look; no DLL change is needed either
+  way. It is written for PSRP and copies none of Enhanced's GPL themes.
 - **Client**, only what 4.x no longer has:
   - Menus close when the ped dies, in `MainMenu.OnTick`, as 3.2.2 did. 4.x's
     own close-on-death sits behind its "player is dead" draw gate and never
@@ -89,9 +101,9 @@ and its toggle key is a key binding, so the V-key bug can't happen.
     the player switches between keyboard and controller.
 
 **What players will notice.**
-- Menus look the same. No skin is set, and the banner still comes from
-  `stream/commonmenu.ytd`. The browser draws them, so text may be slightly
-  sharper.
+- Menus use the PSRP Neon skin. Layout, fonts and the banner (the game's
+  `commonmenu` texture, as before) are unchanged. The browser draws the menu,
+  so text may be slightly sharper.
 - Menu keys are FiveM key bindings, listed in Settings > Key Bindings > FiveM
   ("Menu up", "Menu select"…), and can be rebound.
   - By default: arrow keys, Enter, Backspace or Escape, and the mouse wheel.
@@ -198,13 +210,14 @@ dotnet build MenuAPI/MenuAPI.csproj -c Release -p:MenuApiFlavor=Legacy --nologo 
 2. Check that the installed `storage.html` and `fxmanifest.lua` match
    `build-2026-11-17-3`'s by content. If not, stop.
 3. Copy `vMenuClient.net.dll`, `MenuAPI.dll`, `storage.html`,
-   `fxmanifest.lua` and the `menuapi` folder.
+   `fxmanifest.lua`, and the `menuapi` and `themes` folders.
 4. Run `refresh`, then `restart vMenu`, because the manifest changed. Have
    players reconnect.
 
 **In-game check:** everything in release H's list, plus:
-- F1 opens and closes the menu. It looks as before and navigates with the
-  arrows, Enter, Backspace, Escape and the mouse wheel.
+- F1 opens and closes the menu in the PSRP Neon skin, including the key hints
+  in the bottom right. It navigates with the arrows, Enter, Backspace, Escape
+  and the mouse wheel.
 - Left and right both toggle checkboxes; left on a plain button goes back.
 - Spacer headings ("↓ Vehicle Categories ↓") are centred.
 - Dying with a menu open closes it.
@@ -224,7 +237,8 @@ dotnet build MenuAPI/MenuAPI.csproj -c Release -p:MenuApiFlavor=Legacy --nologo 
 
 **Roll back:** copy back all four of `build-2026-11-17-3`'s files
 (`vMenuClient.net.dll`, `MenuAPI.dll`, `storage.html`, `fxmanifest.lua`),
-delete `menuapi/`, `refresh` and `restart vMenu`. These go back together:
+delete `menuapi/` and `themes/`, `refresh` and `restart vMenu`. These go
+back together:
 unlike release H, this client doesn't run with MenuAPI 3.2.2, and MenuAPI 4
 needs the new page. To keep release H only, use release H's two DLLs with
 `build-2026-11-17-3`'s `storage.html` and `fxmanifest.lua`.

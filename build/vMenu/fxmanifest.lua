@@ -30,7 +30,9 @@ files {
     'config/clothing-layouts.json',
     'storage.html',
     -- MenuAPI 4 draws the menus on storage.html with these files.
-    'menuapi/**/*'
+    'menuapi/**/*',
+    -- The menu skin (PSRP Neon), linked from storage.html.
+    'themes/**/*'
 }
 
 client_scripts {
