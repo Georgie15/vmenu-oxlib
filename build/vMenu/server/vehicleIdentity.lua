@@ -10,7 +10,13 @@ local function allowed(src,model)
     if category then return IsPlayerAceAllowed(src,'vMenu.VehicleSpawner.'..category) end
     return IsPlayerAceAllowed(src,'vMenu.VehicleSpawner.SpawnByName')
 end
-lib.callback.register('vMenu:vehicleIdentityTicket',function(src,p)
+-- Through the request guard (server/guard/requestGuard.lua). not_authorized is a normal answer
+-- (any vMenu spawn asks), so it isn't logged as denied.
+local REFUSED={['rate-limited']={error='throttled'},malformed={error='invalid_model'}}
+VMenuGuard.callback('vMenu:vehicleIdentityTicket',{
+    args={VMenuGuard.optional(VMenuGuard.table)},
+    reject=function(_,why) return REFUSED[why] or {error='throttled'} end,
+},function(src,p)
     p=p or {}; local model=tonumber(p.model)
     if not model or model~=math.floor(model) then return {error='invalid_model'} end
     model=model & 0xffffffff

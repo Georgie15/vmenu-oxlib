@@ -261,10 +261,22 @@ namespace vMenuServer
         }
         #endregion
 
+        /// <summary>
+        /// The client asks for its permissions at start (and retries while its menu isn't built).
+        /// A bootstrap runs ~300 ace checks and they queue one player at a time, so a client's
+        /// requests are rate-limited. Another resource on this server calling
+        /// TriggerEvent("vMenu:RequestPermissions", id) (DiscordAcePerms on a role refresh) has no
+        /// event source, so it never named a player; it is left alone, as before: not limited, not logged.
+        /// </summary>
         [EventHandler("vMenu:RequestPermissions")]
-        internal void RequestPermissions([FromSource] Player sourcePlayer)
+        internal void RequestPermissions([FromSource] Player sourcePlayer, [FromSource] string source)
         {
             if (sourcePlayer == null)
+            {
+                return;
+            }
+
+            if (RequestSource.IsClient(source) && !RequestGuard.Admit(sourcePlayer, RequestGuard.RequestPermissions))
             {
                 return;
             }
@@ -427,81 +439,113 @@ namespace vMenuServer
         /// moment to sync, so the check is retried for about two seconds.
         /// </summary>
         [EventHandler("vMenu:SetPersonalVehicle")]
-        internal async void SetPersonalVehicle([FromSource] Player source, int vehicleNetId)
+        internal async void SetPersonalVehicle([FromSource] Player source, object vehicleNetIdArg)
         {
-            if (source == null)
+            var request = RequestGuard.SetPersonalVehicle;
+            if (!RequestGuard.Admit(source, request))
             {
                 return;
             }
-
-            var playerHandle = source.Handle;
-            var token = personalVehicles.Begin(playerHandle);
-            if (vehicleNetId == 0)
+            if (!RequestPayload.TryInt(vehicleNetIdArg, out var vehicleNetId) || vehicleNetId < 0)
             {
+                RequestGuard.Malformed(source, request, "the vehicle net id is not a whole number of 0 or more");
                 return;
             }
 
-            for (var attempt = 0; attempt < 8; attempt++)
+            try
             {
-                if (!DoesPlayerExist(playerHandle) || !personalVehicles.IsCurrent(playerHandle, token))
+                var playerHandle = source.Handle;
+                var token = personalVehicles.Begin(playerHandle);
+                if (vehicleNetId == 0)
                 {
                     return;
                 }
 
-                var vehicle = NetworkGetEntityFromNetworkId(vehicleNetId);
-                var ped = GetPlayerPed(playerHandle);
-                if (vehicle != 0 && DoesEntityExist(vehicle) && ped != 0 && GetPedInVehicleSeat(vehicle, -1) == ped)
+                for (var attempt = 0; attempt < 8; attempt++)
                 {
-                    personalVehicles.Set(playerHandle, token, vehicleNetId, vehicle, (uint)GetEntityModel(vehicle));
-                    return;
-                }
+                    if (!DoesPlayerExist(playerHandle) || !personalVehicles.IsCurrent(playerHandle, token))
+                    {
+                        return;
+                    }
 
-                await Delay(250);
+                    var vehicle = NetworkGetEntityFromNetworkId(vehicleNetId);
+                    var ped = GetPlayerPed(playerHandle);
+                    if (vehicle != 0 && DoesEntityExist(vehicle) && ped != 0 && GetPedInVehicleSeat(vehicle, -1) == ped)
+                    {
+                        personalVehicles.Set(playerHandle, token, vehicleNetId, vehicle, (uint)GetEntityModel(vehicle));
+                        return;
+                    }
+
+                    await Delay(250);
+                }
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
             }
         }
 
         [EventHandler("vMenu:GetOutOfCar")]
-        internal void GetOutOfCar([FromSource] Player source, int vehicleNetId)
+        internal void GetOutOfCar([FromSource] Player source, object vehicleNetIdArg)
         {
+            var request = RequestGuard.GetOutOfCar;
+            if (!RequestGuard.Admit(source, request))
+            {
+                return;
+            }
+
             if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.PVKickPassengers, source)
                 && !PermissionsManager.IsAllowed(PermissionsManager.Permission.PVAll, source))
             {
-                LogUnauthorized(source, "vMenu:GetOutOfCar");
+                RequestGuard.Denied(source, request, "vMenu.PersonalVehicle.KickPassengers");
                 return;
             }
 
-            Entity vehicle = Entity.FromNetworkId(vehicleNetId);
-            if (vehicle is null)
+            if (!RequestPayload.TryInt(vehicleNetIdArg, out var vehicleNetId))
             {
+                RequestGuard.Malformed(source, request, "the vehicle net id is not a whole number");
                 return;
             }
 
-            int vehicleHandle = vehicle.Handle;
-            if (!personalVehicles.Owns(source.Handle, vehicleNetId, vehicleHandle, (uint)GetEntityModel(vehicleHandle)))
+            try
             {
-                source.TriggerEvent("vMenu:Notify", "You can only remove passengers from your own personal vehicle. Drive it once to set it as your personal vehicle.");
-                return;
-            }
-
-            for (int i = -1; i < 15; i++)
-            {
-                int pedHandle = GetPedInVehicleSeat(vehicleHandle, i);
-                if (pedHandle == 0 || !IsPedAPlayer(pedHandle))
+                Entity vehicle = Entity.FromNetworkId(vehicleNetId);
+                if (vehicle is null)
                 {
-                    continue;
+                    return;
                 }
 
-                int playerHandle = NetworkGetEntityOwner(pedHandle);
-                Player player = GetPlayerFromServerId(playerHandle);
-
-                if (player is null || player == source)
+                int vehicleHandle = vehicle.Handle;
+                if (!personalVehicles.Owns(source.Handle, vehicleNetId, vehicleHandle, (uint)GetEntityModel(vehicleHandle)))
                 {
-                    continue;
+                    source.TriggerEvent("vMenu:Notify", "You can only remove passengers from your own personal vehicle. Drive it once to set it as your personal vehicle.");
+                    return;
                 }
 
-                int warpOutFlag = 16;
-                TaskLeaveVehicle(pedHandle, vehicleHandle, warpOutFlag);
-                player.TriggerEvent("vMenu:Notify", "The owner of the vehicle has kicked you out.");
+                for (int i = -1; i < 15; i++)
+                {
+                    int pedHandle = GetPedInVehicleSeat(vehicleHandle, i);
+                    if (pedHandle == 0 || !IsPedAPlayer(pedHandle))
+                    {
+                        continue;
+                    }
+
+                    int playerHandle = NetworkGetEntityOwner(pedHandle);
+                    Player player = GetPlayerFromServerId(playerHandle);
+
+                    if (player is null || player == source)
+                    {
+                        continue;
+                    }
+
+                    int warpOutFlag = 16;
+                    TaskLeaveVehicle(pedHandle, vehicleHandle, warpOutFlag);
+                    player.TriggerEvent("vMenu:Notify", "The owner of the vehicle has kicked you out.");
+                }
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
             }
         }
         #endregion
@@ -510,7 +554,8 @@ namespace vMenuServer
         [EventHandler("vMenu:ClearArea")]
         internal void ClearAreaNearPos([FromSource] Player source)
         {
-            if (source == null) return;
+            var request = RequestGuard.ClearArea;
+            if (!RequestGuard.Admit(source, request)) return;
 
             // The client shows Clear Area to anyone with vMenu.MiscSettings.ClearArea; this used to
             // require MiscSettings.All, so moderators pressed it and nothing happened.
@@ -518,29 +563,40 @@ namespace vMenuServer
                 IsPlayerAceAllowed(source.Handle, "vMenu.MiscSettings.ClearArea") ||
                 IsPlayerAceAllowed(source.Handle, "vMenu.MiscSettings.All") ||
                 IsPlayerAceAllowed(source.Handle, "vMenu.Everything");
-            if (!allowed) return;
-
-            long now = GetGameTimer();   // <-- long
-            Counter st;
-            if (_clearReqs.TryGetValue(source.Handle, out st))
+            if (!allowed)
             {
-                if (now - st.WindowStart > CLEAR_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
-                st.Hits++;
-                _clearReqs[source.Handle] = st;
-                if (st.Hits > CLEAR_REQ_MAX_BURST) return;
-            }
-            else
-            {
-                _clearReqs[source.Handle] = new Counter { Hits = 1, WindowStart = now };
-            }
-
-            Ped ped = source.Character;
-            if (ped is null || !DoesEntityExist(ped.Handle))
-            {
+                RequestGuard.Denied(source, request, "vMenu.MiscSettings.ClearArea");
                 return;
             }
 
-            TriggerClientEvent("vMenu:ClearArea", ped.Position);
+            try
+            {
+                long now = GetGameTimer();   // <-- long
+                Counter st;
+                if (_clearReqs.TryGetValue(source.Handle, out st))
+                {
+                    if (now - st.WindowStart > CLEAR_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
+                    st.Hits++;
+                    _clearReqs[source.Handle] = st;
+                    if (st.Hits > CLEAR_REQ_MAX_BURST) return;
+                }
+                else
+                {
+                    _clearReqs[source.Handle] = new Counter { Hits = 1, WindowStart = now };
+                }
+
+                Ped ped = source.Character;
+                if (ped is null || !DoesEntityExist(ped.Handle))
+                {
+                    return;
+                }
+
+                TriggerClientEvent("vMenu:ClearArea", ped.Position);
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
+            }
         }
         #endregion
 
@@ -662,144 +718,252 @@ namespace vMenuServer
         #endregion
 
         #region Sync weather & time with clients
+        // These also run with no source when the vmenuserver console command triggers them; that
+        // path skips the guard and the permission checks, as before.
         [EventHandler("vMenu:UpdateServerWeather")]
-        internal void UpdateWeather([FromSource] Player source, string newWeather, bool dynamicWeatherNew, bool enableSnow)
+        internal void UpdateWeather([FromSource] Player source, object newWeatherArg, object dynamicWeatherArg, object enableSnowArg)
         {
+            var request = RequestGuard.UpdateServerWeather;
+            if (source != null && !RequestGuard.Admit(source, request))
+            {
+                return;
+            }
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.Menu") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                LogUnauthorized(source, "vMenu:UpdateServerWeather");
+                RequestGuard.Denied(source, request, "vMenu.WeatherOptions.Menu");
+                return;
+            }
+            if (!RequestPayload.TryString(newWeatherArg, 32, out var newWeather)
+                || !RequestPayload.TryBool(dynamicWeatherArg, out var dynamicWeatherNew)
+                || !RequestPayload.TryBool(enableSnowArg, out var enableSnow))
+            {
+                RequestGuard.Malformed(source, request, "expected a weather name (up to 32 characters) and two true/false values");
                 return;
             }
 
-            if (newWeather == "XMAS" || newWeather == "SNOWLIGHT" || newWeather == "SNOW" || newWeather == "BLIZZARD")
+            try
             {
-                enableSnow = true;
+                if (newWeather == "XMAS" || newWeather == "SNOWLIGHT" || newWeather == "SNOW" || newWeather == "BLIZZARD")
+                {
+                    enableSnow = true;
+                }
+
+                CurrentWeather = newWeather;
+                DynamicWeatherEnabled = dynamicWeatherNew;
+                ManualSnowEnabled = enableSnow;
+
+                lastWeatherChange = GetGameTimer();
             }
-
-            CurrentWeather = newWeather;
-            DynamicWeatherEnabled = dynamicWeatherNew;
-            ManualSnowEnabled = enableSnow;
-
-            lastWeatherChange = GetGameTimer();
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
+            }
         }
 
         [EventHandler("vMenu:UpdateServerBlackout")]
-        internal void UpdateBlackout([FromSource] Player source, bool value)
+        internal void UpdateBlackout([FromSource] Player source, object valueArg)
         {
+            var request = RequestGuard.UpdateServerBlackout;
+            if (source != null && !RequestGuard.Admit(source, request))
+            {
+                return;
+            }
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.Blackout") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                LogUnauthorized(source, "vMenu:UpdateServerBlackout");
+                RequestGuard.Denied(source, request, "vMenu.WeatherOptions.Blackout");
+                return;
+            }
+            if (!RequestPayload.TryBool(valueArg, out var value))
+            {
+                RequestGuard.Malformed(source, request, "expected true or false");
                 return;
             }
 
-            BlackoutEnabled = value;
+            try
+            {
+                BlackoutEnabled = value;
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
+            }
         }
 
         [EventHandler("vMenu:UpdateServerVehicleBlackout")]
-        internal void UpdateVehicleBlackout([FromSource] Player source, bool value)
+        internal void UpdateVehicleBlackout([FromSource] Player source, object valueArg)
         {
+            var request = RequestGuard.UpdateServerVehicleBlackout;
+            if (source != null && !RequestGuard.Admit(source, request))
+            {
+                return;
+            }
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.VehicleBlackout") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.All"))
             {
-                LogUnauthorized(source, "vMenu:UpdateServerVehicleBlackout");
+                RequestGuard.Denied(source, request, "vMenu.WeatherOptions.VehicleBlackout");
+                return;
+            }
+            if (!RequestPayload.TryBool(valueArg, out var value))
+            {
+                RequestGuard.Malformed(source, request, "expected true or false");
                 return;
             }
 
-            VehicleBlackoutEnabled = value;
+            try
+            {
+                VehicleBlackoutEnabled = value;
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
+            }
         }
 
         [EventHandler("vMenu:UpdateServerWeatherCloudsType")]
-        internal void UpdateWeatherCloudsType([FromSource] Player source, bool removeClouds)
+        internal void UpdateWeatherCloudsType([FromSource] Player source, object removeCloudsArg)
         {
+            var request = RequestGuard.UpdateServerWeatherCloudsType;
+            if (source != null && !RequestGuard.Admit(source, request))
+            {
+                return;
+            }
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.RemoveClouds") && !IsPlayerAceAllowed(source.Handle, "vMenu.WeatherOptions.RandomizeClouds"))
             {
-                LogUnauthorized(source, "vMenu:UpdateServerWeatherCloudsType");
+                RequestGuard.Denied(source, request, "vMenu.WeatherOptions.RemoveClouds or RandomizeClouds");
+                return;
+            }
+            if (!RequestPayload.TryBool(removeCloudsArg, out var removeClouds))
+            {
+                RequestGuard.Malformed(source, request, "expected true or false");
                 return;
             }
 
-            if (removeClouds)
+            try
             {
-                TriggerClientEvent("vMenu:SetClouds", 0f, "removed");
+                if (removeClouds)
+                {
+                    TriggerClientEvent("vMenu:SetClouds", 0f, "removed");
+                }
+                else
+                {
+                    var opacity = float.Parse(new Random().NextDouble().ToString());
+                    var type = CloudTypes[new Random().Next(0, CloudTypes.Count)];
+                    TriggerClientEvent("vMenu:SetClouds", opacity, type);
+                }
             }
-            else
+            catch (Exception exception)
             {
-                var opacity = float.Parse(new Random().NextDouble().ToString());
-                var type = CloudTypes[new Random().Next(0, CloudTypes.Count)];
-                TriggerClientEvent("vMenu:SetClouds", opacity, type);
+                RequestGuard.Failed(source, request, exception);
             }
         }
 
         [EventHandler("vMenu:UpdateServerTime")]
-        internal void UpdateTime([FromSource] Player source, int newHours, int newMinutes, bool freezeTimeNew)
+        internal void UpdateTime([FromSource] Player source, object newHoursArg, object newMinutesArg, object freezeTimeArg)
         {
+            var request = RequestGuard.UpdateServerTime;
+            if (source != null && !RequestGuard.Admit(source, request))
+            {
+                return;
+            }
             if (source != null && !IsPlayerAceAllowed(source.Handle, "vMenu.TimeOptions.Menu") && !IsPlayerAceAllowed(source.Handle, "vMenu.TimeOptions.All"))
             {
-                LogUnauthorized(source, "vMenu:UpdateServerTime");
+                RequestGuard.Denied(source, request, "vMenu.TimeOptions.Menu");
+                return;
+            }
+            if (!RequestPayload.TryInt(newHoursArg, out var newHours)
+                || !RequestPayload.TryInt(newMinutesArg, out var newMinutes)
+                || !RequestPayload.TryBool(freezeTimeArg, out var freezeTimeNew))
+            {
+                RequestGuard.Malformed(source, request, "expected an hour, a minute and true/false");
                 return;
             }
 
-            CurrentHours = newHours;
-            CurrentMinutes = newMinutes;
-            FreezeTime = freezeTimeNew;
+            try
+            {
+                CurrentHours = newHours;
+                CurrentMinutes = newMinutes;
+                FreezeTime = freezeTimeNew;
+            }
+            catch (Exception exception)
+            {
+                RequestGuard.Failed(source, request, exception);
+            }
         }
         #endregion
 
         #region Add teleport location (hardened)
+        // A saved location is a short name, a position and a heading: well under 1 KB of JSON.
+        private const int MaxTeleportLocationJson = 4096;
+
         [EventHandler("vMenu:SaveTeleportLocation")]
-        internal void AddTeleportLocation([FromSource] Player source, string locationJson)
+        internal void AddTeleportLocation([FromSource] Player source, object locationJsonArg)
         {
-            if (source == null) return;
+            var request = RequestGuard.SaveTeleportLocation;
+            if (!RequestGuard.Admit(source, request)) return;
 
             if (!PermissionsManager.IsAllowed(PermissionsManager.Permission.MSTeleportSaveLocation, source)
                 && !PermissionsManager.IsAllowed(PermissionsManager.Permission.MSAll, source))
             {
-                LogUnauthorized(source, "vMenu:SaveTeleportLocation");
+                RequestGuard.Denied(source, request, "vMenu.MiscSettings.TeleportSaveLocation");
                 return;
             }
 
-            long now = GetGameTimer();   // <-- long
-            Counter st;
-            if (_saveTpReqs.TryGetValue(source.Handle, out st))
+            if (!RequestPayload.TryString(locationJsonArg, MaxTeleportLocationJson, out var locationJson))
             {
-                if (now - st.WindowStart > SAVE_TP_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
-                st.Hits++;
-                _saveTpReqs[source.Handle] = st;
-                if (st.Hits > SAVE_TP_REQ_MAX_BURST) return;
-            }
-            else
-            {
-                _saveTpReqs[source.Handle] = new Counter { Hits = 1, WindowStart = now };
+                RequestGuard.Malformed(source, request, $"the location is not text of up to {MaxTeleportLocationJson} characters");
+                return;
             }
 
-            TeleportLocation location;
             try
             {
-                location = JsonConvert.DeserializeObject<TeleportLocation>(locationJson);
-            }
-            catch
-            {
-                Log("Teleport location could not be deserialized, location was not saved.", LogLevel.error);
-                return;
-            }
+                long now = GetGameTimer();   // <-- long
+                Counter st;
+                if (_saveTpReqs.TryGetValue(source.Handle, out st))
+                {
+                    if (now - st.WindowStart > SAVE_TP_REQ_WINDOW_MS) { st.Hits = 0; st.WindowStart = now; }
+                    st.Hits++;
+                    _saveTpReqs[source.Handle] = st;
+                    if (st.Hits > SAVE_TP_REQ_MAX_BURST) return;
+                }
+                else
+                {
+                    _saveTpReqs[source.Handle] = new Counter { Hits = 1, WindowStart = now };
+                }
 
-            if (string.IsNullOrWhiteSpace(location.name))
-            {
-                Log("Teleport location could not be deserialized, location was not saved.", LogLevel.error);
-                return;
-            }
+                TeleportLocation location;
+                try
+                {
+                    location = JsonConvert.DeserializeObject<TeleportLocation>(locationJson);
+                }
+                catch
+                {
+                    Log("Teleport location could not be deserialized, location was not saved.", LogLevel.error);
+                    return;
+                }
 
-            if (GetTeleportLocationsData().Any(loc => loc.name == location.name))
-            {
-                Log("A teleport location with this name already exists, location was not saved.", LogLevel.error);
-                return;
+                if (string.IsNullOrWhiteSpace(location.name))
+                {
+                    Log("Teleport location could not be deserialized, location was not saved.", LogLevel.error);
+                    return;
+                }
+
+                if (GetTeleportLocationsData().Any(loc => loc.name == location.name))
+                {
+                    Log("A teleport location with this name already exists, location was not saved.", LogLevel.error);
+                    return;
+                }
+                var locs = GetLocations();
+                locs.teleports.Add(location);
+                if (!SaveResourceFile(GetCurrentResourceName(), "config/locations.json", JsonConvert.SerializeObject(locs, Formatting.Indented), -1))
+                {
+                    Log("Could not save locations.json file, reason unknown.", LogLevel.error);
+                }
+                ConfigManager.InvalidateTeleportLocationsCache();
+                TriggerClientEvent("vMenu:UpdateTeleportLocations", JsonConvert.SerializeObject(locs.teleports));
             }
-            var locs = GetLocations();
-            locs.teleports.Add(location);
-            if (!SaveResourceFile(GetCurrentResourceName(), "config/locations.json", JsonConvert.SerializeObject(locs, Formatting.Indented), -1))
+            catch (Exception exception)
             {
-                Log("Could not save locations.json file, reason unknown.", LogLevel.error);
+                RequestGuard.Failed(source, request, exception);
             }
-            ConfigManager.InvalidateTeleportLocationsCache();
-            TriggerClientEvent("vMenu:UpdateTeleportLocations", JsonConvert.SerializeObject(locs.teleports));
         }
         #endregion
 
@@ -847,9 +1011,17 @@ namespace vMenuServer
             }
         }
 
+        // playerJoining and playerDropped come from the server as "internal-net:<id>". C# handlers also
+        // receive events clients send; FXServer drops client copies of these exact names, and vMenu
+        // checks the source itself as well (older artifacts, other spellings), logging any copy.
         [EventHandler("playerJoining")]
-        internal void OnPlayerJoining([FromSource] Player sourcePlayer)
+        internal void OnPlayerJoining([FromSource] Player sourcePlayer, [FromSource] string source)
         {
+            if (!RequestGuard.IsServerPlayerEvent(source, "playerJoining"))
+            {
+                return;
+            }
+
             joinedPlayers.Add(sourcePlayer.Handle);
             PermissionsManager.SetPermissionsForPlayer(sourcePlayer);
 
@@ -860,8 +1032,15 @@ namespace vMenuServer
         }
 
         [EventHandler("playerDropped")]
-        internal void OnPlayerDropped([FromSource] Player sourcePlayer, string reason)
+        internal void OnPlayerDropped([FromSource] Player sourcePlayer, [FromSource] string source, object reasonArg)
         {
+            if (!RequestGuard.IsServerPlayerEvent(source, "playerDropped"))
+            {
+                return;
+            }
+
+            var reason = reasonArg as string;
+            RequestGuard.Forget(sourcePlayer.Handle);
             personalVehicles.Remove(sourcePlayer.Handle);
             if (!joinedPlayers.Contains(sourcePlayer.Handle))
             {
@@ -903,14 +1082,8 @@ namespace vMenuServer
             return Players[serverId];
         }
 
-        /// <summary>
-        /// Logs a request the sender had no permission for. vMenu's ban system was removed (never
-        /// used; EasyAdmin handles bans), and with vmenu_auto_ban_cheaters off it did nothing at all.
-        /// </summary>
-        private static void LogUnauthorized(Player source, string eventName)
-        {
-            Debug.WriteLine($"^3[vMenu] [WARNING]^7 {source?.Name} ({source?.Handle}) triggered {eventName} without permission.");
-        }
+        // Requests a player had no permission for are logged by RequestGuard.Denied (the security
+        // log). vMenu's ban system was removed (never used; EasyAdmin handles bans).
         #endregion
     }
 }

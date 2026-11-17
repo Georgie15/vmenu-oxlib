@@ -36,11 +36,18 @@ namespace vMenuServer
 
         private readonly Dictionary<string, Heartbeats> requested = new();
 
+        // The permission is not a gate here: anyone may report a mode as off, and an "on" without
+        // the permission just isn't renewed. So no request is logged as denied.
         [EventHandler("vMenu:PSRP:GodmodeState")]
-        internal void OnGodmodeState([FromSource] Player source, bool active)
+        internal void OnGodmodeState([FromSource] Player source, object activeArg)
         {
-            if (source == null)
+            if (!RequestGuard.Admit(source, RequestGuard.GodmodeState))
             {
+                return;
+            }
+            if (!RequestPayload.TryBool(activeArg, out var active))
+            {
+                RequestGuard.Malformed(source, RequestGuard.GodmodeState, "expected true or false");
                 return;
             }
 
@@ -50,10 +57,15 @@ namespace vMenuServer
         }
 
         [EventHandler("vMenu:PSRP:NoclipState")]
-        internal void OnNoclipState([FromSource] Player source, bool active)
+        internal void OnNoclipState([FromSource] Player source, object activeArg)
         {
-            if (source == null)
+            if (!RequestGuard.Admit(source, RequestGuard.NoclipState))
             {
+                return;
+            }
+            if (!RequestPayload.TryBool(activeArg, out var active))
+            {
+                RequestGuard.Malformed(source, RequestGuard.NoclipState, "expected true or false");
                 return;
             }
 
@@ -81,12 +93,17 @@ namespace vMenuServer
             }
         }
 
+        // Only the server's own event ("internal-net:<id>"); MainServer logs a client's copy.
         [EventHandler("playerDropped")]
-        internal void OnPlayerDropped([FromSource] Player source, string reason)
+        internal void OnPlayerDropped([FromSource] string source)
         {
-            if (source != null)
+            if (RequestSource.IsServerPlayerEvent(source))
             {
-                requested.Remove(source.Handle);
+                var handle = RequestSource.PlayerHandle(source);
+                if (handle != null)
+                {
+                    requested.Remove(handle);
+                }
             }
         }
 

@@ -26,7 +26,9 @@ local function telemetry(method, ...)
     end
     return ok and result ~= false
 end
-RegisterNetEvent('vMenu:PSRP:StaminaMode', function(active)
+-- Through the request guard (server/guard/requestGuard.lua). Anyone may report the mode as off,
+-- so the permission isn't a gate and nothing is logged as denied.
+VMenuGuard.netEvent('vMenu:PSRP:StaminaMode', { args = { VMenuGuard.boolean } }, function(active)
     local src = tonumber(source)
     if not src or src <= 0 or type(active) ~= 'boolean' then return end
     if active and allowed(src) then

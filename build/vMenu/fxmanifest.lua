@@ -43,6 +43,8 @@ client_scripts {
 server_scripts {
     'vMenuServer.net.dll',
     'config/config_server.lua',
+    -- The request guard and security log: before server/*.lua, which register through it.
+    'server/guard/requestGuard.lua',
     'server/*.lua'
 }
 

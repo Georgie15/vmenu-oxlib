@@ -10,7 +10,9 @@ local function minTicketIntervalMs()
     return math.max(250, math.floor(GetConvarInt('vmenu_vehicle_spawner_cooldown', 1000) / 2))
 end
 
-RegisterNetEvent('vMenu:telemetry:spawnProvenanceReady', function(version)
+-- Both events go through the request guard (server/guard/requestGuard.lua). A spawn without the
+-- spawner permission is a normal refusal (saved vehicles reach here too), so it isn't logged.
+VMenuGuard.netEvent('vMenu:telemetry:spawnProvenanceReady', {}, function(version)
     local src = tonumber(source)
     if not src or tonumber(version) ~= INTEGRATION_VERSION then return end
     readySources[src] = true
@@ -21,7 +23,9 @@ AddEventHandler('playerDropped', function()
     if src then readySources[src], lastTicketAt[src] = nil, nil end
 end)
 
-RegisterNetEvent('vMenu:telemetry:beginVehicleSpawn', function(request)
+VMenuGuard.netEvent('vMenu:telemetry:beginVehicleSpawn', {
+    args = { VMenuGuard.pattern('^VM%-%x+%-%x+$', 48) },
+}, function(request)
     local src = tonumber(source)
     if not src or type(request) ~= 'string' or #request > 48
             or not request:match('^VM%-%x+%-%x+$') then return end

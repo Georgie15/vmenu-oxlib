@@ -158,6 +158,10 @@ local function newServer(cooldown)
     _G.TriggerClientEvent = function(name, target, ...) srv.toClient[#srv.toClient + 1] = { name = name, target = target, args = { ... } } end
     _G.exports = setmetatable({ psrp_telemetry = { IssueVehicleSpawnTicket = function() srv.issued = srv.issued + 1; return true, 'nonce-' .. srv.issued end } },
         { __call = function(_, name, fn) srv.exportsFn = fn end })
+    -- spawnProvenance.lua registers through the request guard. Its rate limit is off here, so the
+    -- bursts below reach the script's own per-spawn throttle (tests/request-guard covers the guard).
+    _G.GetConvar = function(name, default) if name == 'vmenu_guard_rate_limits' then return 'false' end return default end
+    dofile('tests/lua/request_guard.lua')()
     local realPrint = print
     _G.print = function() end
     assert(load(readFile('build/vMenu/server/spawnProvenance.lua'), '@server/spawnProvenance.lua'))()

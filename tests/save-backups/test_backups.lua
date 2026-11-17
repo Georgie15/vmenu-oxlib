@@ -122,9 +122,13 @@ local function newServer()
         return { data = row.data }
     end
     _G.exports = { oxmysql = db }
+    -- backups.lua registers through the request guard; a fresh one per server.
+    dofile('tests/lua/request_guard.lua')()
     assert(load(readFile('build/vMenu/server/backups.lua'), '@server/backups.lua'))()
 
-    function s.send(src, name, ...) _G.source = src; s.handlers[name](...); _G.source = nil end
+    -- A second passes between a player's requests, as it would in the menu, so the guard's
+    -- rate limit (10 at once, then 3 a second) never decides these checks.
+    function s.send(src, name, ...) s.now = s.now + 1000; _G.source = src; s.handlers[name](...); _G.source = nil end
     function s.info(src) return s.callbacks['vMenu:backups:info'](src) end
     function s.lastReply() return s.client[#s.client] end
     return s

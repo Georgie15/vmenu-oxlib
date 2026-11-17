@@ -39,9 +39,18 @@ local function playerKey(source)
     return GetPlayerIdentifierByType(source, "license") or ("source:" .. source)
 end
 
+-- Both callbacks go through the request guard (server/guard/requestGuard.lua): an id must be a
+-- number and a vehicle a table before the checks below run.
 local userRequestCooldowns = {}
-lib.callback.register(
+VMenuGuard.callback(
     "vMenu:Vehicles:Request",
+    {
+        args = { VMenuGuard.number },
+        reject = function(_, why)
+            if why == "rate-limited" then return false, "You are requesting vehicles too quickly. Please wait a moment." end
+            return false
+        end,
+    },
     function(source, id)
 
         if not vehicleCodesEnabled() then
@@ -85,8 +94,15 @@ lib.callback.register(
 
 local userGenerateCooldowns = {}
 
-lib.callback.register(
+VMenuGuard.callback(
     "vMenu:Vehicles:Generate",
+    {
+        args = { VMenuGuard.table },
+        reject = function(_, why)
+            if why == "rate-limited" then return false, "You are generating vehicles too quickly. Please wait a moment." end
+            return false, "This vehicle can't be shared."
+        end,
+    },
     function(source, data)
 
         if not vehicleCodesEnabled() then
