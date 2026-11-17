@@ -78,7 +78,13 @@ namespace vMenuClient.menus
             var keyMappingId = MainMenu.GetKeyMappingId();
             if (IsAllowed(Permission.PVLockDoors))
             {
-                RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>(async (source, args, rawCommand) => await ToggleLocksFromKey()), false);
+                RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>(async (source, args, rawCommand) =>
+                {
+                    var inputFrame = GetFrameCount();
+                    // Give the tackle key callback time to claim the same input, regardless of dispatch order.
+                    await BaseScript.Delay(0);
+                    await ToggleLocksFromKey(inputFrame);
+                }), false);
                 RegisterKeyMapping($"vMenu:{keyMappingId}:PVLock", "vMenu PV Lock/Unlock", "keyboard", "");
             }
             if (IsAllowed(Permission.PVToggleEngine))
@@ -501,19 +507,19 @@ namespace vMenuClient.menus
             }
         }
 
-        internal async Task ToggleLocksFromKey()
+        internal async Task ToggleLocksFromKey(int inputFrame)
         {
-            if (lockToggleInProgress)
+            if (lockToggleInProgress || TackleBlocksPersonalVehicleLock(inputFrame))
             {
                 return;
             }
 
-            // Either shortcut can fire on the same input as a tackle. Keep its feedback vehicle-only.
+            // Both shortcuts share one operation and use vehicle-only feedback.
             lockToggleInProgress = true;
             try
             {
                 var veh = await GetControlledPersonalVehicle();
-                if (veh != null)
+                if (veh != null && !TackleBlocksPersonalVehicleLock(inputFrame))
                 {
                     await LockOrUnlockDoors(veh, !IsVehicleLocked(veh));
                 }

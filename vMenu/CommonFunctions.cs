@@ -46,6 +46,16 @@ namespace vMenuClient
             return Exports["vMenu"].canDoInteraction(type);
 
         }
+        internal bool TackleBlocksPersonalVehicleLock(int inputFrame)
+        {
+            if (GetResourceState("PSRP_Framework") != "started")
+            {
+                return false;
+            }
+
+            try { return Exports["PSRP_Framework"].blocksPersonalVehicleLock(inputFrame); }
+            catch { return false; } // Older Framework versions lack this optional export.
+        }
         public async Task<bool> LoadSharedOutfit(string outfitName)
         {
             return await Exports["vMenu"].loadSharedOutfit(outfitName);
@@ -3794,5 +3804,7 @@ namespace vMenuClient
             Notify.Success("The location was successfully saved.");
         }
         #endregion
+
+        internal static bool TackleBlocksPersonalVehicleLock(int inputFrame) => External.TackleBlocksPersonalVehicleLock(inputFrame);
     }
 }

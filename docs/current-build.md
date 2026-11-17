@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 16, 2026 — personal vehicle lock shortcuts leave tackle physics alone (client DLL) |
-| `build/vMenu/vMenuClient.net.dll` | `543003acae292219c9e3667d2ebe06cc93961faecff3370af5e48188efd0da79` |
+| Latest change | November 16, 2026 — tackle takes priority over both personal vehicle lock shortcuts (client DLL) |
+| `build/vMenu/vMenuClient.net.dll` | `75af8685c13ed4c950de61239963a1b5b7806e0a1c3ecaf1a2ea7e9bbe940edb` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
@@ -19,6 +19,39 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 16, 2026 — tackle takes priority over vehicle locking (client DLL)
+
+When the tackle chord and vMenu lock share `E`, the Framework records the input
+frame even on a miss or during cooldown. vMenu waits one frame for that input
+to resolve and checks it before toggling. The horn shortcut also checks the
+original press, so a tackle input cannot count toward a double-tap. Both
+shortcuts are suppressed during a tackle and recovery. A fresh `E` press
+can lock or unlock after recovery, including during the remaining cooldown.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `75af8685c13ed4c950de61239963a1b5b7806e0a1c3ecaf1a2ea7e9bbe940edb` |
+| `PSRP_Framework/client/cl_tackle.lua` (LF as committed) | `5ef47bea629c61512b60eef708f01dfbad3a6b42a7bbf2c3113fb3d8e25b3793` |
+
+This package uses `build-2026-11-16-2` to preserve the original same-day tag.
+Built with .NET SDK 9.0.321. The client IL comparison shows only the lock
+paths and optional Framework bridge, plus assembly metadata. The vMenu
+client feature, vehicle convenience, client guard, and client fix tests passed,
+as did both Framework tackle Lua specs.
+
+Deploy this client DLL with `PSRP_Framework/client/cl_tackle.lua` from
+PSRP-Development commit `6928c525509d4bd6c5b46c822bdc3d7cfbe52104`. Check the
+installed DLL against the previous November 16 entry below. The previous
+Framework script SHA-256 is
+`fd1f47664ba7a26b2226596f4ea9c7dfc1013f4bc39bc9c45b4ea87a58eaf1e6`
+(LF as committed). Restart both resources after replacing those files.
+
+In FiveM, bind lock to `E` and test beside a personal vehicle. Try `Shift+E`
+with a target, with no target, and during cooldown. Spam the key through the
+dive and get-up and verify the car stays in its original lock state. Verify a
+fresh `E` press works after recovery, then repeat with the horn double-tap.
+The in-game check is pending.
 
 ## November 16, 2026 — personal vehicle lock shortcuts (client DLL)
 

@@ -62,13 +62,22 @@ for command, permission, label in (('PVLock', 'PVLockDoors', 'vMenu PV Lock/Unlo
     block = member(pv, r'if \(IsAllowed\(Permission\.' + permission + r'\)\)\s*\{\s*RegisterCommand\(\$"vMenu:\{keyMappingId\}:' + command + r'".*?\n            }')
     assert f'RegisterKeyMapping($"vMenu:{{keyMappingId}}:{command}", "{label}", "keyboard", "");' in block, \
         f'{label} is unbound by default and needs {permission}'
-lock_key = member(pv, r'^        internal async Task ToggleLocksFromKey\(\).*?^        }$')
+lock_bind = member(pv, r'RegisterCommand\(\$"vMenu:\{keyMappingId\}:PVLock".*?\}\), false\);')
+lock_key = member(pv, r'^        internal async Task ToggleLocksFromKey\(int inputFrame\).*?^        }$')
 horn_key = member(fc, r'^        private async Task PersonalVehicleOptions\(\).*?^        }$')
+assert re.search(r'var inputFrame = GetFrameCount\(\);.*?await BaseScript.Delay\(0\);\s*await ToggleLocksFromKey\(inputFrame\);', lock_bind, re.S), \
+    'lock key records its press frame and lets the tackle callback run first'
 assert 'await LockOrUnlockDoors(veh, !IsVehicleLocked(veh));' in lock_key, 'lock key toggles using current vehicle lock state'
-assert 'await MainMenu.PersonalVehicleMenu.ToggleLocksFromKey();' in horn_key, 'horn double-tap shares the lock key handler'
+assert re.search(r'if \(Game.IsControlJustPressed\(0, Control.VehicleHorn\)\)\s*\{\s*pvHornPressFrame = GetFrameCount\(\);', horn_key), \
+    'horn double-tap checks the original key press even when release is delayed'
+assert re.search(r'if \(TackleBlocksPersonalVehicleLock\(inputFrame\)\)\s*\{\s*lastPvHornReleaseTime = null;', horn_key), \
+    'a tackle press resets the horn double-tap instead of counting toward it'
+assert 'await personalVehicleMenu.ToggleLocksFromKey(inputFrame);' in horn_key, 'horn double-tap shares the lock key handler'
 assert 'PressKeyFob(' not in lock_key and 'PressKeyFob(' not in horn_key, 'lock shortcuts leave ped tasks and props alone during a tackle'
-assert re.search(r'if \(lockToggleInProgress\)\s*\{\s*return;\s*}', lock_key), 'repeat presses are ignored'
+assert re.search(r'if \(lockToggleInProgress \|\| TackleBlocksPersonalVehicleLock\(inputFrame\)\)\s*\{\s*return;\s*}', lock_key), \
+    'repeat presses and tackle input are ignored before requesting vehicle control'
 assert lock_key.index('lockToggleInProgress = true;') < lock_key.index('await GetControlledPersonalVehicle();'), 'lock guard covers network control'
+assert 'if (veh != null && !TackleBlocksPersonalVehicleLock(inputFrame))' in lock_key, 'a tackle that starts while waiting for control can still cancel the lock'
 assert re.search(r'finally\s*\{\s*lockToggleInProgress = false;', lock_key), 'lock guard releases after the operation, including on failure'
 assert pv.count('ToggleEngine(') >= 3, 'menu item and key share the engine toggle'
 assert 'menu.AddMenuItem(waypointToVehicle);' in pv and 'SetNewWaypoint(LastKnownPosition.Value.X, LastKnownPosition.Value.Y);' in pv

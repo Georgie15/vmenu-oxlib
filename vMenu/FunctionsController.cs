@@ -2955,7 +2955,8 @@ namespace vMenuClient
         }
 
         private bool didShowPvHelpMessage = false;
-        private int time = 0;
+        private int? pvHornPressFrame;
+        private int? lastPvHornReleaseTime;
 
         private async Task AutoPVBlipOnExitTick()
         {
@@ -3026,47 +3027,48 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task PersonalVehicleOptions()
         {
-            if (MainMenu.PermissionsSetupComplete && MainMenu.PersonalVehicleMenu != null && MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle != null)
+            var personalVehicleMenu = MainMenu.PersonalVehicleMenu;
+            var veh = personalVehicleMenu?.CurrentPersonalVehicle;
+            var ped = Game.PlayerPed;
+            if (!MainMenu.PermissionsSetupComplete || veh == null || !veh.Exists()
+                || ped.IsInVehicle(veh) || ped.IsGettingIntoAVehicle
+                || ped.Position.DistanceToSquared(veh.Position) >= 650.0f)
             {
-                if (!Game.PlayerPed.IsInVehicle(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle) && !Game.PlayerPed.IsGettingIntoAVehicle)
+                pvHornPressFrame = null;
+                lastPvHornReleaseTime = null;
+                await Delay(100);
+                return;
+            }
+
+            if (Game.IsControlJustPressed(0, Control.VehicleHorn))
+            {
+                pvHornPressFrame = GetFrameCount();
+            }
+            if (Game.IsControlJustReleased(0, Control.VehicleHorn))
+            {
+                var releaseTime = GetGameTimer();
+                var inputFrame = pvHornPressFrame ?? GetFrameCount();
+                pvHornPressFrame = null;
+                await Delay(0);
+                if (TackleBlocksPersonalVehicleLock(inputFrame))
                 {
-                    if (Game.PlayerPed.Position.DistanceToSquared(MainMenu.PersonalVehicleMenu.CurrentPersonalVehicle.Position) < 650.0f)
-                    {
-                        if (Game.IsControlJustReleased(0, Control.VehicleHorn))
-                        {
-                            // check if it was recently pressed (within the last 500 ms).
-                            if (GetGameTimer() - time < 500)
-                            {
-                                time = 0;
-                                await MainMenu.PersonalVehicleMenu.ToggleLocksFromKey();
-                            }
-                            // otherwise count this as the first one.
-                            else
-                            {
-                                time = GetGameTimer();
-                            }
-                        }
-                        if (!didShowPvHelpMessage)
-                        {
-                            didShowPvHelpMessage = true;
-                            HelpMessage.Custom("When you are close to your personal vehicle, you can double tap ~INPUT_VEH_HORN~ to lock or unlock it.", 10000, true);
-                        }
-                    }
-                    else
-                    {
-                        await Delay(100);
-                    }
+                    lastPvHornReleaseTime = null;
+                }
+                else if (lastPvHornReleaseTime.HasValue && releaseTime - lastPvHornReleaseTime.Value < 500)
+                {
+                    lastPvHornReleaseTime = null;
+                    await personalVehicleMenu.ToggleLocksFromKey(inputFrame);
                 }
                 else
                 {
-                    await Delay(100);
+                    lastPvHornReleaseTime = releaseTime;
                 }
             }
-            else
+            if (!didShowPvHelpMessage)
             {
-                await Delay(100);
+                didShowPvHelpMessage = true;
+                HelpMessage.Custom("When you are close to your personal vehicle, you can double tap ~INPUT_VEH_HORN~ to lock or unlock it.", 10000, true);
             }
-            await Task.FromResult(0);
         }
         #endregion
 
