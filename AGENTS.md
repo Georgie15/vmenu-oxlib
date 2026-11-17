@@ -87,6 +87,11 @@ python tests/idle-rests/test_idle_rests.py
 python tests/key-bindings/test_key_bindings.py
 python tests/hud-overlay/test_hud_overlay.py
 python tests/vehicle-rests/test_vehicle_rests.py
+python tests/vehicle-colours-radio/test_vehicle_colours_radio.py
+python tests/game-data/test_game_data.py
+dotnet run --project tests/tattoo-catalog
+lua tests/dept-outfits/test_dept_outfits.lua
+dotnet run --project tests/character-wardrobe
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so
