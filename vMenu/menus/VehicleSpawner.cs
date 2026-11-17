@@ -207,6 +207,9 @@ namespace vMenuClient.menus
                 // time it is opened. Building all ~800 entries when the menu was created was a hitch.
                 var classIndex = vehClass;
                 var populated = false;
+                // The model behind each item, in menu order. Models the game build lacks get no item,
+                // so an item's index no longer matches its position in the class list.
+                var shownModels = new List<string>();
                 void PopulateClass()
                 {
                     if (populated)
@@ -222,7 +225,13 @@ namespace vMenuClient.menus
                     // Loop through all the vehicles in the vehicle class.
                     foreach (var veh in VehicleData.Vehicles.VehicleClasses[className])
                     {
-                        // Convert the model name to start with a Capital letter, converting the other characters to lowercase. 
+                        // Hide models this game build doesn't have (DLC vehicles newer than the server's build).
+                        if (!DoesModelExist(veh))
+                        {
+                            continue;
+                        }
+
+                        // Convert the model name to start with a Capital letter, converting the other characters to lowercase.
                         var properCasedModelName = veh[0].ToString().ToUpper() + veh.ToLower().Substring(1);
 
                         // Get the localized vehicle name, if it's "NULL" (no label found) then use the "properCasedModelName" created above.
@@ -236,7 +245,6 @@ namespace vMenuClient.menus
                         var maxTraction = Map(GetVehicleModelMaxTraction(model), 0f, tractionValues[classIndex], 0f, 1f);
 
                         // Loop through all the menu items and check each item's title/text and see if it matches the current vehicle (display) name.
-                        var duplicate = false;
                         for (var itemIndex = 0; itemIndex < vehicleClassMenu.Size; itemIndex++)
                         {
                             // If it matches...
@@ -258,62 +266,18 @@ namespace vMenuClient.menus
 
                                 // The model name is a duplicate, so get the modelname and add the duplicate amount for this model name to the end of the vehicle name.
                                 vehName += $" ({duplicateVehNames[vehName]})";
-
-                                // Then create and add a new button for this vehicle.
-
-                                if (DoesModelExist(veh))
-                                {
-                                    var vehBtn = new MenuItem(vehName)
-                                    {
-                                        Enabled = true,
-                                        Label = $"({vehModelName.ToLower()})",
-                                        ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
-                                    };
-                                    vehicleClassMenu.AddMenuItem(vehBtn);
-                                }
-                                else
-                                {
-                                    var vehBtn = new MenuItem(vehName, "This vehicle is not available because the model could not be found in your game files. If this is a DLC vehicle, make sure the server is streaming it.")
-                                    {
-                                        Enabled = false,
-                                        Label = $"({vehModelName.ToLower()})",
-                                        ItemData = new float[4] { 0f, 0f, 0f, 0f }
-                                    };
-                                    vehicleClassMenu.AddMenuItem(vehBtn);
-                                    vehBtn.RightIcon = MenuItem.Icon.LOCK;
-                                }
-
-                                // Mark duplicate as true and break from the loop because we already found the duplicate.
-                                duplicate = true;
                                 break;
                             }
                         }
 
-                        // If it's not a duplicate, add the model name.
-                        if (!duplicate)
+                        shownModels.Add(veh);
+                        var vehBtn = new MenuItem(vehName)
                         {
-                            if (DoesModelExist(veh))
-                            {
-                                var vehBtn = new MenuItem(vehName)
-                                {
-                                    Enabled = true,
-                                    Label = $"({vehModelName.ToLower()})",
-                                    ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
-                                };
-                                vehicleClassMenu.AddMenuItem(vehBtn);
-                            }
-                            else
-                            {
-                                var vehBtn = new MenuItem(vehName, "This vehicle is not available because the model could not be found in your game files. If this is a DLC vehicle, make sure the server is streaming it.")
-                                {
-                                    Enabled = false,
-                                    Label = $"({vehModelName.ToLower()})",
-                                    ItemData = new float[4] { 0f, 0f, 0f, 0f }
-                                };
-                                vehicleClassMenu.AddMenuItem(vehBtn);
-                                vehBtn.RightIcon = MenuItem.Icon.LOCK;
-                            }
-                        }
+                            Enabled = true,
+                            Label = $"({vehModelName.ToLower()})",
+                            ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
+                        };
+                        vehicleClassMenu.AddMenuItem(vehBtn);
                     }
                     #endregion
 
@@ -332,7 +296,7 @@ namespace vMenuClient.menus
                 // Handle button presses
                 vehicleClassMenu.OnItemSelect += async (sender2, item2, index2) =>
                 {
-                    await SpawnVehicle(VehicleData.Vehicles.VehicleClasses[className][index2], SpawnInVehicle, ReplaceVehicle);
+                    await SpawnVehicle(shownModels[index2], SpawnInVehicle, ReplaceVehicle);
                 };
 
                 static void HandleStatsPanel(Menu openedMenu, MenuItem currentItem)

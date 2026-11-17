@@ -1425,31 +1425,31 @@ namespace vMenuClient.menus
 
                 foreach (var tattoo in currentCharacter.PedTatttoos.HeadTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.TorsoTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.LeftArmTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.RightArmTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.LeftLegTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.RightLegTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
                 foreach (var tattoo in currentCharacter.PedTatttoos.BadgeTattoos)
                 {
-                    SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                    SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
                 }
 
                 if (!string.IsNullOrEmpty(currentCharacter.PedAppearance.HairOverlay.Key) && !string.IsNullOrEmpty(currentCharacter.PedAppearance.HairOverlay.Value))
@@ -1476,7 +1476,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.HeadTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 1) // torso
@@ -1485,7 +1485,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.TorsoTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 2) // left arm
@@ -1494,7 +1494,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.LeftArmTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 3) // right arm
@@ -1503,7 +1503,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.RightArmTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 4) // left leg
@@ -1512,7 +1512,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.LeftLegTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 5) // right leg
@@ -1521,7 +1521,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.RightLegTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
                 else if (menuIndex == 6) // badges
@@ -1530,7 +1530,7 @@ namespace vMenuClient.menus
                     var tat = new KeyValuePair<string, string>(Tattoo.collectionName, Tattoo.name);
                     if (!currentCharacter.PedTatttoos.BadgeTattoos.Contains(tat))
                     {
-                        SetPedDecoration(Game.PlayerPed.Handle, (uint)GetHashKey(tat.Key), (uint)GetHashKey(tat.Value));
+                        SetPedDecoration(Game.PlayerPed.Handle, TattoosData.HashOf(tat.Key), TattoosData.HashOf(tat.Value));
                     }
                 }
             };
@@ -3756,31 +3756,31 @@ namespace vMenuClient.menus
 
             foreach (var tattoo in character.PedTatttoos.HeadTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.TorsoTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.LeftArmTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.RightArmTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.LeftLegTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.RightLegTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             foreach (var tattoo in character.PedTatttoos.BadgeTattoos)
             {
-                SetPedDecoration(pedHandle, (uint)GetHashKey(tattoo.Key), (uint)GetHashKey(tattoo.Value));
+                SetPedDecoration(pedHandle, TattoosData.HashOf(tattoo.Key), TattoosData.HashOf(tattoo.Value));
             }
             #endregion
 
