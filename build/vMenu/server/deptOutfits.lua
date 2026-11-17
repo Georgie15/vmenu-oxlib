@@ -446,7 +446,22 @@ local function send(src, requestId, reply)
     end
 end
 
-RegisterNetEvent('vMenu:DeptOutfits:Request', function(requestId, action, argsJson)
+-- Through the request guard (server/guard/requestGuard.lua) like vMenu's other client requests:
+-- a real player, the per-player rate limit, the argument types, and the security log. A refused
+-- request is answered by its id, so the menu doesn't wait for its timeout.
+VMenuGuard.netEvent('vMenu:DeptOutfits:Request', {
+    args = { VMenuGuard.number, VMenuGuard.string(32), VMenuGuard.string(MAX_ARGS_BYTES) },
+    reject = function(src, why, requestId, action, argsJson)
+        if not isWhole(requestId, 0, 2147483647) then return end
+        local message = 'That request could not be read.'
+        if why == 'rate-limited' then
+            message = 'Please wait a moment and try again.'
+        elseif type(argsJson) == 'string' and #argsJson > MAX_ARGS_BYTES then
+            message = 'That request was too large.'
+        end
+        send(src, requestId, { ok = false, message = message })
+    end,
+}, function(requestId, action, argsJson)
     local src = source
     if not isWhole(requestId, 0, 2147483647) then return end
     if not enabled() then

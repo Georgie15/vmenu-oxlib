@@ -163,6 +163,7 @@ local function newServer()
     _G.exports = { oxmysql = db, PoliceEMSActivity = duty }
 
     assert(load(readFile('build/vMenu/config/config_server.lua'), '@config/config_server.lua'))()
+    dofile('tests/lua/request_guard.lua')()
     assert(load(readFile('build/vMenu/server/deptOutfits.lua'), '@server/deptOutfits.lua'))()
 
     -- Sends one request as a client would and returns the decoded reply (nil when none was sent).
@@ -466,6 +467,9 @@ local cfg = readFile('build/vMenu/config/permissions.cfg')
 check(cfg:find('setr vmenu_dept_outfits', 1, true) and cfg:find('#add_ace group.%w+ "vMenu.DeptOutfits.Manage.lspd" allow') and cfg:find('#add_ace group.admin "vMenu.DeptOutfits.ManageAll" allow', 1, true),
     'permissions.cfg has the convar and commented example aces')
 check(readFile('build/vMenu/fxmanifest.lua'):find("'server/*.lua'", 1, true), 'the manifest loads server/deptOutfits.lua')
+check(readFile('build/vMenu/server/deptOutfits.lua'):find("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'", 1, true)
+    and not readFile('build/vMenu/server/deptOutfits.lua'):find("RegisterNetEvent('vMenu:DeptOutfits:Request'", 1, true),
+    'requests go through the request guard (rate limit, argument types, security log)')
 local client = readFile('vMenu/DepartmentOutfits.cs')
 check(client:find('"vMenu:DeptOutfits:Request"', 1, true) and client:find('"vMenu:DeptOutfits:Reply"', 1, true) and client:find('"vmenu_dept_outfits"', 1, true),
     'the client uses the same events and convar')

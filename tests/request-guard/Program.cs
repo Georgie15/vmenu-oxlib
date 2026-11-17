@@ -253,6 +253,7 @@ static class Program
     {
         "vMenu:backups:upload", "vMenu:backups:download", "vMenu:ClothingCapture:Save",
         "vMenu:telemetry:spawnProvenanceReady", "vMenu:telemetry:beginVehicleSpawn", "vMenu:PSRP:StaminaMode",
+        "vMenu:DeptOutfits:Request",
     };
     static readonly string[] LuaCallbacks =
     {

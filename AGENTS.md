@@ -92,6 +92,8 @@ python tests/game-data/test_game_data.py
 dotnet run --project tests/tattoo-catalog
 lua tests/dept-outfits/test_dept_outfits.lua
 dotnet run --project tests/character-wardrobe
+dotnet run --project tests/request-guard
+lua tests/request-guard/test_request_guard.lua
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

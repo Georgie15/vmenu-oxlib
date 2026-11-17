@@ -295,7 +295,8 @@ local function admit(eventName, src, opts, ...)
 end
 
 --- RegisterNetEvent through the guard. opts: args (argument checks), permission (function(src) ->
---- boolean) with permissionName, reject (function(src, why), called for a refused player's request).
+--- boolean) with permissionName, reject (function(src, why, ...), called for a refused player's request
+--- with the request's arguments, so it can answer by request id).
 --- The handler gets the event's arguments, with `source` set as usual.
 function Guard.netEvent(eventName, opts, handler)
     buckets[eventName] = buckets[eventName] or {}
@@ -303,7 +304,7 @@ function Guard.netEvent(eventName, opts, handler)
         local src = source
         local ok, why = admit(eventName, src, opts, ...)
         if ok then return handler(...) end
-        if opts.reject and why ~= 'no-source' then opts.reject(src, why) end
+        if opts.reject and why ~= 'no-source' then opts.reject(src, why, ...) end
     end)
 end
 

@@ -276,7 +276,7 @@ static class Program
         Check(serverActions.SequenceEqual(clientActions) && serverActions.Count == 6, "client requests match the server's actions: " + string.Join(",", clientActions) + " / " + string.Join(",", serverActions));
         var bridge = Read("vMenu", "DepartmentOutfitsBridge.cs");
         Check(bridge.Contains("TriggerServerEvent(DepartmentOutfits.RequestEvent, request, action,") && bridge.Contains("EventHandlers[DepartmentOutfits.ReplyEvent]"), "the bridge uses the shared event names");
-        Check(lua.Contains("RegisterNetEvent('vMenu:DeptOutfits:Request'") && lua.Contains("'vMenu:DeptOutfits:Reply'") && lua.Contains("GetConvarBool('vmenu_dept_outfits', false)"), "the server uses the same events and convar");
+        Check(lua.Contains("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'") && lua.Contains("'vMenu:DeptOutfits:Reply'") && lua.Contains("GetConvarBool('vmenu_dept_outfits', false)"), "the server uses the same events and convar");
         Check(!dept.Contains("IsAllowed(") && !Regex.IsMatch(dept, @"\[""org""\] = listing\.Duty"), "the client never decides access or claims its duty org");
 
         // A character's own outfits and styles.
