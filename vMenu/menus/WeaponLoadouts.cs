@@ -35,7 +35,7 @@ namespace vMenuClient.menus
                 {
                     break;
                 }
-                saves.Add(kvp, JsonConvert.DeserializeObject<List<ValidWeapon>>(GetResourceKvpString(kvp)));
+                saves.Add(kvp, ReadWeaponLoadout(GetResourceKvpString(kvp), "Saved loadout " + kvp));
             }
             EndFindKvp(handle);
             return saves;
@@ -71,7 +71,7 @@ namespace vMenuClient.menus
 
             foreach (var save in saves)
             {
-                SavedWeapons.Add(save, JsonConvert.DeserializeObject<List<ValidWeapon>>(GetResourceKvpString(save)));
+                SavedWeapons.Add(save, ReadWeaponLoadout(GetResourceKvpString(save), "Saved loadout " + save));
             }
 
             return SavedWeapons;

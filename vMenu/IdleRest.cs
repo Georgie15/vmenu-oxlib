@@ -34,7 +34,12 @@ namespace vMenuClient
             return rest.Task;
         }
 
-        public static void MenuOpened()
+        public static void MenuOpened() => WakeAll();
+
+        // Ends every rest in progress: a menu opened, or something outside the menu changed what a
+        // resting loop watches (permissions arrived, an integration event, a key binding). The
+        // loops check again at once and rest again if there is still nothing to do.
+        public static void WakeAll()
         {
             TaskCompletionSource<bool>[] woken;
             lock (gate)

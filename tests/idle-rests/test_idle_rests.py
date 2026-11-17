@@ -81,6 +81,7 @@ namespace Rests
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
+    using vMenuClient;
     using static Rests.Natives;
 
     public enum Control { ''' + ', '.join(controls) + r''' }
@@ -306,7 +307,7 @@ namespace Rests
 
 ''' + klass('Old', old_fc, []) + klass('New', new_fc, ['RadarSettings']).replace(
     'IEnumerable<FakePlayer> Players => W.Players;',
-    'IEnumerable<FakePlayer> Players => W.Players;\n        const int IdleRestMs = 250;\n        const int StateRestMs = 100;\n        static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();\n        static Task Rest(int ms) => vMenuClient.IdleRest.Until(Delay(ms));') + r'''
+    'IEnumerable<FakePlayer> Players => W.Players;\n        const int IdleRestMs = 250;\n        const int StateRestMs = 100;\n        const int SleepRestMs = 2000;\n        static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();\n        static Task Rest(int ms) => vMenuClient.IdleRest.Until(Delay(ms));') + r'''
 
     public static class Test
     {

@@ -101,7 +101,7 @@ namespace vMenuClient.menus
                 savedVehiclesCategoryMenu.AddMenuItem(deleteBtn);
                 savedVehiclesCategoryMenu.AddMenuItem(deleteCharsBtn);
 
-                var spacer = GetSpacerMenuItem("â†“ Vehicles â†“");
+                var spacer = GetSpacerMenuItem("↓ Vehicles ↓");
                 savedVehiclesCategoryMenu.AddMenuItem(spacer);
 
                 if (savedVehicles.Count > 0)
@@ -138,7 +138,7 @@ namespace vMenuClient.menus
 
                         var btn = new MenuItem(buttonName, buttonDescription)
                         {
-                            Label = $"({vehicle.name}) â†’â†’â†’",
+                            Label = $"({vehicle.name}) →→→",
                             LeftIcon = canUse ? MenuItem.Icon.NONE : MenuItem.Icon.LOCK,
                             ItemData = kvp,
                         };

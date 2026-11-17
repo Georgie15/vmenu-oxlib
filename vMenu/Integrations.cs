@@ -13,11 +13,14 @@ namespace vMenuClient
             EventHandlers["vMenu:Integrations:SetPlayerBlips"] += new Action<bool>(enabled =>
             {
                 MiscSettings.Instance?.ForceSetPlayerBlips(enabled);
+                IdleRest.WakeAll();
             });
 
             EventHandlers["vMenu:Integrations:SetPlayerNames"] += new Action<bool>(enabled =>
             {
                 MiscSettings.Instance?.ForceSetPlayerNames(enabled);
+                // The names loop rests while names are off.
+                IdleRest.WakeAll();
             });
         }
     }

@@ -645,6 +645,8 @@ namespace vMenuClient.menus
             }
 
             UpdateCurrentVehicleLabel();
+            // The personal vehicle loops rest while there is none.
+            IdleRest.WakeAll();
         }
 
         public void ClearCurrentPersonalVehicle(bool clearBlip = true)

@@ -3100,6 +3100,50 @@ namespace vMenuClient
 
         #region Weapon Loadouts
         /// <summary>
+        /// Reads a saved loadout. Missing or unreadable data is an empty loadout, and entries without a
+        /// weapon are dropped, so one bad save can't stop the loadouts menu or a respawn.
+        /// </summary>
+        internal static List<ValidWeapon> ReadWeaponLoadout(string json, string what)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new List<ValidWeapon>();
+            }
+            List<ValidWeapon> loadout;
+            try
+            {
+                loadout = JsonConvert.DeserializeObject<List<ValidWeapon>>(json);
+            }
+            catch (Exception e)
+            {
+                Log($"[vMenu] [Loadouts] {what} could not be read and is treated as empty: {e.Message}");
+                return new List<ValidWeapon>();
+            }
+            var weapons = new List<ValidWeapon>();
+            foreach (var weapon in loadout ?? new List<ValidWeapon>())
+            {
+                if (weapon.Hash == 0)
+                {
+                    continue;
+                }
+                var kept = weapon;
+                kept.Components ??= new Dictionary<string, uint>();
+                weapons.Add(kept);
+            }
+            return weapons;
+        }
+
+        /// <summary>
+        /// The permission for a saved weapon, looked up by its spawn name (as upstream vMenu a6349406).
+        /// Loadouts store the permission as a number, and the numbers move when a weapon is added to
+        /// the middle of the list, so the stored one can name the wrong weapon.
+        /// </summary>
+        internal static Permission WeaponPermission(ValidWeapon weapon) =>
+            !string.IsNullOrEmpty(weapon.SpawnName) && ValidWeapons.weaponPermissions.TryGetValue(weapon.SpawnName.ToLowerInvariant(), out var permission)
+                ? permission
+                : Permission.WPSpawn;
+
+        /// <summary>
         /// Gets a saved weapons loadout.
         /// </summary>
         /// <param name="saveName"></param>
@@ -3108,16 +3152,12 @@ namespace vMenuClient
         {
             if (saveName == "vmenu_temp_weapons_loadout_before_respawn")
             {
-                return JsonConvert.DeserializeObject<List<ValidWeapon>>(GetResourceKvpString("vmenu_temp_weapons_loadout_before_respawn") ?? "{}");
+                return ReadWeaponLoadout(GetResourceKvpString("vmenu_temp_weapons_loadout_before_respawn"), "The weapons saved before respawning");
             }
             else
             {
-                var kvp = GetResourceKvpString(saveName.StartsWith("vmenu_string_saved_weapon_loadout_") ? saveName : "vmenu_string_saved_weapon_loadout_" + saveName);
-                if (string.IsNullOrEmpty(kvp))
-                {
-                    return new List<ValidWeapon>();
-                }
-                return JsonConvert.DeserializeObject<List<ValidWeapon>>(kvp);
+                var key = saveName.StartsWith("vmenu_string_saved_weapon_loadout_") ? saveName : "vmenu_string_saved_weapon_loadout_" + saveName;
+                return ReadWeaponLoadout(GetResourceKvpString(key), "Saved loadout " + key);
             }
         }
 
@@ -3160,7 +3200,7 @@ namespace vMenuClient
                 }
                 else
                 {
-                    loadout = JsonConvert.DeserializeObject<List<ValidWeapon>>(kvp);
+                    loadout = ReadWeaponLoadout(kvp, "The loadout to equip on respawn");
                 }
             }
 
@@ -3174,14 +3214,14 @@ namespace vMenuClient
                 }
 
                 // Check if any weapon is not allowed.
-                if (!ignoreSettingsAndPerms && loadout.Any((wp) => !IsAllowed(wp.Perm)))
+                if (!ignoreSettingsAndPerms && loadout.Any((wp) => !IsAllowed(WeaponPermission(wp))))
                 {
                     Notify.Alert("One or more weapon(s) in this saved loadout are not allowed on this server. Those weapons will not be loaded.");
                 }
 
                 foreach (var w in loadout)
                 {
-                    if (ignoreSettingsAndPerms || IsAllowed(w.Perm))
+                    if (ignoreSettingsAndPerms || IsAllowed(WeaponPermission(w)))
                     {
                         // Give the weapon
                         GiveWeaponToPed(Game.PlayerPed.Handle, w.Hash, w.CurrentAmmo > -1 ? w.CurrentAmmo : w.GetMaxAmmo, false, false);

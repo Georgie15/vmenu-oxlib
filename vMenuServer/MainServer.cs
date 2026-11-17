@@ -502,6 +502,9 @@ namespace vMenuServer
             }
         }
 
+        /// <summary>How far Kick Passengers reaches: above OneSync's default vehicle range, so the menu never hits it.</summary>
+        private const float KickPassengersRange = 500f;
+
         [EventHandler("vMenu:GetOutOfCar")]
         internal void GetOutOfCar([FromSource] Player source, object vehicleNetIdArg)
         {
@@ -536,6 +539,17 @@ namespace vMenuServer
                 if (!personalVehicles.Owns(source.Handle, vehicleNetId, vehicleHandle, (uint)GetEntityModel(vehicleHandle)))
                 {
                     source.TriggerEvent("vMenu:Notify", "You can only remove passengers from your own personal vehicle. Drive it once to set it as your personal vehicle.");
+                    return;
+                }
+
+                // The menu only reaches a personal vehicle the player's game has loaded (OneSync's
+                // vehicle range, 424 m by default), so a request from further away isn't the menu's.
+                var ownerPed = GetPlayerPed(source.Handle);
+                var distance = ownerPed == 0 ? float.MaxValue : Vector3.Distance(GetEntityCoords(ownerPed), GetEntityCoords(vehicleHandle));
+                if (distance > KickPassengersRange)
+                {
+                    RequestGuard.Malformed(source, request, $"the vehicle is {(distance == float.MaxValue ? "an unknown distance" : Math.Round(distance) + " m")} away (the menu reaches it within {KickPassengersRange} m)");
+                    source.TriggerEvent("vMenu:Notify", "Your personal vehicle is too far away to remove its passengers.");
                     return;
                 }
 

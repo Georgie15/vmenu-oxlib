@@ -71,7 +71,7 @@ namespace Hud
         public static HashSet<Permission> Denied = new HashSet<Permission>();
         public static float X = 1, Y = 2, Z = 3, Heading = 90, Speed = 10, SafeZone = 1f;
         public static List<string> Sent = new List<string>();
-        public static int Rests, Delays;
+        public static int Rests, Delays, LastRestMs;
     }
     public class Misc
     {
@@ -102,8 +102,9 @@ namespace Hud
     public class Ticker
     {
         bool AnyMenuOpen => W.MenuOpen;
-        Task Rest(int ms) { W.Rests++; return Task.CompletedTask; }
+        Task Rest(int ms) { W.Rests++; W.LastRestMs = ms; return Task.CompletedTask; }
         const int IdleRestMs = 250;
+        const int SleepRestMs = 2000;
         float safeZoneSizeX = -0.0247f;
         string zoneDisplay = "Airport";
         string headingDisplay = "N";
@@ -121,7 +122,7 @@ namespace Hud
         {
             var t = new Ticker();
             t.Run(); t.Run();
-            Check(W.Sent.Count == 0 && W.Rests == 2, "all off: nothing sent, the loop rests");
+            Check(W.Sent.Count == 0 && W.Rests == 2 && W.LastRestMs == 2000, "all off: nothing sent, the loop rests until a menu opens (2 s fallback)");
 
             W.Coords = true; t.Run();
             Check(W.Sent.Count == 1 && W.Sent[0].Contains("\"coords\":{\"x\":\"1.00\"") && W.Sent[0].Contains("\"visible\":true"), "coordinates on: sent with two decimals");

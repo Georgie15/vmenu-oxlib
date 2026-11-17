@@ -38,6 +38,21 @@ namespace vMenuClient.menus
         // Public variables (getters only), return the private variables.
         // The vehicle "Toggle Vehicle Visibility" hid; made visible again when the player leaves it.
         internal static int HiddenVehicle { get; set; } = 0;
+        /// <summary>
+        /// The License Plate Type list, in order: the style each position sets. The labels are the
+        /// game's LS Customs names, CMOD_PLA_0 to 4 (Blue on White 1, 2 and 3, Yellow on Blue,
+        /// Yellow on Black), so the first five are not in the styles' number order (as upstream vMenu
+        /// 9e4055ba). Before, positions 1-4 set Yellow on Black, Yellow on Blue, Blue on White 2 and 3
+        /// under the wrong names.
+        /// </summary>
+        internal static readonly LicensePlateStyle[] PlateStyles =
+        {
+            LicensePlateStyle.BlueOnWhite1, LicensePlateStyle.BlueOnWhite2, LicensePlateStyle.BlueOnWhite3,
+            LicensePlateStyle.YellowOnBlue, LicensePlateStyle.YellowOnBlack, LicensePlateStyle.NorthYankton,
+            LicensePlateStyle.ECola, LicensePlateStyle.LasVenturas, LicensePlateStyle.LibertyCity,
+            LicensePlateStyle.LSCarMeet, LicensePlateStyle.LSPanic, LicensePlateStyle.LSPounders, LicensePlateStyle.Sprunk,
+        };
+
         public bool VehicleGodMode { get; private set; } = UserDefaults.VehicleGodMode;
         public bool VehicleGodInvincible { get; private set; } = UserDefaults.VehicleGodInvincible;
         public bool VehicleGodEngine { get; private set; } = UserDefaults.VehicleGodEngine;
@@ -130,6 +145,35 @@ namespace vMenuClient.menus
                 return;
             }
             action(veh);
+        }
+
+        /// <summary>
+        /// Closes every door if any is open, otherwise opens them all, skipping broken or missing doors
+        /// (as upstream vMenu 2c7b9ab5). It used to look only at the driver's door, so a vehicle without
+        /// one, or with only the boot open, always opened.
+        /// </summary>
+        internal static void ToggleAllVehicleDoors(int vehicle)
+        {
+            var anyOpen = false;
+            for (var door = 0; door < 8 && !anyOpen; door++)
+            {
+                anyOpen = !IsVehicleDoorDamaged(vehicle, door) && GetVehicleDoorAngleRatio(vehicle, door) > 0.1f;
+            }
+            for (var door = 0; door < 8; door++)
+            {
+                if (IsVehicleDoorDamaged(vehicle, door))
+                {
+                    continue;
+                }
+                if (anyOpen)
+                {
+                    SetVehicleDoorShut(vehicle, door, false);
+                }
+                else
+                {
+                    SetVehicleDoorOpen(vehicle, door, false, false);
+                }
+            }
         }
 
         private static void ToggleVehicleDoor(Vehicle veh, int door)
@@ -308,13 +352,14 @@ namespace vMenuClient.menus
             var dirtlevel = new List<string> { "No Dirt", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15" };
             var setDirtLevel = new MenuListItem("Set Dirt Level", dirtlevel, 0, "Select how much dirt should be visible on your vehicle, press ~r~enter~s~ " +
                 "to apply the selected level.");
+            // Each label is the game's name for the style at the same place in PlateStyles.
             var licensePlates = new List<string> {
-                GetLabelText("CMOD_PLA_0"), // Plate Index 0 // BlueOnWhite1
-                GetLabelText("CMOD_PLA_1"), // Plate Index 1 // YellowOnBlack
-                GetLabelText("CMOD_PLA_2"), // Plate Index 2 // YellowOnBlue
-                GetLabelText("CMOD_PLA_3"), // Plate Index 3 // BlueOnWhite2
-                GetLabelText("CMOD_PLA_4"), // Plate Index 4 // BlueOnWhite3
-                "North Yankton", // Plate Index 5 // NorthYankton
+                GetLabelText("CMOD_PLA_0"), // Blue on White 1 // BlueOnWhite1
+                GetLabelText("CMOD_PLA_1"), // Blue on White 2 // BlueOnWhite2
+                GetLabelText("CMOD_PLA_2"), // Blue on White 3 // BlueOnWhite3
+                GetLabelText("CMOD_PLA_3"), // Yellow on Blue // YellowOnBlue
+                GetLabelText("CMOD_PLA_4"), // Yellow on Black // YellowOnBlack
+                "North Yankton", // NorthYankton
                 GetLabelText("CMOD_PLA_6"), // Plate Index 6 // ECola
                 GetLabelText("CMOD_PLA_7"), // Plate Index 7 // LasVenturas
                 GetLabelText("CMOD_PLA_8"), // Plate Index 8 // LibertyCity
@@ -341,20 +386,9 @@ namespace vMenuClient.menus
                 MenuKeyPressType.JUST_PRESSED, m =>
             {
                 var veh = GetVehicle();
-                if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
+                if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed && TryStartVehicleAllDoorsCooldown())
                 {
-                    var open = GetVehicleDoorAngleRatio(veh.Handle, 0) < 0.1f;
-                    if (open)
-                    {
-                        for (var i = 0; i < 8; i++)
-                        {
-                            SetVehicleDoorOpen(veh.Handle, i, false, false);
-                        }
-                    }
-                    else
-                    {
-                        SetVehicleDoorsShut(veh.Handle, false);
-                    }
+                    ToggleAllVehicleDoors(veh.Handle);
                 }
             }, "Toggle Vehicle Doors");
             VehicleDoorsMenu = new Menu("Vehicle Doors", "Vehicle Doors Management");
@@ -906,49 +940,9 @@ namespace vMenuClient.menus
                     else if (item == setLicensePlateType)
                     {
                         // Set the license plate style.
-                        switch (newIndex)
+                        if (newIndex >= 0 && newIndex < PlateStyles.Length)
                         {
-                            case 0:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.BlueOnWhite1;
-                                break;
-                            case 1:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.YellowOnBlack;
-                                break;
-                            case 2:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.YellowOnBlue;
-                                break;
-                            case 3:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.BlueOnWhite2;
-                                break;
-                            case 4:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.BlueOnWhite3;
-                                break;
-                            case 5:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.NorthYankton;
-                                break;
-                            case 6:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.ECola;
-                                break;
-                            case 7:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.LasVenturas;
-                                break;
-                            case 8:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.LibertyCity;
-                                break;
-                            case 9:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.LSCarMeet;
-                                break;
-                            case 10:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.LSPanic;
-                                break;
-                            case 11:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.LSPounders;
-                                break;
-                            case 12:
-                                veh.Mods.LicensePlateStyle = LicensePlateStyle.Sprunk;
-                                break;
-                            default:
-                                break;
+                            veh.Mods.LicensePlateStyle = PlateStyles[newIndex];
                         }
                     }
                 }
@@ -2358,49 +2352,10 @@ namespace vMenuClient.menus
                     if (item == setLicensePlateType && item is MenuListItem listItem && veh != null && veh.Exists())
                     {
                         // Set the license plate style.
-                        switch (veh.Mods.LicensePlateStyle)
+                        var platePosition = Array.IndexOf(PlateStyles, veh.Mods.LicensePlateStyle);
+                        if (platePosition >= 0)
                         {
-                            case LicensePlateStyle.BlueOnWhite1:
-                                listItem.ListIndex = 0;
-                                break;
-                            case LicensePlateStyle.YellowOnBlack:
-                                listItem.ListIndex = 1;
-                                break;
-                            case LicensePlateStyle.YellowOnBlue:
-                                listItem.ListIndex = 2;
-                                break;
-                            case LicensePlateStyle.BlueOnWhite2:
-                                listItem.ListIndex = 3;
-                                break;
-                            case LicensePlateStyle.BlueOnWhite3:
-                                listItem.ListIndex = 4;
-                                break;
-                            case LicensePlateStyle.NorthYankton:
-                                listItem.ListIndex = 5;
-                                break;
-                            case LicensePlateStyle.ECola:
-                                listItem.ListIndex = 6;
-                                break;
-                            case LicensePlateStyle.LasVenturas:
-                                listItem.ListIndex = 7;
-                                break;
-                            case LicensePlateStyle.LibertyCity:
-                                listItem.ListIndex = 8;
-                                break;
-                            case LicensePlateStyle.LSCarMeet:
-                                listItem.ListIndex = 9;
-                                break;
-                            case LicensePlateStyle.LSPanic:
-                                listItem.ListIndex = 10;
-                                break;
-                            case LicensePlateStyle.LSPounders:
-                                listItem.ListIndex = 11;
-                                break;
-                            case LicensePlateStyle.Sprunk:
-                                listItem.ListIndex = 12;
-                                break;
-                            default:
-                                break;
+                            listItem.ListIndex = platePosition;
                         }
                     }
                 });

@@ -94,6 +94,8 @@ lua tests/dept-outfits/test_dept_outfits.lua
 dotnet run --project tests/character-wardrobe
 dotnet run --project tests/request-guard
 lua tests/request-guard/test_request_guard.lua
+python tests/sleeping-loops/test_sleeping_loops.py
+python tests/upstream-bug-fixes/test_upstream_bug_fixes.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

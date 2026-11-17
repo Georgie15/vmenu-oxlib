@@ -8,9 +8,9 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release K: department outfit presets, character outfits and styles, base-game data refresh, vehicle paint and radio options, server request guard, live role refresh (client DLL, server DLL, Lua, config, SQL), on top of releases J, I and H. **Testing on branch `perf/release-k`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `4d002d53df8d1b485522ca2c36d332431898d8daa2eb8764692c99f974111a17` |
-| `build/vMenu/vMenuServer.net.dll` | `03147fa748dcee86dba985a99edb08fda6a58a9fca0b8cb8958409f80a70d39d` (built from this source) |
+| Latest change | November 17, 2026 — release L: upstream bug fixes (plates, eyebrows, arrows, doors, loadouts), a Kick Passengers range, and loops that sleep while idle (client DLL, server DLL), on top of releases K, J, I and H. **Testing on branch `perf/release-l`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
+| `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
 Check a checkout with
@@ -20,6 +20,176 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release L: upstream bug fixes and sleeping loops (client DLL, server DLL) — TESTING, branch `perf/release-l`
+
+**Status: test build, not verified in game, not on `main`.** It is built on
+release K (`perf/release-k`). Until it passes an in-game check, `main` and
+`build-2026-11-17-3` stay the live build and the fallback. It changes the
+server DLL (one range check), so client and server still go together, as with
+release K.
+
+**Why.** The owner asked for the remaining bug fixes and performance work from
+the comparison with vMenu Enhanced v1.0.22.
+
+**Bug fixes (client):**
+- **License Plate Type.** Four styles were under the wrong names: choosing "Blue
+  on White 2" gave Yellow on Black, and so on. One table
+  (`VehicleOptions.PlateStyles`, in upstream 9e4055ba's order) now sets the
+  style and reads it back, where three hand-written switches used to.
+- **Randomize Character** saved the eyebrow style as the colour and the colour
+  as the style.
+- **Garbled arrows.** The "↓ Characters ↓" and "↓ Vehicles ↓" headings and the
+  "→→→" labels in Saved Characters and Saved Vehicles were stored double-encoded
+  and showed as `â†“`.
+- **Toggle all doors** (Space in the mod menu) looked only at the driver's door
+  (upstream 2c7b9ab5). A vehicle without one, or with only the boot open,
+  always opened everything. It now checks every door that isn't broken, and
+  uses the doors menu's all-doors cooldown.
+- **Saved weapon loadouts:**
+  - A save that couldn't be read stopped the loadouts menu or a respawn. A
+    missing "weapons before respawn" save was read as `{}`, which throws. Every
+    read now goes through `ReadWeaponLoadout`, which treats an unreadable save
+    as empty and logs it.
+  - Each saved weapon's permission is looked up by its spawn name (upstream
+    a6349406). The number saved with it moves when a weapon is added to the
+    middle of the list. Release K's newspaper permission came after every
+    weapon, so it moved none.
+  - Unchanged: which loadout actions skip the permission check. In PSRP,
+    regular players have no vMenu weapon permissions, so the respawn restore
+    still skips it.
+
+**Bug fix (server):** Kick Passengers works only within 500 m of the owner.
+The menu can only reach the personal vehicle while the player's game has it
+loaded (OneSync's vehicle range, 424 m by default), so 500 m never stops the
+menu. A request from further away is logged as malformed. Upstream doesn't
+limit this; it was this repo's own audit finding.
+
+**Performance (client):**
+- **The menu watcher sleeps** (`MainMenu.OnTick`). It ran every frame with
+  every menu closed. Now:
+  - It takes itself off the tick list once every menu is closed (`TickSleeper`).
+  - MenuAPI 4's `MenuTicks.Changed` wakes it. The event fires when MenuAPI's
+    own menu loops start, on the frame after a menu opens and before they read
+    any input.
+  - The wake-up does that frame's work immediately: it ends the idle rests,
+    announces `vMenu:MenuStateChanged`, and sets the character creator's back
+    button guard.
+  - A 100 ms safety net in `GeneralTasks` wakes it if the event was ever
+    missed.
+- **The death save starts from the game's damage event**
+  (`CEventNetworkEntityDamage`). The appearance and weapons are saved as the
+  player dies, so the weapon in hand is not lost.
+  - A check 10 times a second, vMenu Enhanced's rate, catches deaths no damage
+    event reports, such as a script setting health to 0.
+  - Started while the ped is still dying, it waits for death, and restores
+    nothing if death never comes.
+  - Only one save runs per death.
+- **Loops sleep while their options are off.** Seventeen loops have nothing to
+  watch but menu options. With every menu closed and those options all off,
+  they rest for 2 s instead of 0.1–0.5 s:
+  - Player, weapon and misc options;
+  - Weather;
+  - HUD text and location;
+  - Recording keys;
+  - Death notifications;
+  - Overhead names;
+  - Entity outlines;
+  - The character editor camera;
+  - The snowball hint;
+  - The personal vehicle loops (while there is no personal vehicle);
+  - The shared player and vehicle checks, which also lost six 100 ms waits.
+
+  These events end the rest at once:
+  - a menu opening;
+  - new permissions;
+  - the player blips or names integration events;
+  - a new personal vehicle;
+  - the minimap key;
+  - the pause menu's expanded radar.
+
+  The loops that watch the game itself keep their rates: the radar preference,
+  voice chat, player blips, clothing glow, the vehicle loops and the time and
+  weather sync.
+
+**Expected effect.** Not measured. With every menu closed, on foot, and every
+option off:
+- vMenu's own every-frame loops go from 2 to none. MenuAPI's toggle tick
+  remains, as in Enhanced.
+- The other loops wake about 65 times a second instead of about 125. This is an
+  estimate from their rest times, not a measurement. Most of what is left is
+  the loops that watch the game, and the 10-a-second death check.
+
+**Validation:**
+- **New tests:**
+  - `tests/sleeping-loops` runs the production watcher and death code against
+    a fake game. It checks:
+    - asleep, nothing runs;
+    - MenuAPI's event does the open frame, and the creator's guard is set
+      before any input;
+    - the close frame is handled before sleeping;
+    - the safety net;
+    - one save per death, from the damage event or the fallback check, and
+      never for another entity.
+
+    Source checks cover which loops take the long rest (never with a menu
+    open) and every wake-up.
+  - `tests/upstream-bug-fixes`:
+    - plate labels against styles, through the one table;
+    - eyebrows;
+    - no double-encoded text anywhere in the client;
+    - the door toggle against fake doors;
+    - loadout reading (empty, `{}`, cut off, `null`, entries without a weapon)
+      and permissions by name;
+    - the Kick Passengers range.
+  - Each fix, undone, fails one of them.
+- **Updated tests:**
+  - `tests/idle-rests` still matches `build-2026-11-17-3` frame by frame with
+    the longer rests.
+  - `tests/key-bindings` checks that the minimap key wakes the loops.
+  - `tests/hud-overlay` checks the HUD's long rest.
+  - `tests/client-fixes` and `tests/client-guards` follow the moves.
+- **`tools/ilcompare` against release K:** the server changes only in
+  `GetOutOfCar` and its new range constant. The client changes are the
+  methods above, plus local functions the compiler renumbered.
+- **All 44 tests in AGENTS.md pass.**
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
+| `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` |
+| `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
+
+**Deploy (test):** on top of release K. Only the two DLLs change. They are in
+`deploy/release-l-test-build/`.
+1. Check that the installed DLLs are release K's (`4d002d53…` and `03147fa7…`).
+2. Copy both DLLs, then run `restart vMenu` (or restart the server) and have
+   players reconnect.
+
+**In-game checks:**
+- **Plates:** each License Plate Type name matches the plate.
+- **Randomize Character:** saves the eyebrows it shows.
+- **Arrows:** the Saved Characters and Saved Vehicles headings and arrows look
+  right.
+- **Toggle all doors:** Space in the mod menu, on a bike and on a car with only
+  the boot open.
+- **Death and respawn:** with Restore Weapons on, die with a gun in hand, by a
+  shot and by `/die` (or another script). The gun comes back after the
+  respawn, and so does the appearance. Do the same with PSRP_DeathScript's
+  revive.
+- **Menu:**
+  - F1 opens at once.
+  - The character creator's back button still shows "save first", including
+    after "Exit Without Saving" is cancelled.
+  - Closing the menu still offers to update a changed saved vehicle.
+- **Options switched with the menu closed:** a Discord role change with
+  `/refreshperms`, PSRP_Clockin's blips and names, the minimap key. Each takes
+  effect at once.
+- **Kick Passengers** works on a personal vehicle nearby.
+- **F8:** no new errors.
+
+**Roll back to release K:** copy back release K's two DLLs from
+`deploy/rollback-to-release-k/`.
 
 ## November 17, 2026 — release K: department outfits, character wardrobe, data refresh, vehicle options, request guard (client DLL, server DLL, Lua, config, SQL) — TESTING, branch `perf/release-k`
 
@@ -164,7 +334,7 @@ button already opens PSRP_spawner.
 
 | File | SHA-256 |
 | --- | --- |
-| `build/vMenu/vMenuClient.net.dll` | `4d002d53df8d1b485522ca2c36d332431898d8daa2eb8764692c99f974111a17` |
+| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
 | `build/vMenu/vMenuServer.net.dll` | `03147fa748dcee86dba985a99edb08fda6a58a9fca0b8cb8958409f80a70d39d` |
 | `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
 

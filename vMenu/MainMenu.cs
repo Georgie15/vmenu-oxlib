@@ -59,6 +59,10 @@ namespace vMenuClient
         public static bool MenuEnabled { get; private set; } = true;
 
         private static bool _wasMenuOpen = false;
+        // The menu watcher (OnTick) runs every frame only while a menu is open, or until setup is
+        // done. With every menu closed it sleeps, and MenuAPI's MenuTicks.Changed, raised when its
+        // own menu loops start as a menu opens, wakes it.
+        private static TickSleeper menuWatcher;
 
         private const int currentCleanupVersion = 2;
         #endregion
@@ -338,7 +342,9 @@ namespace vMenuClient
             }
             else
             {
+                menuWatcher = new TickSleeper(OnTick, t => Tick += t, t => Tick -= t);
                 Tick += OnTick;
+                MenuTicks.Changed += OnMenuTicksChanged;
             }
 
             // Clear all previous pause menu info/brief messages on resource start.
@@ -393,6 +399,8 @@ namespace vMenuClient
                 }
 
                 vMenuShared.PermissionsManager.SetPermissions(permissionsList);
+                // Loops resting with every option off check again with the new permissions.
+                IdleRest.WakeAll();
 
                 VehicleSpawner.allowedCategories = new List<bool>()
                 {
@@ -543,6 +551,58 @@ namespace vMenuClient
             // If the setup (permissions) is done, and it's not the first tick, then do this:
             if (ConfigOptionsSetupComplete)
             {
+                var anyOpen = WatchMenus();
+
+                // The flag is read first: the key only matters while it is set, which is only in
+                // the character creator.
+                if (MpPedCustomization.DisableBackButton && Game.IsDisabledControlJustReleased(0, Control.PhoneCancel))
+                {
+                    await Delay(0);
+                    Notify.Alert("You must save your ped first before exiting, or click the ~r~Exit Without Saving~s~ button.");
+                }
+
+                // Every menu is closed, and the frame after the last one closed has been handled
+                // above: nothing to watch until one opens again (OnMenuTicksChanged).
+                if (!anyOpen)
+                {
+                    menuWatcher?.Sleep();
+                }
+            }
+        }
+
+        /// <summary>
+        /// MenuAPI started or stopped one of its loops. Its menu loops start when a menu opens from
+        /// none, a frame before they first read input, so a sleeping watcher does that frame's work
+        /// here: the character creator's back button guard is set before MenuAPI can act on the key.
+        /// </summary>
+        private static void OnMenuTicksChanged()
+        {
+            if (menuWatcher != null && menuWatcher.Asleep && ConfigOptionsSetupComplete && MenuController.IsAnyMenuOpen())
+            {
+                WatchMenus();
+                menuWatcher.Wake();
+            }
+        }
+
+        /// <summary>
+        /// Safety net, called by a 100 ms loop: a menu open while the watcher sleeps means MenuAPI's
+        /// event was missed, so the watcher is woken anyway.
+        /// </summary>
+        internal static void EnsureMenuWatcherAwake()
+        {
+            if (menuWatcher != null && menuWatcher.Asleep && ConfigOptionsSetupComplete && MenuController.IsAnyMenuOpen())
+            {
+                WatchMenus();
+                menuWatcher.Wake();
+            }
+        }
+
+        /// <summary>
+        /// The menu watcher's work for one frame. Returns whether a menu is open.
+        /// </summary>
+        private static bool WatchMenus()
+        {
+            {
                 #region Handle Opening/Closing of the menu.
                 // MenuAPI 3 closed every menu when the ped died. MenuAPI 4's own check sits behind its
                 // "player is dead" draw gate and never runs, so a menu open at death came back after
@@ -602,18 +662,11 @@ namespace vMenuClient
                     }
                 }
 
-                // The flag is read first: the key only matters while it is set, which is only in
-                // the character creator.
-                if (MpPedCustomization.DisableBackButton && Game.IsDisabledControlJustReleased(0, Control.PhoneCancel))
-                {
-                    await Delay(0);
-                    Notify.Alert("You must save your ped first before exiting, or click the ~r~Exit Without Saving~s~ button.");
-                }
-
-                // This still runs every frame. It sets the character creator's back button guard
-                // the frame its menu reappears, and wakes the resting loops when any menu opens.
-
+                // While a menu is open this runs every frame. It sets the character creator's back
+                // button guard the frame its menu reappears, and wakes the resting loops when any
+                // menu opens.
                 #endregion
+                return isMenuOpen;
             }
         }
 

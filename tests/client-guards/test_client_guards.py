@@ -60,7 +60,8 @@ assert '!Game.IsControlEnabled(0, Control.MultiplayerInfo)' in minimap_key and '
 
 # --- fix 5 and 6 --------------------------------------------------------------------------------
 deaths = member(fc, r'^        private async Task DeathNotifications\(\).*?^        }$')
-assert deaths.rstrip().endswith('await Delay(250);\n        }') and 'Task.FromResult' not in deaths, 'death notifications check 4 times a second'
+assert deaths.rstrip().endswith('await (MainMenu.MiscSettingsMenu.DeathNotifications || AnyMenuOpen ? Delay(250) : Rest(SleepRestMs));\n        }') \
+    and 'Task.FromResult' not in deaths, 'death notifications check 4 times a second, and rest while off with every menu closed'
 options = member(fc, r'^        private async Task PlayerOptions\(\).*?^        }$')
 assert 'if (MainMenu.PlayerOptionsMenu.PlayerInvisible && IsAllowed(Permission.POInvisible) && GetSettingsBool(Setting.vmenu_handle_invisibility))' in options, \
     'the convar is only read while invisibility is on'

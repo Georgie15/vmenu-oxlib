@@ -94,6 +94,11 @@ namespace vMenuClient
         private const int IdleRestMs = 250;
         // Shorter, for what follows the player getting into a vehicle or dying.
         private const int StateRestMs = 100;
+        // Longer, for a loop with nothing to watch but its menu options, all of them off, and every
+        // menu closed: those options can't change until a menu opens, which ends the rest at once,
+        // as do new permissions and the few outside switches (the player blips and names integration
+        // events, the minimap key). The 2 s is a fallback, not the way it wakes.
+        private const int SleepRestMs = 2000;
 
         private static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();
 
@@ -149,6 +154,7 @@ namespace vMenuClient
             // Configuration based
             if (!GetSettingsBool(Setting.vmenu_disable_spawning_as_default_character))
             {
+                RegisterDeathEvents();
                 Tick += RestorePlayerAfterBeingDead;
             }
             if (!GetSettingsBool(Setting.vmenu_disable_entity_outlines_tool))
@@ -235,6 +241,10 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task GeneralTasks()
         {
+            // The menu watcher sleeps while every menu is closed; if MenuAPI's open event was ever
+            // missed, this wakes it within 100 ms.
+            MainMenu.EnsureMenuWatcherAwake();
+
             // Check if the player has switched to a new vehicle.
             // PlayerPedId() is one game call; Game.PlayerPed is two (PlayerId, then GetPlayerPed).
             var ped = PlayerPedId();
@@ -370,7 +380,7 @@ namespace vMenuClient
                 || DriveWanderTaskActive;
             if (!everyFrame)
             {
-                await Rest(IdleRestMs);
+                await Rest(SleepRestMs);
             }
         }
         #endregion
@@ -382,23 +392,13 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task DoPlayerAndVehicleChecks()
         {
+            // Six option reads, which used to be spread out with a wait after each.
             var god = IsAllowed(Permission.POGod) && MainMenu.PlayerOptionsMenu != null && MainMenu.PlayerOptionsMenu.PlayerGodMode;
-            await Delay(100);
-
             var vehGod = IsAllowed(Permission.VOGod) && MainMenu.VehicleOptionsMenu != null && MainMenu.VehicleOptionsMenu.VehicleGodMode;
-            await Delay(100);
-
             var ignored = IsAllowed(Permission.POIgnored) && MainMenu.PlayerOptionsMenu != null && MainMenu.PlayerOptionsMenu.PlayerIsIgnored;
-            await Delay(100);
-
             var stayInVeh = IsAllowed(Permission.POStayInVehicle) && MainMenu.PlayerOptionsMenu != null && MainMenu.PlayerOptionsMenu.PlayerStayInVehicle;
-            await Delay(100);
-
             var bikeSeatbelt = IsAllowed(Permission.VOBikeSeatbelt) && MainMenu.VehicleOptionsMenu != null && MainMenu.VehicleOptionsMenu.VehicleBikeSeatbelt;
-            await Delay(100);
-
             var noRagdoll = IsAllowed(Permission.PONoRagdoll) && MainMenu.PlayerOptionsMenu != null && MainMenu.PlayerOptionsMenu.PlayerNoRagdoll;
-            await Delay(100);
 
             var cantBeKnockedOff = god || vehGod || bikeSeatbelt || noRagdoll;
             var cantBeDraggedOut = god || vehGod || ignored || stayInVeh;
@@ -411,7 +411,16 @@ namespace vMenuClient
                 ped => new Ped(ped).CanBeShotInVehicle = false, ped => new Ped(ped).CanBeShotInVehicle = true);
             ApplyOverride(knockOffBikeLatch, cantBeKnockedOff, playerPed,
                 ped => new Ped(ped).CanBeKnockedOffBike = false, ped => new Ped(ped).CanBeKnockedOffBike = true);
-            await Delay(1000);
+            // Applied again every second while one is on, in case the ped changed (respawn, new
+            // model). With all of them off the latches were let go above and nothing is left to do.
+            if (!AnyMenuOpen && !cantBeKnockedOff && !cantBeDraggedOut && !cantBeShotInVehicle)
+            {
+                await Rest(SleepRestMs);
+            }
+            else
+            {
+                await Delay(1000);
+            }
         }
         #endregion
 
@@ -529,49 +538,10 @@ namespace vMenuClient
                         if (IsAllowed(Permission.VOChangePlate) && MainMenu.VehicleOptionsMenu.GetMenu().GetMenuItems().Find(mi => mi is MenuListItem li && li.ListItems.Any(liText => liText == GetLabelText("CMOD_PLA_0"))) is MenuListItem listItem)
                         {
                             // Set the license plate style.
-                            switch (veh.Mods.LicensePlateStyle)
+                            var platePosition = Array.IndexOf(menus.VehicleOptions.PlateStyles, veh.Mods.LicensePlateStyle);
+                            if (platePosition >= 0)
                             {
-                                case LicensePlateStyle.BlueOnWhite1:
-                                    listItem.ListIndex = 0;
-                                    break;
-                                case LicensePlateStyle.YellowOnBlack:
-                                    listItem.ListIndex = 1;
-                                    break;
-                                case LicensePlateStyle.YellowOnBlue:
-                                    listItem.ListIndex = 2;
-                                    break;
-                                case LicensePlateStyle.BlueOnWhite2:
-                                    listItem.ListIndex = 3;
-                                    break;
-                                case LicensePlateStyle.BlueOnWhite3:
-                                    listItem.ListIndex = 4;
-                                    break;
-                                case LicensePlateStyle.NorthYankton:
-                                    listItem.ListIndex = 5;
-                                    break;
-                                case LicensePlateStyle.ECola:
-                                    listItem.ListIndex = 6;
-                                    break;
-                                case LicensePlateStyle.LasVenturas:
-                                    listItem.ListIndex = 7;
-                                    break;
-                                case LicensePlateStyle.LibertyCity:
-                                    listItem.ListIndex = 8;
-                                    break;
-                                case LicensePlateStyle.LSCarMeet:
-                                    listItem.ListIndex = 9;
-                                    break;
-                                case LicensePlateStyle.LSPanic:
-                                    listItem.ListIndex = 10;
-                                    break;
-                                case LicensePlateStyle.LSPounders:
-                                    listItem.ListIndex = 11;
-                                    break;
-                                case LicensePlateStyle.Sprunk:
-                                    listItem.ListIndex = 12;
-                                    break;
-                                default:
-                                    break;
+                                listItem.ListIndex = platePosition;
                             }
                         }
 
@@ -794,7 +764,9 @@ namespace vMenuClient
         #region Weather Options
         private async Task WeatherOptions()
         {
-            await Delay(100);
+            // Only does something while the weather menu is open, so with every menu closed it rests
+            // until one opens.
+            await (AnyMenuOpen ? Delay(100) : Rest(SleepRestMs));
             var weatherMenu = MainMenu.WeatherOptionsMenu.GetMenu();
             if (weatherMenu != null && weatherMenu.Visible)
             {
@@ -857,11 +829,10 @@ namespace vMenuClient
                     SendNuiMessage("{\"action\":\"vmenuHud\",\"visible\":false}");
                     lastHudMessage = null;
                 }
-                // Checked 4 times a second, or every frame while a menu is open, so switching one
-                // on shows it at once.
+                // Checked every frame while a menu is open, so switching one on shows it at once.
                 if (!AnyMenuOpen)
                 {
-                    await Rest(IdleRestMs);
+                    await Rest(SleepRestMs);
                 }
                 return;
             }
@@ -998,7 +969,7 @@ namespace vMenuClient
             }
             else
             {
-                await Delay(1000);
+                await (AnyMenuOpen ? Delay(1000) : Rest(SleepRestMs));
             }
         }
         #endregion
@@ -1029,7 +1000,13 @@ namespace vMenuClient
                 {
                     DisplayRadar(IsRadarPreferenceSwitchedOn());
                 }
-                expandedRadarProfile = GetProfileSetting(221) == 1; // 221 = settings > display > expanded radar
+                var expanded = GetProfileSetting(221) == 1; // 221 = settings > display > expanded radar
+                if (expanded && !expandedRadarProfile)
+                {
+                    // MiscSettings keeps it open every frame, and may be resting.
+                    IdleRest.WakeAll();
+                }
+                expandedRadarProfile = expanded;
             }
             // Every frame while a menu is open, as before, so unticking Hide Radar or leaving the
             // character creator follows the preference on the next frame.
@@ -1101,7 +1078,8 @@ namespace vMenuClient
                 || expandedRadarProfile || vMenuOpenedBigmap || bothSpeeds;
             if (!everyFrame)
             {
-                await Rest(IdleRestMs);
+                // RadarSettings and the minimap key wake it when they turn on the expanded radar.
+                await Rest(SleepRestMs);
             }
         }
 
@@ -1116,11 +1094,11 @@ namespace vMenuClient
         {
             if (!MainMenu.MiscSettingsMenu.KbRecordKeys)
             {
-                // The recording keys are off: nothing to read. Checked again 4 times a second, or
-                // next frame while a menu is open, so switching them on works at once.
+                // The recording keys are off: nothing to read. Checked again next frame while a menu
+                // is open, so switching them on works at once.
                 if (!AnyMenuOpen)
                 {
-                    await Rest(IdleRestMs);
+                    await Rest(SleepRestMs);
                 }
                 return;
             }
@@ -1362,7 +1340,8 @@ namespace vMenuClient
                 }
             }
             // Players stay dead for seconds, so 4 checks a second is enough. This ran every frame.
-            await Delay(250);
+            // Switched off, it rests until a menu opens.
+            await (MainMenu.MiscSettingsMenu.DeathNotifications || AnyMenuOpen ? Delay(250) : Rest(SleepRestMs));
         }
         #endregion
         #endregion
@@ -1540,7 +1519,7 @@ namespace vMenuClient
                 || MainMenu.WeaponOptionsMenu.UnlimitedParachutes;
             if (!everyFrame)
             {
-                await Rest(IdleRestMs);
+                await Rest(SleepRestMs);
             }
         }
         #endregion
@@ -1830,7 +1809,7 @@ namespace vMenuClient
             // in it, so with every menu closed this rests.
             if (!AnyMenuOpen && camera == null)
             {
-                await Rest(IdleRestMs);
+                await Rest(SleepRestMs);
             }
         }
 
@@ -2045,15 +2024,97 @@ namespace vMenuClient
             return (dead is int || dead is long || dead is double) && Convert.ToDouble(dead) == 1;
         }
 
+        // Death. The appearance and weapons are saved as the player's ped dies, before the game can
+        // drop the weapon in hand. This checked every frame; now the game's damage event
+        // (CEventNetworkEntityDamage, raised for the frame the damage lands) starts it, and a check
+        // 10 times a second (as vMenu Enhanced) catches a death no damage event reports, such as a
+        // script setting health to 0.
+        private const int DeathCheckMs = 100;
+        private static bool deathEventsRegistered;
+        private bool deathInProgress;
+
+        private void RegisterDeathEvents()
+        {
+            if (deathEventsRegistered)
+            {
+                return;
+            }
+            deathEventsRegistered = true;
+            EventHandlers["gameEventTriggered"] += new Action<string, List<object>>(OnGameEvent);
+        }
+
+        private void OnGameEvent(string name, List<object> args)
+        {
+            if (name != "CEventNetworkEntityDamage" || deathInProgress || args == null || args.Count == 0)
+            {
+                return;
+            }
+            var ped = PlayerPedId();
+            int victim;
+            try
+            {
+                victim = Convert.ToInt32(args[0]);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            // The victim is the first argument in every game build; whether it was fatal moves
+            // between builds, so the ped is asked instead.
+            if (victim != ped || !(IsEntityDead(ped) || IsPedDeadOrDying(ped, true)))
+            {
+                return;
+            }
+            _ = HandlePlayerDeathSafely();
+        }
+
+        private async Task HandlePlayerDeathSafely()
+        {
+            try
+            {
+                await HandlePlayerDeath();
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine($"[vMenu] Restoring the player after death failed: {e.Message}");
+            }
+        }
+
         /// <summary>
-        /// Restores player appearance after dying.
+        /// The fallback death check: 10 times a second, for deaths the damage event didn't report.
         /// </summary>
-        /// <returns></returns>
         private async Task RestorePlayerAfterBeingDead()
         {
-            // Still checked every frame: the appearance and weapons are saved on the first frame
-            // of death, before the game can drop the weapon in hand.
-            if (MainMenu.MiscSettingsMenu != null && IsEntityDead(PlayerPedId()))
+            if (!deathInProgress && IsEntityDead(PlayerPedId()))
+            {
+                await HandlePlayerDeath();
+            }
+            await Delay(DeathCheckMs);
+        }
+
+        /// <summary>
+        /// Saves the appearance and weapons as the player dies, waits for the respawn or revive, and
+        /// restores them. One at a time: the damage event and the fallback check can both see a death.
+        /// </summary>
+        private async Task HandlePlayerDeath()
+        {
+            if (deathInProgress || MainMenu.MiscSettingsMenu == null)
+            {
+                return;
+            }
+            deathInProgress = true;
+            try
+            {
+                await SaveAndRestoreAroundDeath();
+            }
+            finally
+            {
+                deathInProgress = false;
+            }
+        }
+
+        private async Task SaveAndRestoreAroundDeath()
+        {
             {
                 var restoreDefault = MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter
                     && !string.IsNullOrEmpty(GetResourceKvpString("vmenu_default_character"));
@@ -2082,6 +2143,18 @@ namespace vMenuClient
                     {
                         Log("save failed from restore weapons after death");
                     }
+                }
+
+                // Saved from the damage event, the ped may still be dying: wait until it is dead,
+                // and restore nothing if it never is.
+                var deadBy = GetGameTimer() + 5000;
+                while (!Game.PlayerPed.IsDead && !IsLogicallyDead() && GetGameTimer() < deadBy)
+                {
+                    await Delay(0);
+                }
+                if (!Game.PlayerPed.IsDead && !IsLogicallyDead())
+                {
+                    return;
                 }
 
                 // PSRP_DeathScript's fake death brings the dead ped back to life about
@@ -2632,7 +2705,10 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task PlayerOverheadNamesControl()
         {
-            await Delay(500);
+            // Switched off, the pass after that clears the tags; from then on it rests until a menu
+            // opens or vMenu:Integrations:SetPlayerNames switches names on.
+            var namesOff = MainMenu.MiscSettingsMenu != null && !MainMenu.MiscSettingsMenu.MiscShowOverheadNames;
+            await (namesOff && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(500));
 
             if (MainMenu.MiscSettingsMenu != null)
             {
@@ -2918,6 +2994,8 @@ namespace vMenuClient
                 SetBigmapActive(true, false);
                 radarSwitchTimer = GetGameTimer();
                 vMenuOpenedBigmap = true;
+                // MiscSettings closes it after 8 s, and may be resting.
+                IdleRest.WakeAll();
             }
         }
 
@@ -3012,7 +3090,8 @@ namespace vMenuClient
                     showSnowballInfo = true;
                 }
             }
-            await Delay(100);
+            // Without snow this rests; the help shows within 2 s of snow starting.
+            await (EventManager.IsSnowEnabled ? Delay(100) : Rest(SleepRestMs));
         }
         #endregion
 
@@ -3029,7 +3108,7 @@ namespace vMenuClient
             {
                 if (!AnyMenuOpen)
                 {
-                    await Rest(IdleRestMs);
+                    await Rest(SleepRestMs);
                 }
                 return;
             }
@@ -3269,7 +3348,7 @@ namespace vMenuClient
             {
                 if (!AnyMenuOpen)
                 {
-                    await Rest(IdleRestMs);
+                    await Rest(SleepRestMs);
                 }
                 return;
             }
@@ -3316,8 +3395,9 @@ namespace vMenuClient
         /// </summary>
         private async Task PersonalVehicleAutoLockTick()
         {
-            await Delay(500);
             var personalVehicleMenu = MainMenu.PersonalVehicleMenu;
+            // No personal vehicle: rests until one is set (SetCurrentPersonalVehicle wakes it).
+            await (personalVehicleMenu?.CurrentPersonalVehicle == null && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(500));
             var veh = personalVehicleMenu?.CurrentPersonalVehicle;
             if (!MainMenu.PermissionsSetupComplete || veh == null || !veh.Exists() || veh.IsDead)
             {
@@ -3338,7 +3418,8 @@ namespace vMenuClient
         {
             if (!MainMenu.PermissionsSetupComplete || MainMenu.PersonalVehicleMenu == null)
             {
-                await Delay(200);
+                // New permissions wake it.
+                await Rest(SleepRestMs);
                 return;
             }
 
@@ -3347,7 +3428,8 @@ namespace vMenuClient
 
             if (personalVehicle == null)
             {
-                await Delay(200);
+                // SetCurrentPersonalVehicle wakes it.
+                await Rest(SleepRestMs);
                 return;
             }
 
@@ -3412,7 +3494,9 @@ namespace vMenuClient
             {
                 pvHornPressFrame = null;
                 personalVehicleMenu?.ResetHornLockTap();
-                await Delay(100);
+                // Near it again is a distance only this check sees; no personal vehicle at all waits
+                // for SetCurrentPersonalVehicle, which wakes it.
+                await (veh == null && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(100));
                 return;
             }
 

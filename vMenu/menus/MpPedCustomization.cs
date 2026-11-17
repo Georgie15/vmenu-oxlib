@@ -1771,8 +1771,8 @@ namespace vMenuClient.menus
                                 colorRequired = true;
                                 colorIndex = 1;
 
-                                currentCharacter.PedAppearance.eyebrowsColor = value;
-                                currentCharacter.PedAppearance.eyebrowsStyle = color;
+                                currentCharacter.PedAppearance.eyebrowsStyle = value;
+                                currentCharacter.PedAppearance.eyebrowsColor = color;
                                 currentCharacter.PedAppearance.eyebrowsOpacity = opacity;
                                 break;
 
@@ -2350,7 +2350,7 @@ namespace vMenuClient.menus
                 savedCharactersCategoryMenu.AddMenuItem(deleteBtn);
                 savedCharactersCategoryMenu.AddMenuItem(deleteCharsBtn);
 
-                var spacer = GetSpacerMenuItem("â†“ Characters â†“");
+                var spacer = GetSpacerMenuItem("↓ Characters ↓");
                 savedCharactersCategoryMenu.AddMenuItem(spacer);
 
                 List<string> names = GetAllMpCharacterNames();
@@ -2378,7 +2378,7 @@ namespace vMenuClient.menus
 
                         var btn = new MenuItem(name, "Click to spawn, edit, clone, rename or delete this saved character.")
                         {
-                            Label = "â†’â†’â†’",
+                            Label = "→→→",
                             LeftIcon = tmpData.IsMale ? MenuItem.Icon.MALE : MenuItem.Icon.FEMALE,
                             ItemData = tmpData.IsMale
                         };

@@ -54,7 +54,7 @@ print('PASS: wiring (load timeouts, Extras menu, teleport, spawner, glow, blips)
 
 # PSRP_DeathScript's fake death: a dead ped is alive again ~1.5 s after the fall, so the after-death
 # restore (which swaps the model) must also wait for the `dead` state bag to clear.
-restore = member(fc, r'^        private async Task RestorePlayerAfterBeingDead\(.*?^        }$')
+restore = member(fc, r'^        private async Task SaveAndRestoreAroundDeath\(.*?^        }$')
 assert 'while (Game.PlayerPed.IsDead || IsLogicallyDead() ||' in restore, 'after-death restore waits for the logical death'
 logical = member(fc, r'^        private static bool IsLogicallyDead\(.*?^        }$')
 assert 'Game.Player.State["dead"]' in logical and 'is bool flag' in logical and '== 1' in logical, \

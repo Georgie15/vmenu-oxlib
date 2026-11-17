@@ -106,6 +106,7 @@ namespace Keys
         public static bool IsControlEnabled(int group, Control control) => !W.Disabled.Contains(control);
     }
     public class TickSleeper { public void Wake() => W.Wakes++; public void Sleep() => W.Sleeps++; }
+    public static class IdleRest { public static int Woken; public static void WakeAll() => Woken++; }
     public static class N
     {
         public static int GetGameTimer() => W.Now;
@@ -198,10 +199,11 @@ namespace Keys
             // Minimap
             W.Reset(); h.Minimap();
             Check(!W.Bigmap, "minimap: option off, nothing happens");
-            W.KbRadarKeys = true; h.Minimap();
+            W.KbRadarKeys = true; var wokenBefore = IdleRest.Woken; h.Minimap();
             Check(W.Bigmap && h.OpenedBigmap, "minimap: opens the expanded radar and remembers vMenu opened it");
+            Check(IdleRest.Woken == wokenBefore + 1, "minimap: wakes the resting loops, so MiscSettings closes it after 8 s");
             h.Minimap();
-            Check(!W.Bigmap && !h.OpenedBigmap, "minimap: closes it again");
+            Check(!W.Bigmap && !h.OpenedBigmap && IdleRest.Woken == wokenBefore + 1, "minimap: closes it again (nothing to wake)");
             W.MenuOpen = true; h.Minimap(); W.MenuOpen = false;
             W.Pause = true; h.Minimap(); W.Pause = false;
             W.Disabled.Add(Control.MultiplayerInfo); h.Minimap(); W.Disabled.Clear();
