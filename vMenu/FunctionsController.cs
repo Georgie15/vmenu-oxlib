@@ -29,6 +29,7 @@ namespace vMenuClient
     class FunctionsController : BaseScript
     {
         private int LastVehicle = 0;
+        private int radioAppliedVehicle = 0;
         private bool SwitchedVehicle = false;
         private readonly List<int> deadPlayers = new();
         private float cameraRotationHeading = 0f;
@@ -246,14 +247,27 @@ namespace vMenuClient
                     // Set the last vehicle to the new vehicle entity.
                     LastVehicle = tmpVehicle.Handle;
                     SwitchedVehicle = true;
-                    // The player's radio choices (Vehicle Options), once per vehicle they get into.
-                    VehicleRadio.ApplyTo(tmpVehicle.Handle);
 
                     if (IsAllowed(Permission.PVMenu) && MainMenu.PermissionsSetupComplete && MainMenu.PersonalVehicleMenu != null && Game.PlayerPed == tmpVehicle.Driver)
                     {
                         MainMenu.PersonalVehicleMenu.SetCurrentPersonalVehicle(tmpVehicle);
                     }
                 }
+            }
+            // The player's radio choices (Vehicle Options), each time they become a vehicle's driver:
+            // getting in, getting back in, or moving over from a passenger seat.
+            var driving = seated ? GetVehiclePedIsIn(ped, false) : 0;
+            if (driving != 0 && GetPedInVehicleSeat(driving, -1) == ped)
+            {
+                if (driving != radioAppliedVehicle)
+                {
+                    radioAppliedVehicle = driving;
+                    VehicleRadio.ApplyTo(driving);
+                }
+            }
+            else
+            {
+                radioAppliedVehicle = 0;
             }
             // Checked 10 times a second, seated or not (vMenu Enhanced polls the seat 4 times a
             // second). A new vehicle is seen within 100 ms of sitting in it, and VehicleOptions

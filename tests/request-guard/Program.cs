@@ -205,9 +205,22 @@ static class Program
                     where + ": client arguments are object (a typed one the runtime can't convert removes the handler)");
                 Check(body.Contains("RequestGuard.Admit(") && body.Contains("RequestGuard." + field), where + ": goes through RequestGuard." + field);
                 var admit = body.IndexOf("RequestGuard.Admit(", StringComparison.Ordinal);
+                // RequestPermissions first handles a call from another resource on the server (no
+                // sender: DiscordAcePerms naming a player after a role refresh). Clients can't reach
+                // that branch: it needs no sender and a non-client source. Checked separately below.
+                var checkedBody = body;
+                if (name == "vMenu:RequestPermissions")
+                {
+                    var serverBranch = Regex.Match(body, @"if \(sourcePlayer == null\)\s*\{.*?\r?\n            \}", RegexOptions.Singleline);
+                    Check(serverBranch.Success && serverBranch.Value.Contains("!RequestSource.IsClient(source)") && serverBranch.Value.Contains("RequestPayload.TryInt(target, out var id)")
+                          && Regex.IsMatch(serverBranch.Value, @"return;\s*\}$"),
+                        where + ": a server-side refresh names the player, never a client");
+                    checkedBody = body.Remove(serverBranch.Index, serverBranch.Length);
+                    admit = checkedBody.IndexOf("RequestGuard.Admit(", StringComparison.Ordinal);
+                }
                 foreach (var work in new[] { "IsPlayerAceAllowed(", "PermissionsManager.", "personalVehicles.", "JsonConvert.", "Current", "TriggerClientEvent(", "Exports[" })
                 {
-                    var at = body.IndexOf(work, StringComparison.Ordinal);
+                    var at = checkedBody.IndexOf(work, StringComparison.Ordinal);
                     Check(at < 0 || at > admit, where + ": the guard runs before " + work);
                 }
                 if (parameters.Count > 1 && name != "vMenu:RequestPermissions")
@@ -245,6 +258,10 @@ static class Program
             var body = Regex.Match(main, @"internal void " + handler + @"\(.*?\n        \}", RegexOptions.Singleline).Value;
             Check(body.Contains("if (source != null && !RequestGuard.Admit(source, request))"), handler + ": the server's own calls still work");
         }
+        var updateTime = Regex.Match(main, @"internal void UpdateTime\(.*?\n        \}", RegexOptions.Singleline).Value;
+        var bounds = updateTime.IndexOf("if (newHours < 0 || newHours > 23 || newMinutes < 0 || newMinutes > 59)", StringComparison.Ordinal);
+        Check(bounds > 0 && bounds < updateTime.IndexOf("CurrentHours = newHours;", StringComparison.Ordinal),
+            "UpdateTime: an hour outside 0-23 or a minute outside 0-59 is refused before it is used");
         Console.WriteLine($"PASS: C# wiring ({seen.Count} client events guarded with object arguments and caught exceptions; {droppedHandlers} player-event handlers check their source)");
     }
 

@@ -276,6 +276,13 @@ static class Program
         Check(serverActions.SequenceEqual(clientActions) && serverActions.Count == 6, "client requests match the server's actions: " + string.Join(",", clientActions) + " / " + string.Join(",", serverActions));
         var bridge = Read("vMenu", "DepartmentOutfitsBridge.cs");
         Check(bridge.Contains("TriggerServerEvent(DepartmentOutfits.RequestEvent, request, action,") && bridge.Contains("EventHandlers[DepartmentOutfits.ReplyEvent]"), "the bridge uses the shared event names");
+        Check(bridge.Contains("await Delay(PollMs);") && bridge.Contains("private const int PollMs = 50;") && !bridge.Contains("Delay(0)"), "the bridge checks for the answer every 50 ms, not every frame");
+        var listLimit = Regex.Match(lua, @"local COOLDOWN_MS = \{ list = (\d+), wear = (\d+),");
+        var spacing = Regex.Match(bridge, @"SpacingMs = new\(\) \{ \[""list""\] = (\d+), \[""wear""\] = (\d+) \};");
+        Check(listLimit.Success && spacing.Success && int.Parse(spacing.Groups[1].Value) > int.Parse(listLimit.Groups[1].Value)
+            && int.Parse(spacing.Groups[2].Value) > int.Parse(listLimit.Groups[2].Value), "list and wear requests are spaced past the server's limits, so reopening the menu waits instead of failing");
+        Check(dept.Contains("Notify.Error(\"Department outfits are only for MP characters.\");") && dept.Contains("Notify.Error(\"This outfit couldn't be read."),
+            "an outfit that can't be worn says why");
         Check(lua.Contains("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'") && lua.Contains("'vMenu:DeptOutfits:Reply'") && lua.Contains("GetConvarBool('vmenu_dept_outfits', false)"), "the server uses the same events and convar");
         Check(!dept.Contains("IsAllowed(") && !Regex.IsMatch(dept, @"\[""org""\] = listing\.Duty"), "the client never decides access or claims its duty org");
 

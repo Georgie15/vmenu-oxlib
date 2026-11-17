@@ -190,6 +190,26 @@ static class Program
             && TattoosData.HashOf("MP_Bea_M_Back_000") == unchecked((uint)Natives.API.GetHashKey("MP_Bea_M_Back_000")), "names apply GET_HASH_KEY, as before");
         Console.WriteLine("PASS: TattoosData builds the menus from the list and the game, once, and applies saved names and hashes");
 
+        // --- A tattoo saved by hash that a later list names ------------------------------------------
+        var named = listed.First(t => t.collectionName != TattooCatalog.SinglePlayerCollection);
+        var asHash = new KeyValuePair<string, string>(TattooCatalog.HashName(TattooCatalog.Joaat(named.collectionName)), TattooCatalog.HashName(TattooCatalog.Joaat(named.name)));
+        var withName = new KeyValuePair<string, string>(named.collectionName, named.name);
+        var unknown = new KeyValuePair<string, string>("0x11111111", "0x99999999");
+        var plain = new KeyValuePair<string, string>("mpBeach_overlays", "MP_Bea_M_Back_000");
+        var lookups = 0;
+        Dictionary<ulong, KeyValuePair<string, string>> Lookup() { lookups++; return TattooCatalog.NamedByHash(listed); }
+        var savedTattoos = new List<KeyValuePair<string, string>> { plain, asHash, unknown };
+        Check(TattooCatalog.UseNames(savedTattoos, Lookup) && savedTattoos.SequenceEqual(new[] { plain, withName, unknown }) && lookups == 1,
+            "saved by hash, now named: saved under its name, so the menu shows it worn; an unknown hash stays as it is");
+        Check(!TattooCatalog.UseNames(savedTattoos, Lookup) && lookups == 2, "nothing more to change");
+        var both = new List<KeyValuePair<string, string>> { withName, asHash };
+        Check(TattooCatalog.UseNames(both, Lookup) && both.SequenceEqual(new[] { withName }), "worn both ways: the hash copy is dropped");
+        var byName = new List<KeyValuePair<string, string>> { plain, withName };
+        lookups = 0;
+        Check(!TattooCatalog.UseNames(byName, Lookup) && lookups == 0 && !TattooCatalog.UseNames(null, Lookup), "names only: the lookup is never built");
+        Check(TattooCatalog.NamedByHash(shops.Tattoos).Values.All(t => !TattooCatalog.TryParseHashName(t.Value, out _)), "shop-only tattoos are not names");
+        Console.WriteLine("PASS: tattoos saved by hash are matched to names a later list adds");
+
         // --- Wiring ----------------------------------------------------------------------------------
         var mp = Read("vMenu", "menus", "MpPedCustomization.cs");
         Check(!Regex.IsMatch(mp, @"GetHashKey\((tattoo|tat)\.(Key|Value)\)"), "no saved tattoo is hashed with GET_HASH_KEY directly");
@@ -198,6 +218,11 @@ static class Program
         Check(mp.Contains("TattoosData.GenerateTattoosData();"), "the character editor builds the tattoo menus from TattoosData");
         var data = Read("vMenu", "data", "TattoosData.cs");
         Check(data.Contains("catch (Exception e)") && data.Contains("catalog = TattooCatalog.Build(listed, null, null);"), "any failure reading the game falls back to the list");
+        var shopRead = data.IndexOf("shopTattoos = ReadShopTattoos();", StringComparison.Ordinal);
+        Check(shopRead > 0 && shopRead < data.IndexOf("catalog = TattooCatalog.Build(listed, (collection, name) => GetPedDecorationZoneFromHashes(collection, name), shopTattoos);", StringComparison.Ordinal)
+            && !data.Contains("ReadShopTattoos());"), "the shop read has its own try, so its failure keeps the zone check");
+        Check(Regex.Matches(mp, @"TattoosData\.UseCatalogNames\(currentCharacter\.PedTatttoos\.\w+Tattoos\);").Count == 7,
+            "each of the seven saved tattoo lists is matched to names before the menu compares it");
         Check(Regex.IsMatch(data, @"ShopItemBufferSize = 0x200;") && data.Contains("Marshal.FreeHGlobal(buffer);"), "the shop buffer is large and freed");
         Console.WriteLine("PASS: wiring (all tattoo applies go through HashOf, failures fall back to the list)");
         return 0;

@@ -93,6 +93,16 @@ namespace vMenuClient.data
         /// </summary>
         internal static uint HashOf(string name) => TattooCatalog.TryParseHashName(name, out var hash) ? hash : (uint)GetHashKey(name);
 
+        private static List<Tattoo> catalogTattoos;
+        private static Dictionary<ulong, KeyValuePair<string, string>> namedByHash;
+
+        /// <summary>
+        /// Saved tattoos stored by hash that the list has since named are matched to their names
+        /// (<see cref="TattooCatalog.UseNames"/>). The lookup is built the first time one is found.
+        /// </summary>
+        internal static bool UseCatalogNames(List<KeyValuePair<string, string>> saved) =>
+            TattooCatalog.UseNames(saved, () => catalogTattoos == null ? null : namedByHash ??= TattooCatalog.NamedByHash(catalogTattoos));
+
         private static bool isDataSetup = false;
         internal static void GenerateTattoosData()
         {
@@ -104,10 +114,20 @@ namespace vMenuClient.data
             isDataSetup = true;
 
             var listed = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Tattoo>>(Properties.Resources.overlays);
+            // The shop read on its own: if it fails, the zone check still leaves out what this game lacks.
+            List<ShopTattoo> shopTattoos = null;
+            try
+            {
+                shopTattoos = ReadShopTattoos();
+            }
+            catch (Exception e)
+            {
+                Log($"[vMenu] [Tattoos] Could not read the game's tattoo shops, so shop-only tattoos are not listed: {e.Message}");
+            }
             TattooCatalog.Result catalog;
             try
             {
-                catalog = TattooCatalog.Build(listed, (collection, name) => GetPedDecorationZoneFromHashes(collection, name), ReadShopTattoos());
+                catalog = TattooCatalog.Build(listed, (collection, name) => GetPedDecorationZoneFromHashes(collection, name), shopTattoos);
             }
             catch (Exception e)
             {
@@ -116,6 +136,7 @@ namespace vMenuClient.data
             }
             Log($"[vMenu] [Tattoos] {catalog.FromList} from vMenu's list, {catalog.NotInGame} left out (not in this game build), " +
                 $"{catalog.FromShops} more from the game's shops. Game checked: {catalog.GameChecked}, shops used: {catalog.ShopsUsed}.");
+            catalogTattoos = catalog.Tattoos;
 
             foreach (var tattoo in catalog.Tattoos)
             {

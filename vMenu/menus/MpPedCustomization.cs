@@ -1431,6 +1431,14 @@ namespace vMenuClient.menus
                 currentCharacter.PedTatttoos.LeftLegTattoos ??= new List<KeyValuePair<string, string>>();
                 currentCharacter.PedTatttoos.RightLegTattoos ??= new List<KeyValuePair<string, string>>();
                 currentCharacter.PedTatttoos.BadgeTattoos ??= new List<KeyValuePair<string, string>>();
+                // Tattoos saved by hash that vMenu's list now names show as worn (TattooCatalog.UseNames).
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.HeadTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.TorsoTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.LeftArmTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.RightArmTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.LeftLegTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.RightLegTattoos);
+                TattoosData.UseCatalogNames(currentCharacter.PedTatttoos.BadgeTattoos);
             }
 
             void ApplySavedTattoos()
@@ -3537,7 +3545,17 @@ namespace vMenuClient.menus
                     return;
                 }
                 var save = ClothingSaves.Read(ClothingSaves.Kind.Outfit, reply.Text("payload"));
-                if (!IsCurrentPedMpFreemode() || !WearOutfit(save, $"Department outfit {outfit.Name}"))
+                if (!IsCurrentPedMpFreemode())
+                {
+                    Notify.Error("Department outfits are only for MP characters.");
+                    return;
+                }
+                if (save == null)
+                {
+                    Notify.Error("This outfit couldn't be read. Ask a department head to publish it again.");
+                    return;
+                }
+                if (!WearOutfit(save, $"Department outfit {outfit.Name}"))
                 {
                     Notify.Error("This outfit is for the other body type.");
                     return;

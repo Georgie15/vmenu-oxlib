@@ -677,13 +677,48 @@ namespace vMenuShared
         }
 #endif
 #if CLIENT
+        private static Dictionary<string, Permission> permissionsByName;
+
+        /// <summary>
+        /// Reads the server's permission list, { "Name": true/false }. A name this build doesn't have
+        /// (a newer server, or a client rolled back without its server) is skipped, so the rest of the
+        /// menu still works; reading it as Dictionary&lt;Permission, bool&gt; threw on the first one and
+        /// left vMenu without a menu.
+        /// </summary>
+        internal static Dictionary<Permission, bool> ParsePermissions(string json)
+        {
+            if (permissionsByName == null)
+            {
+                var names = new Dictionary<string, Permission>(StringComparer.Ordinal);
+                foreach (Permission p in Enum.GetValues(typeof(Permission)))
+                {
+                    names[p.ToString()] = p;
+                }
+                permissionsByName = names;
+            }
+            var raw = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, bool>>(json);
+            var result = new Dictionary<Permission, bool>();
+            if (raw == null)
+            {
+                return result;
+            }
+            foreach (var pair in raw)
+            {
+                if (pair.Key != null && permissionsByName.TryGetValue(pair.Key, out var permission))
+                {
+                    result[permission] = pair.Value;
+                }
+            }
+            return result;
+        }
+
         /// <summary>
         /// Sets the permission (client side event handler).
         /// </summary>
         /// <param name="permissions"></param>
         public static void SetPermissions(string permissions)
         {
-            Permissions = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<Permission, bool>>(permissions);
+            Permissions = ParsePermissions(permissions);
             effectivePermissions = BuildEffectivePermissions(Permissions, ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_menu_staff_only));
             // if debug logging.
             if (GetResourceMetadata(GetCurrentResourceName(), "client_debug_mode", 0) == "true")

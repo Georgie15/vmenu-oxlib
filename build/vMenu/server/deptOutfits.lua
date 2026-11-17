@@ -6,7 +6,10 @@
 --   On duty:   exports.PoliceEMSActivity:GetDutyInfo(src) / GetDutyOrg(src). Without
 --              PoliceEMSActivity nobody counts as on duty; managers still manage.
 --   Managers:  ace vMenu.DeptOutfits.Manage.<org> (the org id as PoliceEMSActivity's Config.Orgs
---              writes it, e.g. vMenu.DeptOutfits.Manage.lspd), or vMenu.DeptOutfits.ManageAll.
+--              writes it, e.g. vMenu.DeptOutfits.Manage.lspd), or vMenu.DeptOutfits.ManageAll, or
+--              vMenu.DeptOutfits.ManageOwn: the orgs whose member ace (DepartmentOutfitOrgs' member,
+--              the org's duty permission in PoliceEMSActivity) the player also has. PSRP grants
+--              ManageOwn to group.depthead, so a department head manages their own department.
 --   Wearing:   the org you're on duty with, and any org you manage.
 --   Storage:   the vmenu_dept_outfits table (database.sql); needs oxmysql.
 --   Enabled:   setr vmenu_dept_outfits true
@@ -20,7 +23,10 @@ local MAX_ARGS_BYTES = 12288
 local MAX_PAYLOAD_BYTES = 8192
 local MAX_NAME_LENGTH = 40
 local MAX_PER_ORG_AND_MODEL = 60
-local MAX_LISTED = 300
+local MAX_LISTED = 2000 -- names only (no outfit data): every org's presets for one body fit
+-- Ace checks cost about 0.3-0.5 ms each on the main thread and an access check makes one or more per
+-- org, so who manages what is kept per player for 30 seconds. Duty is always read fresh.
+local MANAGE_CACHE_MS = 30000
 local LATENT_REPLY_BYTES = 8000
 local LATENT_BPS = 64000
 
@@ -28,6 +34,7 @@ local LATENT_BPS = 64000
 local COOLDOWN_MS = { list = 300, wear = 1000, publish = 10000, replace = 5000, rename = 3000, delete = 3000 }
 
 local MANAGE_ALL_ACE = 'vMenu.DeptOutfits.ManageAll'
+local MANAGE_OWN_ACE = 'vMenu.DeptOutfits.ManageOwn'
 local MANAGE_ACE_PREFIX = 'vMenu.DeptOutfits.Manage.'
 local DUTY_RESOURCE = 'PoliceEMSActivity'
 
@@ -53,17 +60,20 @@ end
 --- Org ids and labels managers can publish for, in menu order: config/config_server.lua's
 --- DepartmentOutfitOrgs ({ { id = 'lspd', label = '...' }, ... }).
 local function configuredOrgs()
-    local list, labels = {}, {}
+    local list, labels, memberAces = {}, {}, {}
     local orgs = type(Config) == 'table' and Config.DepartmentOutfitOrgs or nil
     if type(orgs) == 'table' then
         for _, org in ipairs(orgs) do
             if type(org) == 'table' and isOrgId(org.id) and not labels[org.id] then
                 labels[org.id] = type(org.label) == 'string' and org.label ~= '' and org.label or org.id
                 list[#list + 1] = org.id
+                if type(org.member) == 'string' and org.member ~= '' then
+                    memberAces[org.id] = org.member
+                end
             end
         end
     end
-    return list, labels
+    return list, labels, memberAces
 end
 
 local function dutyAvailable()
@@ -87,16 +97,53 @@ local function managesAll(src)
     return IsPlayerAceAllowed(src, MANAGE_ALL_ACE)
 end
 
-local function manages(src, org)
-    return isOrgId(org) and (managesAll(src) or IsPlayerAceAllowed(src, MANAGE_ACE_PREFIX .. org))
+--- Who this player manages, read once per MANAGE_CACHE_MS: ManageAll, ManageOwn, and the
+--- configured orgs they manage (Manage.<org>, or ManageOwn plus the org's duty permission).
+local manageCache = {}
+local function managerOf(src, list, memberAces)
+    local now = GetGameTimer()
+    local cached = manageCache[src]
+    if cached and now - cached.at < MANAGE_CACHE_MS then return cached end
+    local all = managesAll(src)
+    local own = not all and IsPlayerAceAllowed(src, MANAGE_OWN_ACE)
+    local set = {}
+    for _, id in ipairs(list) do
+        -- A department head (ManageOwn) manages an org they belong to: its duty permission.
+        local member = memberAces[id]
+        if all or IsPlayerAceAllowed(src, MANAGE_ACE_PREFIX .. id) or (own and member ~= nil and IsPlayerAceAllowed(src, member)) then
+            set[id] = true
+        end
+    end
+    cached = { at = now, all = all, set = set, extra = {} }
+    manageCache[src] = cached
+    return cached
+end
+
+AddEventHandler('playerDropped', function()
+    local src = tonumber(source)
+    if src then manageCache[src] = nil end
+end)
+
+--- Whether the player manages an org: the cached configured set, or (for an org the config doesn't
+--- list yet) ManageAll or Manage.<org>, remembered with the cache.
+local function manages(src, org, manager)
+    if not isOrgId(org) then return false end
+    if manager.set[org] then return true end
+    local extra = manager.extra[org]
+    if extra == nil then
+        extra = manager.all or IsPlayerAceAllowed(src, MANAGE_ACE_PREFIX .. org)
+        manager.extra[org] = extra
+    end
+    return extra
 end
 
 --- Everything this request may use about the player: duty, managed orgs (configured orgs and the
 --- duty org) and labels.
 local function access(src)
-    local list, labels = configuredOrgs()
+    local list, labels, memberAces = configuredOrgs()
     local duty, dutyLabel = dutyOf(src)
-    local a = { duty = duty, labels = labels, manage = {}, manageSet = {} }
+    local manager = managerOf(src, list, memberAces)
+    local a = { duty = duty, labels = labels, manager = manager, manage = {}, manageSet = {} }
     if duty then
         a.labels[duty] = a.labels[duty] or dutyLabel or duty
         local known = false
@@ -104,7 +151,7 @@ local function access(src)
         if not known then list[#list + 1] = duty end
     end
     for _, id in ipairs(list) do
-        if manages(src, id) then
+        if manages(src, id, manager) then
             a.manage[#a.manage + 1] = id
             a.manageSet[id] = true
         end
@@ -117,7 +164,7 @@ local function labelOf(a, org)
 end
 
 local function canManage(src, a, org)
-    return a.manageSet[org] == true or manages(src, org)
+    return a.manageSet[org] == true or manages(src, org, a.manager)
 end
 
 local function canWear(src, a, org)
@@ -131,7 +178,13 @@ end
 
 local function playerName(src)
     local name = GetPlayerName(src)
-    return type(name) == 'string' and name:sub(1, 64) or ''
+    if type(name) ~= 'string' then return '' end
+    -- Cut at 64 bytes without leaving half a UTF-8 character at the end.
+    return (name:sub(1, 64):gsub('[\194-\244][\128-\191]*$', function(tail)
+        local lead = tail:byte(1)
+        local need = lead >= 240 and 4 or lead >= 224 and 3 or 2
+        return #tail == need and tail or ''
+    end))
 end
 
 -- Limits are per Rockstar license and per kind of request, so reconnecting doesn't reset them.
@@ -344,7 +397,15 @@ end
 
 function actions.publish(src, args)
     local org = args.org
-    if not isOrgId(org) or not manages(src, org) then
+    if not isOrgId(org) then
+        return { ok = false, message = "You can't publish outfits for that department." }
+    end
+    -- The configured spelling (CertCivt2, not certcivt2): the table ignores case, duty doesn't.
+    for _, id in ipairs((configuredOrgs())) do
+        if id:lower() == org:lower() then org = id break end
+    end
+    local a = access(src)
+    if not canManage(src, a, org) then
         return { ok = false, message = "You can't publish outfits for that department." }
     end
     local name, nameError = cleanName(args.name)
@@ -355,24 +416,29 @@ function actions.publish(src, args)
     if onCooldown('publish', license) then
         return { ok = false, message = 'You can publish an outfit every 10 seconds. Please wait and try again.' }
     end
+    -- Taken before the database calls below, which wait: requests sent together can't all pass the
+    -- check and the per-body cap. A refused publish gives it back.
+    startCooldown('publish', license)
+    local function refuse(reply)
+        lastAt.publish[license] = nil
+        return reply
+    end
 
     local okCount, count = db('scalar_async', 'SELECT COUNT(*) FROM `vmenu_dept_outfits` WHERE `org` = ? AND `model` = ?', { org, model })
-    if not okCount then return DB_ERROR end
+    if not okCount then return refuse(DB_ERROR) end
     if (tonumber(count) or 0) >= MAX_PER_ORG_AND_MODEL then
-        return { ok = false, message = ('A department can have up to %d outfits per body type. Delete one first.'):format(MAX_PER_ORG_AND_MODEL) }
+        return refuse({ ok = false, message = ('A department can have up to %d outfits per body type. Delete one first.'):format(MAX_PER_ORG_AND_MODEL) })
     end
     local taken = nameTaken(org, model, name)
-    if taken == nil then return DB_ERROR end
-    if taken then return { ok = false, message = ('There is already an outfit called %s. Choose Replace on it instead.'):format(name) } end
+    if taken == nil then return refuse(DB_ERROR) end
+    if taken then return refuse({ ok = false, message = ('There is already an outfit called %s. Choose Replace on it instead.'):format(name) }) end
 
-    startCooldown('publish', license)
     local who = playerName(src)
     local okInsert, id = db('insert_async',
         'INSERT INTO `vmenu_dept_outfits` (`org`, `name`, `model`, `payload`, `created_by`, `created_by_name`, `updated_by_name`) VALUES (?, ?, ?, ?, ?, ?, ?)',
         { org, name, model, args.payload, license, who, who })
-    if not okInsert or not id then return DB_ERROR end
+    if not okInsert or not id then return refuse(DB_ERROR) end
     audit(src, ('published %s outfit #%s "%s"'):format(org, tostring(id), name))
-    local a = access(src)
     return { ok = true, id = id, message = ('%s published for %s.'):format(name, labelOf(a, org)) }
 end
 

@@ -265,14 +265,31 @@ namespace vMenuServer
         /// The client asks for its permissions at start (and retries while its menu isn't built).
         /// A bootstrap runs ~300 ace checks and they queue one player at a time, so a client's
         /// requests are rate-limited. Another resource on this server calling
-        /// TriggerEvent("vMenu:RequestPermissions", id) (DiscordAcePerms on a role refresh) has no
-        /// event source, so it never named a player; it is left alone, as before: not limited, not logged.
+        /// TriggerEvent("vMenu:RequestPermissions", id) (DiscordAcePerms after a role refresh) has no
+        /// event source and names the player: their permissions are reloaded and sent again, so a
+        /// granted or removed role reaches vMenu's checks without a rejoin. (Menus are built once, so
+        /// a newly allowed menu item still appears after the next join.) Before release K this call
+        /// was ignored. A client can't use it for anyone else: a client's request always refreshes
+        /// itself, whatever it passes.
         /// </summary>
         [EventHandler("vMenu:RequestPermissions")]
-        internal void RequestPermissions([FromSource] Player sourcePlayer, [FromSource] string source)
+        internal void RequestPermissions([FromSource] Player sourcePlayer, [FromSource] string source, object target)
         {
             if (sourcePlayer == null)
             {
+                if (!RequestSource.IsClient(source) && RequestPayload.TryInt(target, out var id) && id > 0
+                    && !string.IsNullOrEmpty(GetPlayerName(id.ToString())))
+                {
+                    var player = Players[id];
+                    if (player != null)
+                    {
+                        if (DebugMode)
+                        {
+                            Debug.WriteLine($"[vMenu] Permissions refreshed for {player.Name} ({id}) by another resource.");
+                        }
+                        PermissionsManager.SetPermissionsForPlayer(player);
+                    }
+                }
                 return;
             }
 
@@ -874,6 +891,13 @@ namespace vMenuServer
                 || !RequestPayload.TryBool(freezeTimeArg, out var freezeTimeNew))
             {
                 RequestGuard.Malformed(source, request, "expected an hour, a minute and true/false");
+                return;
+            }
+            // vMenu's client keeps the time in range (CommonFunctions.UpdateServerTime); anything else is
+            // not from it, and the time loop would carry an hour of 99 to every player.
+            if (newHours < 0 || newHours > 23 || newMinutes < 0 || newMinutes > 59)
+            {
+                RequestGuard.Malformed(source, request, "the hour must be 0-23 and the minute 0-59");
                 return;
             }
 

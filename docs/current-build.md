@@ -8,9 +8,9 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release J: the rest of Enhanced's performance patterns and empty teleport fields (client DLL, `storage.html`, `client/exports.lua`), on top of releases I and H. **Testing on branch `perf/release-j`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `dece98b426477274f47302c1ad2038b2d5a57ba0378b3636c8e6edaa1caf25bd` |
-| `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
+| Latest change | November 17, 2026 — release K: department outfit presets, character outfits and styles, base-game data refresh, vehicle paint and radio options, server request guard, live role refresh (client DLL, server DLL, Lua, config, SQL), on top of releases J, I and H. **Testing on branch `perf/release-k`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `4d002d53df8d1b485522ca2c36d332431898d8daa2eb8764692c99f974111a17` |
+| `build/vMenu/vMenuServer.net.dll` | `03147fa748dcee86dba985a99edb08fda6a58a9fca0b8cb8958409f80a70d39d` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
 Check a checkout with
@@ -20,6 +20,202 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release K: department outfits, character wardrobe, data refresh, vehicle options, request guard (client DLL, server DLL, Lua, config, SQL) — TESTING, branch `perf/release-k`
+
+**Status: test build, not verified in game, not on `main`.** It is built on
+release J (`perf/release-j`). Until it passes an in-game check, `main` and
+`build-2026-11-17-3` stay the live build and the fallback. **It changes the
+server DLL** (the owner asked for the request guard and the live role refresh).
+
+**Why.** The owner picked these from the gap list against vMenu Enhanced v1.0.21,
+leaving out what PSRP already has elsewhere: EasyAdmin handles staff tools,
+PSRP_Framework restricts vehicles and weapons, and vMenu's Custom Vehicles
+button already opens PSRP_spawner.
+
+**What changed:**
+- **Department Outfits** (MP Ped Customization > Department Outfits, after
+  Saved Outfits). Off until `setr vmenu_dept_outfits true`.
+  - Anyone on duty with a department (PoliceEMSActivity's `/duty`) lists and
+    wears its outfits for their body type. Nobody needs an ace to wear them.
+  - **Managers** publish, replace, rename and delete them. There are three
+    ways to manage:
+    - `vMenu.DeptOutfits.ManageOwn` manages each department whose duty
+      permission the player has. That is the org's `member` in
+      `Config.DepartmentOutfitOrgs`, copied from PoliceEMSActivity's
+      `Config.Orgs`, e.g. `group.lspdblip`. PSRP grants it to
+      `group.depthead`, so a department head manages exactly their own
+      department(s).
+    - `vMenu.DeptOutfits.Manage.<org>` manages one department.
+    - `vMenu.DeptOutfits.ManageAll` manages every department. PSRP grants it to
+      `group.owner`.
+  - Stored in the `vmenu_dept_outfits` table (`database.sql`). The server
+    (`server/deptOutfits.lua`) checks every request against duty and aces, and
+    checks every outfit (a whole MP outfit, every piece matched to a clothing
+    collection, under 8 KB).
+  - **Limits:**
+    - names are unique per department and body type;
+    - at most 60 outfits per department and body type;
+    - one publish per 10 seconds per player;
+    - who manages what is read once per player per 30 seconds; duty is read
+      fresh every time.
+- **Character Outfits and Hair & Makeup Styles** (Manage Saved Character).
+  Each MP character has its own outfits and styles, kept on the player's PC
+  (KVP `vmenu_character_outfit_*` / `vmenu_character_style_*`) and included in
+  backups. Renaming or cloning a character takes them along, and deleting one
+  removes them.
+- **Base-game data refresh:**
+  - 29 vehicles, now 927 in the spawner;
+  - 21 peds;
+  - `weapon_newspaper` (`vMenu.WeaponOptions.Newspaper`).
+  - Tattoos: the list (`overlays.json`, 3,429) is checked against the game, and
+    tattoos only the game's shops know are added. The F8 console line
+    `[vMenu] [Tattoos] … Game checked: True, shops used: True` shows it worked.
+  - The spawner and ped menus hide models this game build doesn't have.
+  - `config/vehicleIdentityModels.json` is regenerated for the new vehicles.
+- **Vehicle Options:**
+  - Hex paint (`#RRGGBB`) for primary and secondary colours.
+  - "Paint Fade" (was "Vehicle Enveff Scale"), with its slider now showing the
+    vehicle's current value.
+  - Preset factory colours clear custom paint first.
+  - Roof livery.
+  - Radio: a station to tune when you get in as the driver (or leave it
+    alone, the default), and stations to block. The old forced LS Rock Radio
+    on spawn is gone, and an old "Default radio station" setting carries over.
+  - New aces `vMenu.VehicleOptions.HexColors`, `.RoofLivery` and `.Radio`,
+    granted to everyone in the packaged `permissions.cfg`. A server without
+    them falls back to Vehicle Options' own permission.
+- **Request guard and security log:**
+  - `vMenuServer/RequestGuard.cs` and `server/guard/requestGuard.lua` check
+    every request a client sends to vMenu's server side: argument types and
+    sizes, the sender, and a per-player, per-event rate limit (far above what
+    the menu sends).
+  - Refusals are printed to the server console as `[vMenu] [SECURITY]`. They
+    can also go to a Discord webhook (`set vmenu_security_webhook`, never
+    `setr`).
+  - The convars are in `permissions.cfg`, commented out at their defaults.
+  - The time update also refuses an hour outside 0–23 or a minute outside 0–59.
+- **Live role refresh.** DiscordAcePerms already fires
+  `TriggerEvent('vMenu:RequestPermissions', src)` after `/refreshperms` and the
+  bot's auto-refresh. vMenu now answers it from the server (it ignored calls
+  with no client source) and sends that player their new permissions. Options
+  turn on or off at once. Menus are built once per session, though, so a menu
+  the player didn't have at join only appears after they reconnect.
+- **Permission names.** The client skips a permission name it doesn't know
+  instead of failing. Before, a client older than its server never built the
+  menu. This only helps from release K on: release J's client still fails
+  against release K's server, so **deploy and roll back client and server
+  together.**
+
+**Validation:**
+- **New tests:**
+  - `tests/dept-outfits` (Lua): the whole server against an in-memory table,
+    covering:
+    - access by duty, Manage, ManageOwn and ManageAll;
+    - names and payloads;
+    - limits;
+    - two publishes sent together;
+    - the 30-second access cache, and forgetting it when a player leaves;
+    - org spelling (`LSPD` and `certcivt2` stored as the config writes them);
+    - player names cut on a character boundary;
+    - database errors;
+    - the wiring.
+  - `tests/character-wardrobe`: keys, rename, clone and delete, styles, the
+    shared outfit path, request pacing, and the Department Outfits wiring.
+  - `tests/game-data`: the new vehicles, peds and weapon.
+  - `tests/tattoo-catalog`: hashing, the game check, shop tattoos, the
+    fallbacks, and tattoos saved by hash that a later list names.
+  - `tests/vehicle-colours-radio`: hex paint, Paint Fade, roof livery, radio
+    choices and their wiring.
+  - `tests/request-guard` (C# and Lua): rate limits, argument checks, sources,
+    and every handler's wiring.
+- **Updated tests:** `tests/permission-table` (unknown permission names are
+  skipped), `tests/vehicle-rests`, `tests/idle-rests` and others follow the
+  moves.
+- `tools/ilcompare` of the server against the first release K build: only
+  `RequestPermissions` (live refresh) and `UpdateTime` (bounds) changed.
+- **Two independent reviews** (server and client). Fixed from them:
+  - a department access check costing up to ~190 ace checks per request (now
+    cached per player for 30 s);
+  - two publishes sent together both passing the limit;
+  - org casing;
+  - names cut mid-character;
+  - the list size cap (300 → 2,000 names);
+  - the time bounds;
+  - the client failing on unknown permission names;
+  - the tattoo shop read failing the zone check with it;
+  - tattoos saved by hash;
+  - the radio choice not applying when moving to the driver's seat or getting
+    back into the same vehicle;
+  - the request loop polling every frame;
+  - reopening the menu quickly showing "Couldn't load";
+  - an unclear "other body type" error.
+- **Left as is (rare):**
+  - A tuned radio station can re-tune over another resource that switched the
+    radio off within 3 s of getting in.
+  - Blocked stations stay blocked for the session if the Radio ace is
+    removed.
+  - Rolling back to J forgets the old radio setting, so J tunes LS Rock again.
+  - Wardrobe entries can be orphaned after a rollback to J and a character
+    delete there.
+  - The tattoo catalog is built in one go the first time the character
+    creator opens (estimated tens of ms, once).
+- All 42 tests in AGENTS.md pass.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `4d002d53df8d1b485522ca2c36d332431898d8daa2eb8764692c99f974111a17` |
+| `build/vMenu/vMenuServer.net.dll` | `03147fa748dcee86dba985a99edb08fda6a58a9fca0b8cb8958409f80a70d39d` |
+| `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
+
+**Deploy (test):** on top of release J. `deploy/release-k-test-build/` has every
+changed file, with `SHA256SUMS.txt`.
+1. Check the installed `vMenuClient.net.dll` is release J's (`dece98b4…`) and
+   `vMenuServer.net.dll` is `8827cd4c…`.
+2. Run the `vmenu_dept_outfits` `CREATE TABLE` from `database.sql` on the
+   server's database. It's `IF NOT EXISTS`, so running it twice is safe.
+3. Copy both DLLs together, plus:
+   - `fxmanifest.lua`, `database.sql`;
+   - `server/deptOutfits.lua`, `server/guard/requestGuard.lua`;
+   - the changed `server/*.lua` (`backups`, `clothingCapture`, `oufitCodes`,
+     `spawnProvenance`, `staminaTelemetry`, `vehicleCodes`, `vehicleIdentity`);
+   - `client/backups.lua`;
+   - `config/vehicleIdentityModels.json`.
+4. **`config/config_server.lua`:** if the installed one matches release J's,
+   copy it. Otherwise add the `DepartmentOutfitOrgs` block by hand.
+5. **`config/permissions.cfg`:** the live file has hand edits, so add these by
+   hand:
+   - `setr vmenu_dept_outfits true`;
+   - the two `add_ace` lines for `group.depthead` (ManageOwn) and
+     `group.owner` (ManageAll);
+   - the three `vMenu.VehicleOptions` aces (HexColors, RoofLivery, Radio);
+   - optionally, the commented `vmenu_guard_*` and `vmenu_security_webhook`
+     lines.
+6. Restart the server (or `refresh` + `restart vMenu`), and have players
+   reconnect.
+
+**In-game checks:**
+- **Department Outfits:**
+  - A department head on duty publishes for their own department, and is
+    refused for another.
+  - A member on duty sees and wears it.
+  - A civilian sees nothing.
+  - Reopening the menu quickly still loads.
+- **Live role refresh:** `/refreshperms` after a Discord role change turns an
+  option on or off without a reconnect.
+- **Joining and leaving:** no `[vMenu] [SECURITY]` lines from normal play,
+  joining or leaving. The server's `[FromSource] string` source has only been
+  checked offline.
+- **Radio:** tune on entry, block a station, move from passenger to driver.
+- **Vehicle paint:** roof livery and hex paint.
+- **Data:** the F8 tattoo line; the new vehicles and peds spawn; models the
+  game lacks are hidden.
+- **Release J's checks:** key bindings and the HUD text size.
+
+**Roll back to release J:** copy back release J's two DLLs and the files above
+from `deploy/rollback-to-release-j/`, then restart. Both DLLs go back together.
+The `vmenu_dept_outfits` table, the extra aces and the convars can stay; J
+ignores them.
 
 ## November 17, 2026 — release J: the rest of Enhanced's performance patterns, empty teleport fields (client DLL, `storage.html`, `client/exports.lua`) — TESTING, branch `perf/release-j`
 

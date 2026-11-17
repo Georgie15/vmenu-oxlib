@@ -99,6 +99,62 @@ namespace vMenuClient.data
 
         private static ulong Key(uint collectionHash, uint nameHash) => ((ulong)collectionHash << 32) | nameHash;
 
+        private static uint HashOfName(string name) => TryParseHashName(name, out var hash) ? hash : Joaat(name);
+
+        /// <summary>The tattoos that have real names, by hash, for <see cref="UseNames"/>.</summary>
+        public static Dictionary<ulong, KeyValuePair<string, string>> NamedByHash(IEnumerable<Tattoo> tattoos)
+        {
+            var named = new Dictionary<ulong, KeyValuePair<string, string>>();
+            foreach (var tattoo in tattoos)
+            {
+                if (string.IsNullOrEmpty(tattoo.name) || string.IsNullOrEmpty(tattoo.collectionName)
+                    || TryParseHashName(tattoo.name, out _) || TryParseHashName(tattoo.collectionName, out _))
+                {
+                    continue;
+                }
+                named[Key(Joaat(tattoo.collectionName), Joaat(tattoo.name))] = new KeyValuePair<string, string>(tattoo.collectionName, tattoo.name);
+            }
+            return named;
+        }
+
+        /// <summary>
+        /// A tattoo saved by hash (known then only from the game's shops) that the list now names is
+        /// saved under its name instead, so the menu shows it as worn; a copy already saved by name is
+        /// kept and the hash one dropped. Returns whether anything changed.
+        /// </summary>
+        public static bool UseNames(List<KeyValuePair<string, string>> saved, Func<Dictionary<ulong, KeyValuePair<string, string>>> named)
+        {
+            if (saved == null)
+            {
+                return false;
+            }
+            Dictionary<ulong, KeyValuePair<string, string>> lookup = null;
+            var changed = false;
+            for (var i = saved.Count - 1; i >= 0; i--)
+            {
+                var tattoo = saved[i];
+                if (!TryParseHashName(tattoo.Key, out _) && !TryParseHashName(tattoo.Value, out _))
+                {
+                    continue;
+                }
+                lookup ??= named();
+                if (lookup == null || !lookup.TryGetValue(Key(HashOfName(tattoo.Key), HashOfName(tattoo.Value)), out var withName))
+                {
+                    continue;
+                }
+                if (saved.Contains(withName))
+                {
+                    saved.RemoveAt(i);
+                }
+                else
+                {
+                    saved[i] = withName;
+                }
+                changed = true;
+            }
+            return changed;
+        }
+
         /// <param name="listed">vMenu's tattoo list (overlays.json).</param>
         /// <param name="zoneOf">GET_PED_DECORATION_ZONE_FROM_HASHES(collection, name), or null to use the list as is.</param>
         /// <param name="shopTattoos">Every tattoo the game's shops sell to freemode characters.</param>

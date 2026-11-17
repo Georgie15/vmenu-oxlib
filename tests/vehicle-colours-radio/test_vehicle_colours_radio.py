@@ -49,10 +49,14 @@ for path in sorted((root / 'vMenu').rglob('*.cs')):
     text = path.read_text(encoding='utf-8-sig')
     assert not radio_calls.search(text), f'{path.relative_to(root)} changes the radio; only VehicleRadio may'
 
-# Applied from the existing vehicle-entry detection, once per vehicle, and nothing new per frame.
+# Applied from the existing 100 ms vehicle check each time the player becomes a driver (getting in,
+# getting back into the same vehicle, or moving over from a passenger seat), and nothing new per frame.
 general = block(functions, r'^        private async Task GeneralTasks\(\).*?^        }$')
-entry = block(general, r'if \(tmpVehicle != null && tmpVehicle\.Exists\(\) && tmpVehicle\.Handle != LastVehicle\)\s*\{.*?\n                }')
-assert entry.count('VehicleRadio.ApplyTo(tmpVehicle.Handle);') == 1, 'radio applied once on getting into a vehicle'
+assert re.search(r'var driving = seated \? GetVehiclePedIsIn\(ped, false\) : 0;\s*'
+                 r'if \(driving != 0 && GetPedInVehicleSeat\(driving, -1\) == ped\)\s*\{\s*'
+                 r'if \(driving != radioAppliedVehicle\)\s*\{\s*radioAppliedVehicle = driving;\s*VehicleRadio\.ApplyTo\(driving\);\s*\}\s*\}\s*'
+                 r'else\s*\{\s*radioAppliedVehicle = 0;\s*\}', general), 'radio applied once each time the player becomes the driver'
+assert general.index('VehicleRadio.ApplyTo(driving);') < general.index('await Rest(StateRestMs);')
 assert functions.count('VehicleRadio.') == 1, 'FunctionsController makes a single call into VehicleRadio'
 assert 'Tick' not in radio and 'while (true)' not in radio, 'VehicleRadio adds no per-frame work'
 tune = block(radio, r'^        private static async Task TuneAsync\(.*?^        }$')

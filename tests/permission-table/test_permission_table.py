@@ -23,6 +23,8 @@ enum = block(r'^        public enum Permission\s*\{.*?^        \}')
 parents_field = block(r'^        private static readonly Dictionary<Permission, List<Permission>> parentPermissions = new\(\);$')
 parents = block(r'^        public static List<Permission> GetPermissionAndParentPermissions\(.*?^        }$')
 build = block(r'^        internal static bool\[\] BuildEffectivePermissions\(.*?^        }$')
+names_field = block(r'^        private static Dictionary<string, Permission> permissionsByName;$')
+parse = block(r'^        internal static Dictionary<Permission, bool> ParsePermissions\(.*?^        }$')
 
 # Wiring: the table is built when permissions arrive, and IsAllowed only reads it.
 client_is_allowed = block(r'^        private static bool IsAllowedClient\(.*?^        }$')
@@ -39,6 +41,9 @@ repeated = sorted({line for line in aces if aces.count(line) > 1})
 assert not repeated, f'repeated grants: {repeated}'
 print(f'PASS: permissions.cfg has {len(aces)} grants, each allow or deny, none repeated')
 assert 'effectivePermissions = BuildEffectivePermissions(Permissions, ConfigManager.GetSettingsBool(ConfigManager.Setting.vmenu_menu_staff_only));' in source
+# Release K: a permission name the client doesn't have (newer server) is skipped, not fatal.
+assert 'Permissions = ParsePermissions(permissions);' in source
+assert 'DeserializeObject<Dictionary<Permission, bool>>' not in source
 
 program = r'''
 using System;
@@ -47,7 +52,7 @@ using System.Linq;
 
 static class PermissionsManager
 {
-''' + enum + '\n' + parents_field + '\n' + parents + '\n' + build + r'''
+''' + enum + '\n' + parents_field + '\n' + parents + '\n' + build + '\n' + names_field + '\n' + parse + r'''
 
     // Reference: the client IsAllowed logic before the table (minus its true-only cache,
     // which only mattered when SetPermissions arrived twice).
@@ -112,6 +117,14 @@ static class PermissionsManager
         }
 
         Check(BuildEffectivePermissions(null, false).All(v => !v), "a missing permission list allows nothing");
+
+        var parsed = ParsePermissions("{\"Everything\":false,\"VORadio\":true,\"SomeFuturePermission\":true,\"5\":true,\"Staff,Everything\":true,\"VOGod\":false}");
+        Check(parsed.Count == 3 && parsed[Permission.VORadio] && !parsed[Permission.Everything] && !parsed[Permission.VOGod],
+            "permissions from a newer server: known names read; unknown, numeric and combined names skipped");
+        Check(ParsePermissions("null").Count == 0, "no list reads as no permissions");
+        var every = all.ToDictionary(p => p.ToString(), p => true);
+        Check(ParsePermissions(Newtonsoft.Json.JsonConvert.SerializeObject(every)).Count == all.Length, "every name this build has round-trips");
+        Console.WriteLine("PASS: a permission name this client doesn't know is skipped, not fatal");
         Console.WriteLine($"PASS: permission table matches the old IsAllowed for {compared} checks");
         return 0;
     }
@@ -128,6 +141,7 @@ with tempfile.TemporaryDirectory(prefix='vmenu-permission-table-') as temp:
     work.relative_to(Path(tempfile.gettempdir()).resolve())
     (work / 'Tests.csproj').write_text('''<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+  <ItemGroup><Reference Include="Newtonsoft.Json"><HintPath>''' + str(root / 'dependencies' / 'shared' / 'Newtonsoft.Json.dll') + '''</HintPath></Reference></ItemGroup>
 </Project>''', encoding='utf-8')
     (work / 'Program.cs').write_text(program, encoding='utf-8')
     subprocess.run(['dotnet', 'run', '--project', str(work / 'Tests.csproj'),

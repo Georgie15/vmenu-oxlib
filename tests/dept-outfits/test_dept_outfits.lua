@@ -46,28 +46,33 @@ end
 local CSHARP_PAYLOAD = [[{"model":1885233650,"clothes":{"1":[1,0],"3":[3,0],"4":[4,0],"5":[5,0],"6":[6,0],"7":[7,0],"8":[8,0],"9":[9,0],"10":[10,0],"11":[45,5]},"props":{"0":[2,1],"1":[-1,-1],"2":[-1,-1],"3":[-1,-1],"4":[-1,-1],"5":[-1,-1],"6":[-1,-1],"7":[-1,-1]},"refs":{"v":2,"model":1885233650,"clothes":{"1":{"col":"","drw":1,"tex":0,"lp":"38053a671452b083"},"3":{"col":"","drw":3,"tex":0,"lp":"38053a671452b083"},"4":{"col":"","drw":4,"tex":0,"lp":"38053a671452b083"},"5":{"col":"","drw":5,"tex":0,"lp":"38053a671452b083"},"6":{"col":"","drw":6,"tex":0,"lp":"38053a671452b083"},"7":{"col":"","drw":7,"tex":0,"lp":"38053a671452b083"},"8":{"col":"","drw":8,"tex":0,"lp":"38053a671452b083"},"9":{"col":"","drw":9,"tex":0,"lp":"38053a671452b083"},"10":{"col":"","drw":10,"tex":0,"lp":"38053a671452b083"},"11":{"col":"mp_m_deptmerge2","drw":5,"tex":5,"lp":"38053a671452b083"}},"props":{"0":{"col":"","drw":2,"tex":1,"lp":"38053a671452b083"},"1":{"empty":true},"2":{"empty":true},"3":{"empty":true},"4":{"empty":true},"5":{"empty":true},"6":{"empty":true},"7":{"empty":true}}},"layout":"38053a671452b083"}]]
 
 -- A server with an in-memory vmenu_dept_outfits table. Players: 1 LSPD member, 2 LSPD manager,
--- 3 ManageAll, 4 civilian, 5 BCSO member who also manages LSPD and SAHP.
+-- 3 ManageAll, 4 civilian, 5 BCSO member who also manages LSPD and SAHP, 6 department head
+-- (ManageOwn) who may /duty as BCSO, 7 department head in no department.
 local function newServer()
     local s = {
         now = 100000, enabled = true, rows = {}, nextId = 1, client = {}, latent = {}, handlers = {},
-        errors = {}, warnings = {}, infos = {}, failQueries = false, nextRequest = 1,
+        errors = {}, warnings = {}, infos = {}, failQueries = false, nextRequest = 1, names = {}, events = {}, aceCalls = 0,
         resources = { oxmysql = 'started', PoliceEMSActivity = 'started' },
         duty = { [1] = 'lspd', [2] = nil, [3] = nil, [4] = nil, [5] = 'bcso' },
         aces = {
             [2] = { ['vMenu.DeptOutfits.Manage.lspd'] = true },
             [3] = { ['vMenu.DeptOutfits.ManageAll'] = true },
             [5] = { ['vMenu.DeptOutfits.Manage.lspd'] = true, ['vMenu.DeptOutfits.Manage.sahp'] = true },
+            [6] = { ['vMenu.DeptOutfits.ManageOwn'] = true, ['group.bcsoblip'] = true },
+            [7] = { ['vMenu.DeptOutfits.ManageOwn'] = true },
         },
-        licenses = { [1] = 'license:one', [2] = 'license:two', [3] = 'license:three', [4] = 'license:four', [5] = 'license:five' },
+        licenses = { [1] = 'license:one', [2] = 'license:two', [3] = 'license:three', [4] = 'license:four', [5] = 'license:five',
+            [6] = 'license:six', [7] = 'license:seven' },
         dutyThrows = false,
     }
 
     _G.GetGameTimer = function() return s.now end
     _G.GetConvarBool = function(name, default) if name == 'vmenu_dept_outfits' then return s.enabled end return default end
     _G.GetResourceState = function(name) return s.resources[name] or 'missing' end
-    _G.IsPlayerAceAllowed = function(src, ace) return (s.aces[src] or {})[ace] == true end
+    _G.IsPlayerAceAllowed = function(src, ace) s.aceCalls = s.aceCalls + 1; return (s.aces[src] or {})[ace] == true end
     _G.GetPlayerIdentifierByType = function(src, kind) assert(kind == 'license'); return s.licenses[src] end
-    _G.GetPlayerName = function(src) return 'Player ' .. src end
+    _G.GetPlayerName = function(src) return s.names[src] or ('Player ' .. src) end
+    _G.AddEventHandler = function(name, fn) s.events[name] = fn end
     _G.RegisterNetEvent = function(name, fn) s.handlers[name] = fn end
     _G.TriggerClientEvent = function(name, target, ...) s.client[#s.client + 1] = { name = name, target = target, args = { ... } } end
     _G.TriggerLatentClientEvent = function(name, target, bps, ...) s.latent[#s.latent + 1] = { name = name, target = target, bps = bps, args = { ... } } end
@@ -110,6 +115,10 @@ local function newServer()
     end
     function db.scalar_async(_, query, params)
         fail()
+        -- Stands in for the wait on the database: another request is handled meanwhile.
+        local meanwhile = s.whileCounting
+        s.whileCounting = nil
+        if meanwhile then meanwhile() end
         assert(query:find('^SELECT COUNT%(%*%) FROM `vmenu_dept_outfits` WHERE `org` = %? AND `model` = %?'), query)
         local n = 0
         for _, row in ipairs(s.rows) do if row.org == params[1] and row.model == params[2] then n = n + 1 end end
@@ -118,7 +127,7 @@ local function newServer()
     function db.query_async(_, query, params)
         fail()
         if query == 'SELECT 1 FROM `vmenu_dept_outfits` LIMIT 1' then return {} end
-        assert(query:find('WHERE `model` = %? AND `org` IN %(') and query:find('ORDER BY `org`, `name` LIMIT 300'), query)
+        assert(query:find('WHERE `model` = %? AND `org` IN %(') and query:find('ORDER BY `org`, `name` LIMIT 2000'), query)
         local _, marks = query:gsub('%?', '')
         assert(marks == #params, 'one parameter per placeholder')
         local orgs = {}
@@ -229,7 +238,17 @@ r = s.ask(2, 'publish', { org = 'lspd', name = 'From CSharp', payload = CSHARP_P
 check(r.ok, 'the JSON the client writes is accepted: ' .. tostring(r.message))
 s.wait()
 check(s.ask(2, 'wear', { id = r.id }).payload == CSHARP_PAYLOAD, 'and handed back byte for byte')
-print('PASS: only managers publish, only for their orgs; ManageAll covers every org')
+-- Department heads (ManageOwn) manage only the departments they may /duty as.
+r = s.ask(6, 'publish', { org = 'bcso', name = 'Head Uniform', payload = outfit(MALE) })
+check(r.ok == true, 'a department head publishes for their own department: ' .. tostring(r.message))
+s.wait()
+check(s.ask(6, 'publish', { org = 'lspd', name = 'Not Mine', payload = outfit(MALE) }).ok == false, 'but not for another department')
+s.wait()
+check(s.ask(7, 'publish', { org = 'bcso', name = 'Nobody', payload = outfit(MALE) }).ok == false, 'a department head in no department manages nothing')
+s.wait()
+local headList = s.ask(6, 'list', { model = MALE })
+check(#headList.manage == 1 and headList.manage[1].id == 'bcso', 'a department head is offered only their own department')
+print('PASS: only managers publish, only for their orgs; ManageAll covers every org; department heads manage their own department')
 
 -- ---- Names --------------------------------------------------------------------------------------
 s.wait()
@@ -306,6 +325,68 @@ check(r.ok == false and r.message:find('up to 60', 1, true), 'at most 60 outfits
 s.wait()
 check(s.ask(2, 'publish', { org = 'lspd', name = 'Sixty One', payload = outfit(FEMALE) }).ok, 'the cap is per body type')
 print('PASS: publishing is rate limited per license and capped per org and body')
+
+-- ---- Requests sent together, cached access, org spelling, player names --------------------------
+s = newServer()
+local during
+s.whileCounting = function() during = s.ask(2, 'publish', { org = 'lspd', name = 'Second', payload = outfit(MALE) }) end
+check(s.ask(2, 'publish', { org = 'lspd', name = 'First', payload = outfit(MALE) }).ok, 'the first of two publishes sent together')
+check(during and during.ok == false and during.message:find('every 10 seconds', 1, true), 'the second is refused while the first waits on the database')
+check(#s.rows == 1, 'so only one is stored')
+s.wait()
+s.rows[#s.rows + 1] = { id = 500, org = 'lspd', name = 'Taken', model = MALE, payload = outfit(MALE) }
+check(s.ask(2, 'publish', { org = 'lspd', name = 'Taken', payload = outfit(MALE) }).ok == false and
+    s.ask(2, 'publish', { org = 'lspd', name = 'Free', payload = outfit(MALE) }).ok, 'a publish refused after the wait gives the limit back')
+
+s.wait()
+r = s.ask(2, 'publish', { org = 'LSPD', name = 'Shouting', payload = outfit(MALE) })
+check(r.ok and s.rows[#s.rows].org == 'lspd', 'an org is stored as the config spells it (LSPD -> lspd)')
+s.wait()
+r = s.ask(3, 'publish', { org = 'certcivt2', name = 'Cert', payload = outfit(MALE) })
+check(r.ok and s.rows[#s.rows].org == 'CertCivt2', '... and certcivt2 -> CertCivt2, the org PoliceEMSActivity puts you on duty with')
+
+s.wait()
+s.names[2] = ('a'):rep(62) .. '\u{1F600}'
+s.ask(2, 'publish', { org = 'lspd', name = 'Long Name', payload = outfit(MALE) })
+check(s.rows[#s.rows].created_by_name == ('a'):rep(62), 'a player name cut at 64 bytes drops a half character')
+s.wait()
+s.names[2] = ('a'):rep(60) .. '\u{1F600}' .. 'b'
+s.ask(2, 'publish', { org = 'lspd', name = 'Whole Emoji', payload = outfit(MALE) })
+check(s.rows[#s.rows].created_by_name == ('a'):rep(60) .. '\u{1F600}', 'and keeps a whole one')
+s.wait()
+s.names[2] = ('a'):rep(62) .. '\u{E9}z'
+s.ask(2, 'publish', { org = 'lspd', name = 'Accent', payload = outfit(MALE) })
+check(s.rows[#s.rows].created_by_name == ('a'):rep(62) .. '\u{E9}', 'a two-byte character ending at byte 64 stays')
+
+s = newServer()
+s.ask(6, 'list', { model = MALE })
+local firstCalls = s.aceCalls
+s.now = s.now + 1000
+s.ask(6, 'list', { model = MALE })
+check(firstCalls > 0 and s.aceCalls == firstCalls, 'who manages what is read once, then cached (' .. firstCalls .. ' ace checks, then none)')
+s.aces[6]['group.bcsoblip'] = nil
+check(s.ask(6, 'publish', { org = 'bcso', name = 'Cached', payload = outfit(MALE) }).ok, 'for up to 30 seconds')
+s.now = s.now + 30000
+check(s.ask(6, 'publish', { org = 'bcso', name = 'Expired', payload = outfit(MALE) }).ok == false, 'then read again')
+s.aces[6]['group.bcsoblip'] = true
+s.now = s.now + 30000
+s.ask(6, 'list', { model = MALE })
+s.aces[6]['group.bcsoblip'] = nil
+_G.source = 6
+s.events.playerDropped('left')
+_G.source = nil
+s.now = s.now + 10000
+check(s.ask(6, 'publish', { org = 'bcso', name = 'Rejoined', payload = outfit(MALE) }).ok == false, 'and forgotten when the player leaves')
+s.duty[1] = 'bcso'
+local calls = s.aceCalls
+s.ask(1, 'list', { model = MALE })
+s.now = s.now + 1000
+local switched = s.ask(1, 'list', { model = MALE })
+s.duty[1] = 'lspd'
+s.now = s.now + 1000
+switched = s.ask(1, 'list', { model = MALE })
+check(switched.duty and switched.duty.id == 'lspd', 'duty is read fresh on every request')
+print('PASS: requests sent together, cached access, org spelling and player names')
 
 -- ---- Listing and wearing ------------------------------------------------------------------------
 s = newServer()
@@ -466,6 +547,10 @@ end
 local cfg = readFile('build/vMenu/config/permissions.cfg')
 check(cfg:find('setr vmenu_dept_outfits', 1, true) and cfg:find('#add_ace group.%w+ "vMenu.DeptOutfits.Manage.lspd" allow') and cfg:find('#add_ace group.admin "vMenu.DeptOutfits.ManageAll" allow', 1, true),
     'permissions.cfg has the convar and commented example aces')
+check(cfg:find('\nadd_ace group.depthead "vMenu.DeptOutfits.ManageOwn" allow', 1, true), 'PSRP: department heads manage their own department')
+local serverCfg = readFile('build/vMenu/config/config_server.lua')
+check(serverCfg:find('{ id = "lspd", label = "Los Santos Police Department", member = "group.lspdblip" }', 1, true)
+    and select(2, serverCfg:gsub('member = "group%.', '')) == 33, 'every configured org names its duty permission')
 check(readFile('build/vMenu/fxmanifest.lua'):find("'server/*.lua'", 1, true), 'the manifest loads server/deptOutfits.lua')
 check(readFile('build/vMenu/server/deptOutfits.lua'):find("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'", 1, true)
     and not readFile('build/vMenu/server/deptOutfits.lua'):find("RegisterNetEvent('vMenu:DeptOutfits:Request'", 1, true),
