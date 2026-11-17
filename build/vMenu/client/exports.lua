@@ -59,8 +59,10 @@ end)
 ---@return string "x,y,z", or "" if cancelled
 exports("coordsDialog", function()
 	local coords = GetEntityCoords(cache.ped)
+	-- Empty fields, so pasted coordinates don't have to replace a pre-filled value. Your current
+	-- position is only a placeholder hint.
 	local function field(label, value)
-		return { type = "number", label = label, default = math.floor(value * 100 + 0.5) / 100, precision = 2, required = true }
+		return { type = "number", label = label, placeholder = ("%.2f"):format(value), precision = 2, required = true }
 	end
 	local input = lib.inputDialog("Teleport To Coords", {
 		field("X", coords.x),

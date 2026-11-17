@@ -136,10 +136,12 @@ namespace Rests
         public List<string> channels = new List<string> { "None", "1", "2" };
         public string currentChannel = "None";
 
+        // Release J: the teleport-to-waypoint, drift, point and minimap keys are FiveM key bindings,
+        // and coordinates, location, time and speed are shown on the web page, so MiscSettings no
+        // longer does either; tests/key-bindings and tests/hud-overlay cover them. They stay off here.
         public static readonly string[] Toggles =
         {
-            "HideRadar", "LockCameraX", "LockCameraY", "KbTpToWaypoint", "KbDriftMode", "KbPointKeys", "KbRadarKeys", "KbRecordKeys",
-            "ShowCoordinates", "ShowLocation", "DrawTimeOnScreen", "ShowSpeedoKmh", "ShowSpeedoMph",
+            "HideRadar", "LockCameraX", "LockCameraY", "KbRecordKeys",
             "PlayerGodMode", "PlayerNoRagdoll", "PlayerInvisible", "PlayerSuperJump", "PlayerNeverWanted",
             "NoReload", "UnlimitedAmmo", "AutoEquipChute", "UnlimitedParachutes",
             "EnableVoicechat", "ShowCurrentSpeaker", "ShowVoiceStatus",

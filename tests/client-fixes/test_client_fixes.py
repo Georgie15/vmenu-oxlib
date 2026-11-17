@@ -44,7 +44,8 @@ assert 'void PopulateClass()' in vs and vs.index('void PopulateClass()') < vs.in
 assert '[vehClass]' not in vs.split('void PopulateClass()')[1].split('vehicleClassMenu.ShowVehicleStatsPanel')[0], \
     'the deferred builder uses the copied class index, not the loop variable'
 
-assert 'private void DrawMiscSettingsText()' in fc, 'misc settings text is no longer an async void every frame'
+# Release J: the misc settings text moved to the web page (HudOverlayTick, tests/hud-overlay); nothing draws it every frame.
+assert 'DrawMiscSettingsText' not in fc and 'private async Task HudOverlayTick()' in fc, 'misc settings text is not drawn every frame'
 assert 'DecorSetInt(Game.PlayerPed.Handle, clothingAnimationDecor' not in fc, 'own clothing decorator only written on change'
 blips = member(fc, r'^        private async Task PlayerBlipsControl\(.*?^        }$')
 assert blips.count('SetBlipNameToPlayerName(') == 1 and blips.index('if (style.Sprite != blipSprite)') < blips.index('SetBlipNameToPlayerName('), \

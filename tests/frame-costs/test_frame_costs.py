@@ -353,7 +353,17 @@ namespace Blips
 '''
 
 # --- snowball and visor keys ------------------------------------------------------------------
-interactions = member(fc, r'^        private async Task AnimationsAndInteractions\(\).*?^        }$')
+# Release J: these are FiveM key bindings (RegisterKeyBindings), so nothing reads them every frame.
+assert 'AnimationsAndInteractions' not in fc, 'the every-frame visor/snowball tick is gone'
+setup_ticks = member(fc, r'^        public void SetupTickFunctions\(\).*?^        }$')
+assert 'RegisterKeyBindings();' in setup_ticks, 'the key bindings are registered with the other client tasks'
+bindings = member(fc, r'^        private void RegisterKeyBindings\(\).*?^        }$')
+for command, key in (('+vMenu:{id}:Visor', '"keyboard", "F11"'), ('+vMenu:{id}:Snowball', '"keyboard", "G"')):
+    assert f'RegisterKeyMapping($"{command}"' in bindings and key in bindings, command
+assert 'Command($"-vMenu:{id}:Snowball", OnSnowballReleased);' in bindings, 'the snowball is picked up on release, as before'
+visor = member(fc, r'^        private async void OnVisorPressed\(\).*?^        }$')
+snowball = member(fc, r'^        private async void OnSnowballReleased\(\).*?^        }$')
+world = member(fc, r'^        private static bool WorldKeysAllowed\(\).*?^        }$')
 anim_test = r'''
 namespace Interactions
 {
@@ -372,8 +382,8 @@ namespace Interactions
         public static FrameRuntime Runtime;
         public static int Calls, SnowReads, Pickups, VisorSwitches, HeadlightBlocks;
         public static bool MenuOpen, Snow = true, Allowed = true, Walking, InVehicle, OnBike;
-        public static readonly HashSet<Control> Pressed = new HashSet<Control>(), JustReleased = new HashSet<Control>();
     }
+    public static class Debug { public static void WriteLine(string s) => throw new Exception(s); }
     public class Ped
     {
         public int Handle => 7;
@@ -392,8 +402,6 @@ namespace Interactions
     {
         public static Ped PlayerPed { get { S.Calls += 2; return new Ped(); } }
         public static bool IsPaused { get { S.Calls++; return false; } }
-        public static bool IsControlJustReleased(int group, Control control) { S.Calls++; return S.JustReleased.Contains(control); }
-        public static bool IsControlPressed(int group, Control control) { S.Calls++; return S.Pressed.Contains(control); }
         public static void DisableControlThisFrame(int group, Control control) { S.Calls++; if (control == Control.VehicleHeadlight) { S.HeadlightBlocks++; } }
     }
     public static class MenuController { public static bool IsAnyMenuOpen() => S.MenuOpen; }
@@ -413,24 +421,25 @@ namespace Interactions
         public static Vehicle GetVehicle() { S.Calls += 3; return S.InVehicle ? new Vehicle() : null; }
     }
 
-    public class Ticker
+    public class Keys
     {
         readonly uint snowball_hash = 3;
+        private bool visorHeld;
         Task PickupSnowballOnce() { S.Pickups++; return Task.CompletedTask; }
         async Task SwitchHelmetOnce() { S.VisorSwitches++; await Delay(100); }
-''' + interactions + r'''
-        public Task Tick() => AnimationsAndInteractions();
+''' + world + visor + snowball + r'''
+        public void PressVisor() => OnVisorPressed();
+        public void ReleaseVisor() => visorHeld = false;
+        public void ReleaseSnowball() => OnSnowballReleased();
     }
 
     public static class Test
     {
         static int frame;
-        static void Frames(int count, Action before = null)
+        static void Frames(int count)
         {
             for (var i = 0; i < count; i++)
             {
-                S.JustReleased.Clear();
-                before?.Invoke();
                 S.Runtime.Frame(frame++ * 16);
             }
         }
@@ -438,47 +447,45 @@ namespace Interactions
         public static void Run()
         {
             S.Runtime = new FrameRuntime();
-            S.Runtime.Add(new Ticker().Tick);
+            var keys = new Keys();
 
             S.Calls = 0;
             Frames(100);
-            Check(S.Calls == 200 && S.SnowReads == 0, $"no key used: two key reads a frame and nothing else ({S.Calls} calls, {S.SnowReads} snow reads)");
+            Check(S.Calls == 0 && S.SnowReads == 0, $"no key used: nothing runs at all ({S.Calls} calls; the old tick read two keys a frame)");
 
-            var once = true;
-            Frames(5, () => { if (once) { S.JustReleased.Add(Control.Detonate); once = false; } });
+            keys.ReleaseSnowball(); Frames(5);
             Check(S.Pickups == 1 && S.SnowReads == 1, "snowball key: one pickup, snow read once");
 
-            S.Snow = false; once = true;
-            Frames(5, () => { if (once) { S.JustReleased.Add(Control.Detonate); once = false; } });
+            S.Snow = false; keys.ReleaseSnowball(); Frames(5);
             Check(S.Pickups == 1 && S.SnowReads == 2, "snow off: no pickup");
             S.Snow = true;
 
-            S.Walking = true; once = true;
-            Frames(5, () => { if (once) { S.JustReleased.Add(Control.Detonate); once = false; } });
+            S.Walking = true; keys.ReleaseSnowball(); Frames(5);
             Check(S.Pickups == 1, "walking: no pickup (the old conditions still apply)");
             S.Walking = false;
 
-            S.MenuOpen = true; once = true;
-            Frames(5, () => { if (once) { S.JustReleased.Add(Control.Detonate); once = false; } });
+            S.MenuOpen = true; keys.ReleaseSnowball(); Frames(5);
             Check(S.Pickups == 1 && S.SnowReads == 3, "menu open: nothing happens, snow not read");
             S.MenuOpen = false;
 
-            S.Pressed.Add(Control.SwitchVisor);
-            Frames(20);
+            keys.PressVisor(); Frames(20);
             Check(S.VisorSwitches == 0, "visor: not before the key is held 400 ms");
             Frames(10);
-            S.Pressed.Clear();
-            Frames(20);
+            keys.ReleaseVisor(); Frames(20);
             Check(S.VisorSwitches == 1, "visor: held past 400 ms switches once");
 
+            keys.PressVisor(); Frames(10); keys.ReleaseVisor(); Frames(30);
+            Check(S.VisorSwitches == 1, "visor: released before 400 ms does nothing");
+
             S.InVehicle = true; S.OnBike = true;
-            S.Pressed.Add(Control.SwitchVisor);
-            Frames(30);
-            S.Pressed.Clear();
-            Frames(20);
+            keys.PressVisor(); Frames(30); keys.ReleaseVisor(); Frames(20);
             Check(S.VisorSwitches == 2 && S.HeadlightBlocks > 0, "visor on a bike: headlight key blocked while switching");
             Check(S.Pickups == 1 && S.SnowReads == 3, "the visor key never picks up a snowball or reads the snow setting");
-            Console.WriteLine("PASS: snowball and visor keys (read first; pickup, snow setting, menu gate and visor unchanged)");
+
+            S.Calls = 0;
+            Frames(100);
+            Check(S.Calls == 0, "after the keys are released nothing keeps running");
+            Console.WriteLine("PASS: snowball and visor key bindings (no per-frame cost; pickup, snow setting, menu gate and visor hold unchanged)");
         }
     }
 }

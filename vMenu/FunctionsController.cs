@@ -36,7 +36,6 @@ namespace vMenuClient
         // show location variables
         private float safeZoneSizeX = (1 / GetSafeZoneSize() / 3.0f) - 0.358f;
         private string zoneDisplay = "";
-        private string streetDisplay = "";
         private string headingDisplay = "";
 
         private int voiceTimer = 0;
@@ -126,7 +125,10 @@ namespace vMenuClient
         public void SetupTickFunctions()
         {
             // Always needed
-            Tick += AnimationsAndInteractions;
+            // The visor, snowball, point, minimap, drift and teleport-to-waypoint keys are FiveM key
+            // bindings (see Key bindings below), so nothing polls them every frame.
+            RegisterKeyBindings();
+            Tick += HudOverlayTick;
             Tick += PlayerClothingAnimationsController;
             Tick += MiscRecordingKeybinds;
             Tick += MiscSettings;
@@ -251,17 +253,11 @@ namespace vMenuClient
                     }
                 }
             }
-            // Every frame (a 1 ms wait) while getting into or sitting in a vehicle, so a switch is
-            // seen on the frame you are seated, as before. On foot it rests: getting in takes far
-            // longer than the rest, so this is back to every frame before you are seated.
-            if (seated || IsPedInAnyVehicle(ped, true))
-            {
-                await Delay(1);
-            }
-            else
-            {
-                await Rest(StateRestMs);
-            }
+            // Checked 10 times a second, seated or not (vMenu Enhanced polls the seat 4 times a
+            // second). A new vehicle is seen within 100 ms of sitting in it, and VehicleOptions
+            // applies its switch settings (power multiplier, no siren, turbulence, anchor) on its
+            // next pass.
+            await Rest(StateRestMs);
         }
         #endregion
 
@@ -351,7 +347,9 @@ namespace vMenuClient
                 || (MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed)
                 || MainMenu.PlayerOptionsMenu.PlayerInvisible
                 || MainMenu.PlayerOptionsMenu.PlayerSuperJump
-                || MainMenu.PlayerOptionsMenu.PlayerNeverWanted
+                // Never Wanted defaults to on, also for players without the permission, who
+                // can't see the option. Without it the check above does nothing.
+                || (MainMenu.PlayerOptionsMenu.PlayerNeverWanted && IsAllowed(Permission.PONeverWanted))
                 || DriveToWpTaskActive
                 || DriveWanderTaskActive;
             if (!everyFrame)
@@ -669,12 +667,12 @@ namespace vMenuClient
                 }
             }
 
-            // On foot with no menu open, everything above only restores or checks, so it rests for
-            // 100 ms instead of running every frame. Getting in counts as in a vehicle (the check
-            // above includes entering), so the in-vehicle options start while the door opens.
-            // Engine always on keeps its timing.
+            // Every frame only while something above acts every frame: in a vehicle, an option that
+            // must be reapplied each frame, or a vehicle switch still to handle. Otherwise everything
+            // above only restores or checks, so it rests for 100 ms, in a vehicle too (vMenu Enhanced
+            // polls vehicle state every 100-250 ms). Engine always on keeps its timing.
             var engineAlwaysOn = MainMenu.VehicleOptionsMenu.VehicleEngineAlwaysOn && IsAllowed(Permission.VOEngineAlwaysOn);
-            if (inVehicle || AnyMenuOpen || engineAlwaysOn)
+            if (AnyMenuOpen || engineAlwaysOn || (inVehicle && VehicleOptionsEveryFrame()))
             {
                 await Delay(1);
             }
@@ -693,6 +691,24 @@ namespace vMenuClient
                 }
             }
             await Task.FromResult(0);
+        }
+
+        /// <summary>
+        /// Whether VehicleOptions must run every frame while you are in a vehicle: a vehicle switch
+        /// is waiting to be handled, or an option is on that the game needs reapplied each frame
+        /// (god mode, freeze, keep clean, torque, no helmet, infinite fuel). Each is checked with the
+        /// same permission as where it is applied.
+        /// </summary>
+        private bool VehicleOptionsEveryFrame()
+        {
+            var options = MainMenu.VehicleOptionsMenu;
+            return SwitchedVehicle
+                || (options.VehicleGodMode && IsAllowed(Permission.VOGod))
+                || (options.VehicleFrozen && IsAllowed(Permission.VOFreeze))
+                || (options.VehicleNeverDirty && IsAllowed(Permission.VOKeepClean))
+                || (options.VehicleTorqueMultiplier && IsAllowed(Permission.VOTorqueMultiplier))
+                || (options.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet))
+                || (options.VehicleInfiniteFuel && IsAllowed(Permission.VOInfiniteFuel));
         }
 
         /// <summary>
@@ -798,53 +814,115 @@ namespace vMenuClient
 
         #region Misc Settings Menu Tasks
 
-        #region misc settings draw text function
-        /// <summary>
-        /// Draws various misc settings menu text items, like coordinates, location time and speed.
-        /// </summary>
-        private void DrawMiscSettingsText()
+        #region On-screen text (coordinates, location, time, speedometer)
+        // vMenu Enhanced shows text like this on its web page, updated a few times a second, instead
+        // of drawing it with game calls every frame. MenuAPI 4 already gives vMenu that page
+        // (storage.html), so this loop sends what to show to it: at most 10 times a second and
+        // only when something changed, and nothing at all while every one of these options is off.
+        // Positions and sizes use the same screen fractions and text heights the game drawing used.
+        private string lastHudMessage;
+        private bool locationNear;
+        private string locationMain = "";
+        private string locationCross = "";
+
+        private async Task HudOverlayTick()
         {
-            // draw coordinates
-            if (MainMenu.MiscSettingsMenu.ShowCoordinates && IsAllowed(Permission.MSShowCoordinates))
+            var misc = MainMenu.MiscSettingsMenu;
+            var coordsOn = misc != null && misc.ShowCoordinates && IsAllowed(Permission.MSShowCoordinates);
+            var locationOn = misc != null && misc.ShowLocation && IsAllowed(Permission.MSShowLocation);
+            var timeOn = misc != null && misc.DrawTimeOnScreen;
+            var kmhOn = misc != null && misc.ShowSpeedoKmh;
+            var mphOn = misc != null && misc.ShowSpeedoMph;
+
+            if (!(coordsOn || locationOn || timeOn || kmhOn || mphOn))
             {
-                var pos = Game.PlayerPed.Position;
-                double x = Math.Round(pos.X, 2), y = Math.Round(pos.Y, 2), z = Math.Round(pos.Z, 2), heading = Math.Round(Game.PlayerPed.Heading, 2);
-                SetScriptGfxAlign(0, 84);
-                SetScriptGfxAlignParams(0f, 0f, 0f, 0f);
-                DrawTextOnScreen($"~r~X~s~ \t\t{x}\n~r~Y~s~ \t\t{y}\n~r~Z~s~ \t\t{z}\n~r~Heading~s~ \t{heading}", 0.5f - (30f / Resolution.Width), 0f, 0.5f, Alignment.Left, 6, false);
-                ResetScriptGfxAlign();
+                if (lastHudMessage != null)
+                {
+                    SendNuiMessage("{\"action\":\"vmenuHud\",\"visible\":false}");
+                    lastHudMessage = null;
+                }
+                // Checked 4 times a second, or every frame while a menu is open, so switching one
+                // on shows it at once.
+                if (!AnyMenuOpen)
+                {
+                    await Rest(IdleRestMs);
+                }
+                return;
             }
 
-            // draw location
-            if (MainMenu.MiscSettingsMenu.ShowLocation && IsAllowed(Permission.MSShowLocation))
+            var ped = PlayerPedId();
+            // The game drawing was not shown over the pause menu or a fade either.
+            var visible = !IsPauseMenuActive() && IsScreenFadedIn() && !IsPlayerSwitchInProgress() && !IsHudHidden();
+            var safeZone = GetSafeZoneSize();
+
+            object coords = null;
+            if (coordsOn)
             {
-                SetScriptGfxAlign(0, 84);
-                SetScriptGfxAlignParams(0f, 0f, 0f, 0f);
-                ShowLocation();
-                ResetScriptGfxAlign();
+                var pos = GetEntityCoords(ped, true);
+                coords = new
+                {
+                    x = Math.Round(pos.X, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    y = Math.Round(pos.Y, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    z = Math.Round(pos.Z, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    heading = Math.Round(GetEntityHeading(ped), 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    h = GetTextScaleHeight(0.5f, 6),
+                };
             }
 
-            // draw time
-            if (MainMenu.MiscSettingsMenu.DrawTimeOnScreen)
+            object location = null;
+            if (locationOn)
             {
-                var hour = World.CurrentDayTime.Hours;
-                var minute = World.CurrentDayTime.Minutes;
-                var timestring = $"{(hour < 10 ? "0" + hour.ToString() : hour.ToString())}:{(minute < 10 ? "0" + minute.ToString() : minute.ToString())}";
-                SetScriptGfxAlign(0, 84);
-                SetScriptGfxAlignParams(0f, 0f, 0f, 0f);
-                DrawTextOnScreen($"~c~{timestring}", 0.208f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(0.4f, 1), 0.40f, Alignment.Center);
-                ResetScriptGfxAlign();
+                location = new
+                {
+                    near = locationNear,
+                    main = locationMain,
+                    cross = locationCross,
+                    zone = zoneDisplay,
+                    heading = headingDisplay,
+                    x = 0.234f + safeZoneSizeX,
+                    headingX = 0.208f + safeZoneSizeX,
+                    streetY = safeZone - GetTextScaleHeight(0.48f, 6) - GetTextScaleHeight(0.48f, 6),
+                    zoneY = safeZone - GetTextScaleHeight(0.45f, 6) - GetTextScaleHeight(0.95f, 6),
+                    headingY = safeZone - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6),
+                    streetH = GetTextScaleHeight(0.48f, 6),
+                    zoneH = GetTextScaleHeight(0.45f, 6),
+                    headingH = GetTextScaleHeight(1.2f, 6),
+                };
             }
 
-            if (MainMenu.MiscSettingsMenu.ShowSpeedoKmh && Game.PlayerPed.IsInVehicle())
+            object time = null;
+            if (timeOn)
             {
-                ShowSpeedKmh();
+                var day = World.CurrentDayTime;
+                time = new
+                {
+                    text = $"{day.Hours:00}:{day.Minutes:00}",
+                    x = 0.208f + safeZoneSizeX,
+                    y = safeZone - GetTextScaleHeight(0.4f, 1),
+                    h = GetTextScaleHeight(0.4f, 6),
+                };
             }
 
-            if (MainMenu.MiscSettingsMenu.ShowSpeedoMph && Game.PlayerPed.IsInVehicle())
+            object speed = null;
+            var vehicle = GetVehiclePedIsIn(ped, false);
+            if ((kmhOn || mphOn) && vehicle != 0)
             {
-                ShowSpeedMph();
+                var metres = GetEntitySpeed(vehicle);
+                speed = new
+                {
+                    kmh = kmhOn ? (int)Math.Round(metres * 3.6f) : (int?)null,
+                    mph = mphOn ? (int)Math.Round(metres * 2.23694f) : (int?)null,
+                    h = GetTextScaleHeight(0.7f, 4),
+                };
             }
+
+            var message = JsonConvert.SerializeObject(new { action = "vmenuHud", visible, coords, location, time, speed });
+            if (message != lastHudMessage)
+            {
+                SendNuiMessage(message);
+                lastHudMessage = message;
+            }
+            await Delay(100);
         }
         #endregion
 
@@ -875,10 +953,10 @@ namespace vMenuClient
                 var mainName = GetStreetNameFromHashKey(mainSt);
                 var crossName = GetStreetNameFromHashKey(crossSt);
 
-                // Set the suffix for the road name to the corssing name, or to an empty string if there's no crossing.
-                var prefix = currentPos.DistanceToSquared(nodePos) > 1400f ? "~m~Near ~s~" : "~s~";
-                var suffix = crossSt != 0 ? "~t~ / " + crossName : "";
-                streetDisplay = prefix + mainName + suffix;
+                // The street, "Near" when far from a road, and the crossing, for the web page.
+                locationNear = currentPos.DistanceToSquared(nodePos) > 1400f;
+                locationMain = mainName;
+                locationCross = crossSt != 0 ? crossName : "";
 
                 if (heading is > 320 or < 45) // North
                 {
@@ -906,69 +984,10 @@ namespace vMenuClient
         }
         #endregion
 
-        #region ShowLocation
-        /// <summary>
-        /// Show location function to show the player's location.
-        /// </summary>
-        private void ShowLocation()
-        {
-            // Draw the street name + crossing.
-            SetTextWrap(0f, 1f);
-            DrawTextOnScreen(streetDisplay, 0.234f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(0.48f, 6) - GetTextScaleHeight(0.48f, 6)/*0.925f - safeZoneSizeY*/, 0.48f);
-
-            // Draw the zone name.
-            SetTextWrap(0f, 1f);
-            DrawTextOnScreen(zoneDisplay, 0.234f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(0.45f, 6) - GetTextScaleHeight(0.95f, 6)/*0.9485f - safeZoneSizeY*/, 0.45f);
-
-            // Draw the left border for the heading character.
-            DrawTextOnScreen("~t~|", 0.188f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6)/*0.915f - safeZoneSizeY*/, 1.2f, Alignment.Left);
-
-            // Draw the heading character.
-            SetTextWrap(0f, 1f);
-            DrawTextOnScreen(headingDisplay, 0.208f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6)/*0.915f - safeZoneSizeY*/, 1.2f, Alignment.Center);
-
-            // Draw the right border for the heading character.
-            SetTextWrap(0f, 1f);
-            DrawTextOnScreen("~t~|", 0.228f + safeZoneSizeX, GetSafeZoneSize() - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6)/*0.915f - safeZoneSizeY*/, 1.2f, Alignment.Right);
-        }
-        #endregion
-
-        #region Private ShowSpeed Functions
-        /// <summary>
-        /// Shows the current speed in km/h.
-        /// Must be in a vehicle.
-        /// </summary>
-        private void ShowSpeedKmh()
-        {
-            var speed = int.Parse(Math.Round(GetEntitySpeed(GetVehicle().Handle) * 3.6f).ToString());
-            DrawTextOnScreen($"{speed} KM/h", 0.995f, 0.955f, 0.7f, Alignment.Right, 4);
-        }
-
-        /// <summary>
-        /// Shows the current speed in mph.
-        /// Must be in a vehicle.
-        /// </summary>
-        private void ShowSpeedMph()
-        {
-            var speed = Math.Round(GetEntitySpeed(GetVehicle().Handle) * 2.23694f);
-
-            if (MainMenu.MiscSettingsMenu.ShowSpeedoKmh)
-            {
-                DrawTextOnScreen($"{speed} MPH", 0.995f, 0.925f, 0.7f, Alignment.Right, 4);
-                HideHudComponentThisFrame((int)HudComponent.StreetName);
-            }
-            else
-            {
-                DrawTextOnScreen($"{speed} MPH", 0.995f, 0.955f, 0.7f, Alignment.Right, 4);
-            }
-        }
-        #endregion
-
         #region Main misc settings function
         int radarSwitchTimer = 0;
         // Whether vMenu opened the expanded radar; one another script opened is left alone.
         bool vMenuOpenedBigmap = false;
-        int lastPressedPoint = 0;
         /// <summary>
         /// Run all tasks that need to be handeled for the Misc Settings Menu.
         /// </summary>
@@ -1003,7 +1022,7 @@ namespace vMenuClient
 
         private async Task MiscSettings()
         {
-            DrawMiscSettingsText();
+            // Coordinates, location, time and speed are on the web page now (HudOverlayTick).
 
             #region Misc Settings
             // Hide radar. Showing it again follows the pause menu preference, in RadarSettings.
@@ -1032,118 +1051,7 @@ namespace vMenuClient
             }
             #endregion
 
-            if (MainMenu.MiscSettingsMenu.KbTpToWaypoint)
-            {
-                if (IsAllowed(Permission.MSTeleportToWp))
-                {
-                    if (Game.IsControlJustReleased(0, (Control)MainMenu.MiscSettingsMenu.KbTpToWaypointKey)
-                        && Fading.IsFadedIn
-                        && !IsPlayerSwitchInProgress()
-                        && Game.CurrentInputMode == InputMode.MouseAndKeyboard)
-                    {
-                        if (Game.IsWaypointActive)
-                        {
-                            TeleportToWp();
-                            Notify.Success("Teleported to waypoint.");
-                        }
-                        else
-                        {
-                            Notify.Error("You need to set a waypoint first.");
-                        }
-                    }
-                }
-            }
-            if (MainMenu.MiscSettingsMenu.KbDriftMode)
-            {
-                if (IsAllowed(Permission.MSDriftMode))
-                {
-                    if (Game.PlayerPed.IsInVehicle())
-                    {
-                        var veh = GetVehicle();
-                        if (veh != null && veh.Exists() && !veh.IsDead)
-                        {
-                            if ((Game.IsControlPressed(0, Control.Sprint) && Game.CurrentInputMode == InputMode.MouseAndKeyboard) ||
-                                (Game.IsControlPressed(0, Control.Jump) && Game.CurrentInputMode == InputMode.GamePad))
-                            {
-                                SetVehicleReduceGrip(veh.Handle, true);
-                            }
-                            else
-                            if ((Game.IsControlJustReleased(0, Control.Sprint) && Game.CurrentInputMode == InputMode.MouseAndKeyboard) ||
-                                (Game.IsControlJustReleased(0, Control.Jump) && Game.CurrentInputMode == InputMode.GamePad))
-                            {
-                                SetVehicleReduceGrip(veh.Handle, false);
-                            }
-                        }
-                    }
-                }
-            }
-            if (MainMenu.MiscSettingsMenu.KbPointKeys)
-            {
-                static async Task TogglePointing()
-                {
-                    if (IsPedPointing(Game.PlayerPed.Handle))
-                    {
-                        ClearPedSecondaryTask(Game.PlayerPed.Handle);
-                    }
-                    else
-                    {
-                        if (!await LoadAnimDictAsync("anim@mp_point"))
-                        {
-                            return;
-                        }
-                        TaskMoveNetwork(Game.PlayerPed.Handle, "task_mp_pointing", 0.5f, false, "anim@mp_point", 24);
-                        RemoveAnimDict("anim@mp_point");
-                    }
-                }
-                // Double press the right analog stick for controllers.
-                if (Game.CurrentInputMode == InputMode.GamePad)
-                {
-                    if (Game.IsControlJustReleased(0, Control.SpecialAbilitySecondary) && !Game.PlayerPed.IsInVehicle())
-                    {
-                        if (GetGameTimer() - lastPressedPoint < 300)
-                        {
-                            lastPressedPoint = GetGameTimer();
-                            await TogglePointing();
-                        }
-                        else
-                        {
-                            lastPressedPoint = GetGameTimer();
-                        }
-                    }
-                }
-                // Press the B button on keyboard once to toggle.
-                else
-                {
-                    if (Game.IsControlJustReleased(0, Control.SpecialAbilitySecondary) && UpdateOnscreenKeyboard() != 0 && !Game.PlayerPed.IsInVehicle())
-                    {
-                        await TogglePointing();
-                    }
-                }
-
-                // Set pitch, heading, blocking, first person and speed properties on animation.
-                if (IsPedPointing(Game.PlayerPed.Handle))
-                {
-                    if (Game.PlayerPed.IsInVehicle())
-                    {
-                        ClearPedSecondaryTask(Game.PlayerPed.Handle);
-                    }
-                    else
-                    {
-                        SetTaskMoveNetworkSignalFloat(Game.PlayerPed.Handle, "Pitch", GetPointingPitch());
-                        SetTaskMoveNetworkSignalFloat(Game.PlayerPed.Handle, "Heading", GetPointingHeading());
-                        SetTaskMoveNetworkSignalBool(Game.PlayerPed.Handle, "isBlocked", GetPointingIsBlocked());
-                        if (GetFollowPedCamViewMode() == 4)
-                        {
-                            SetTaskMoveNetworkSignalBool(Game.PlayerPed.Handle, "isFirstPerson", true);
-                        }
-                        else
-                        {
-                            SetTaskMoveNetworkSignalBool(Game.PlayerPed.Handle, "isFirstPerson", false);
-                        }
-                        SetTaskMoveNetworkSignalFloat(Game.PlayerPed.Handle, "Speed", 0.25f);
-                    }
-                }
-            }
+            // The teleport-to-waypoint, drift and point keys are key bindings now (Key bindings).
 
             if (expandedRadarProfile) // 221 = settings > display > expanded radar, read by RadarSettings
             {
@@ -1151,38 +1059,21 @@ namespace vMenuClient
             }
             else
             {
+                // The minimap key opens it (Key bindings); vMenu closes what it opened after 8 s.
                 if (vMenuOpenedBigmap && (!IsBigmapActive() || GetGameTimer() - radarSwitchTimer > 8000))
                 {
                     SetBigmapActive(false, false);
                     vMenuOpenedBigmap = false;
                 }
-                if (Game.IsControlJustReleased(0, Control.MultiplayerInfo) && Game.IsControlEnabled(0, Control.MultiplayerInfo) && MainMenu.MiscSettingsMenu.KbRadarKeys && !MenuController.IsAnyMenuOpen() && !IsPauseMenuActive())
-                {
-                    var radarExpanded = IsBigmapActive();
-
-                    if (radarExpanded)
-                    {
-                        SetBigmapActive(false, false);
-                        vMenuOpenedBigmap = false;
-                    }
-                    else
-                    {
-                        SetBigmapActive(true, false);
-                        radarSwitchTimer = GetGameTimer();
-                        vMenuOpenedBigmap = true;
-                    }
-                }
             }
 
-            // Each option above draws, reads a key or enforces a setting every frame while it is
-            // on. With all of them off nothing here does anything, so it rests.
+            // Each option above draws or enforces a setting every frame while it is on. With all of
+            // them off nothing here does anything, so it rests. The keys are key bindings now and
+            // need no polling.
             var misc = MainMenu.MiscSettingsMenu;
             var everyFrame = AnyMenuOpen
                 || misc.HideRadar || misc.LockCameraX || misc.LockCameraY
-                || misc.KbTpToWaypoint || misc.KbDriftMode || misc.KbPointKeys || misc.KbRadarKeys
-                || expandedRadarProfile || vMenuOpenedBigmap
-                || misc.ShowCoordinates || misc.ShowLocation || misc.DrawTimeOnScreen
-                || misc.ShowSpeedoKmh || misc.ShowSpeedoMph;
+                || expandedRadarProfile || vMenuOpenedBigmap;
             if (!everyFrame)
             {
                 await Rest(IdleRestMs);
@@ -2758,67 +2649,284 @@ namespace vMenuClient
         }
         #endregion
 
-        #region Tick related to animations and interactions in-game
-        /// <summary>
-        /// Manages (triggers) all interactions and animations that happen in the world without direct use of the menu.
-        /// </summary>
-        /// <returns></returns>
-        private async Task AnimationsAndInteractions()
+        #region Key bindings
+        // vMenu Enhanced reads keys like these as FiveM key bindings instead of reading game controls
+        // every frame. Players can change them in Settings > Key Bindings > FiveM. Each handler keeps
+        // the conditions the old every-frame check had. The command names must never change: FiveM
+        // saves each player's chosen key under them.
+        private static bool keyBindingsRegistered;
+        private bool visorHeld;
+        private int lastPadPointPress;
+        private int driftVehicle;
+        private TickSleeper pointingSleeper;
+
+        // Keyboard key names for the controls vmenu_teleport_to_wp_keybind_key may hold.
+        private static readonly Dictionary<int, string> TeleportKeyNames = new Dictionary<int, string>
         {
-            // Nothing below happens unless one of these two keys is used this frame, so they are read
-            // first. The state checks and the snow convar read used to run every frame to find that out.
-            var snowballKeyReleased = Game.IsControlJustReleased(0, Control.Detonate);
-            if (!snowballKeyReleased && !Game.IsControlPressed(0, Control.SwitchVisor))
+            [288] = "F1", [289] = "F2", [170] = "F3", [166] = "F5", [167] = "F6", [168] = "F7",
+            [169] = "F8", [56] = "F9", [57] = "F10", [344] = "F11",
+        };
+
+        private void RegisterKeyBindings()
+        {
+            if (keyBindingsRegistered)
             {
                 return;
             }
+            keyBindingsRegistered = true;
+            var id = MainMenu.GetKeyMappingId();
 
-            if (!(MenuController.IsAnyMenuOpen() || MainMenu.DontOpenMenus || !Fading.IsFadedIn || Game.IsPaused || IsPlayerSwitchInProgress() || Game.PlayerPed.IsDead))
+            void Command(string name, Action action)
             {
-                // snowballs
-                if (snowballKeyReleased && EventManager.IsSnowEnabled && IsAllowed(Permission.WPSnowball))
+                RegisterCommand(name, new Action<int, List<object>, string>((source, args, raw) => action()), false);
+            }
+
+            // Helmet visor: hold for 400 ms. (Was the game's visor control, read every frame.)
+            Command($"+vMenu:{id}:Visor", OnVisorPressed);
+            Command($"-vMenu:{id}:Visor", () => visorHeld = false);
+            RegisterKeyMapping($"+vMenu:{id}:Visor", "vMenu Helmet Visor (hold)", "keyboard", "F11");
+            RegisterKeyMapping($"+vMenu:{id}:Visor", "vMenu Helmet Visor (hold, controller)", "PAD_ANALOGBUTTON", "LRIGHT_INDEX");
+
+            // Snowball pickup, on release, as before. (Was the game's detonate control.)
+            Command($"+vMenu:{id}:Snowball", () => { });
+            Command($"-vMenu:{id}:Snowball", OnSnowballReleased);
+            RegisterKeyMapping($"+vMenu:{id}:Snowball", "vMenu Pick Up Snowball", "keyboard", "G");
+            RegisterKeyMapping($"+vMenu:{id}:Snowball", "vMenu Pick Up Snowball (controller)", "PAD_ANALOGBUTTON", "LRIGHT_INDEX");
+
+            // Finger point toggle: B, or a double tap of the right stick. Misc Settings > Keybind
+            // Settings > Finger Point Controls must be on.
+            Command($"vMenu:{id}:Point", () => OnPointKey(false));
+            Command($"vMenu:{id}:PointPad", () => OnPointKey(true));
+            RegisterKeyMapping($"vMenu:{id}:Point", "vMenu Finger Point Toggle", "keyboard", "B");
+            RegisterKeyMapping($"vMenu:{id}:PointPad", "vMenu Finger Point Toggle (controller, double tap)", "PAD_ANALOGBUTTON", "R3_INDEX");
+            pointingSleeper = new TickSleeper(PointingTick, t => Tick += t, t => Tick -= t);
+            Tick += PointingTick;
+
+            // Expanded minimap toggle, on release, as before. Minimap Controls must be on.
+            Command($"+vMenu:{id}:Minimap", () => { });
+            Command($"-vMenu:{id}:Minimap", OnMinimapReleased);
+            RegisterKeyMapping($"+vMenu:{id}:Minimap", "vMenu Expanded Minimap Toggle", "keyboard", "Z");
+            RegisterKeyMapping($"+vMenu:{id}:Minimap", "vMenu Expanded Minimap Toggle (controller)", "PAD_ANALOGBUTTON", "LDOWN_INDEX");
+
+            // Drift mode: less grip while held. Drift Mode must be on.
+            Command($"+vMenu:{id}:Drift", () => SetDriftGrip(true));
+            Command($"-vMenu:{id}:Drift", () => SetDriftGrip(false));
+            RegisterKeyMapping($"+vMenu:{id}:Drift", "vMenu Drift Mode (hold)", "keyboard", "LSHIFT");
+            RegisterKeyMapping($"+vMenu:{id}:Drift", "vMenu Drift Mode (hold, controller)", "PAD_ANALOGBUTTON", "RLEFT_INDEX");
+
+            // Teleport to waypoint, keyboard only as before. Its default key still comes from
+            // vmenu_teleport_to_wp_keybind_key (a control number, 168 = F7).
+            Command($"vMenu:{id}:TpToWaypoint", OnTeleportToWaypointKey);
+            var tpControl = MainMenu.MiscSettingsMenu != null ? MainMenu.MiscSettingsMenu.KbTpToWaypointKey : 168;
+            var tpKey = TeleportKeyNames.TryGetValue(tpControl, out var keyName) ? keyName : "F7";
+            RegisterKeyMapping($"vMenu:{id}:TpToWaypoint", "vMenu Teleport To Waypoint", "keyboard", tpKey);
+        }
+
+        // The state the old every-frame checks required before acting on a key.
+        private static bool WorldKeysAllowed()
+        {
+            return !(MenuController.IsAnyMenuOpen() || MainMenu.DontOpenMenus || !Fading.IsFadedIn || Game.IsPaused || IsPlayerSwitchInProgress() || Game.PlayerPed.IsDead);
+        }
+
+        private async void OnVisorPressed()
+        {
+            if (visorHeld)
+            {
+                return;
+            }
+            visorHeld = true;
+            try
+            {
+                var timer = GetGameTimer();
+                while (visorHeld && WorldKeysAllowed())
                 {
-                    if (!(Game.PlayerPed.IsInVehicle() || Game.PlayerPed.IsDead || !Fading.IsFadedIn || IsPlayerSwitchInProgress() || Game.IsPaused
-                        || GetInteriorFromEntity(Game.PlayerPed.Handle) != 0 || !Game.PlayerPed.IsOnFoot || Game.PlayerPed.IsInParachuteFreeFall ||
-                        Game.PlayerPed.IsFalling || Game.PlayerPed.IsBeingStunned || Game.PlayerPed.IsWalking || Game.PlayerPed.IsRunning ||
-                        Game.PlayerPed.IsSprinting || Game.PlayerPed.IsSwimming || Game.PlayerPed.IsSwimmingUnderWater || (Game.PlayerPed.IsDiving && GetSelectedPedWeapon(Game.PlayerPed.Handle) == snowball_hash) || GetSelectedPedWeapon(Game.PlayerPed.Handle) == GetHashKey("unarmed")))
+                    await Delay(0);
+                    var veh = GetVehicle();
+                    var inVeh = veh != null && (veh.Model.IsBike || veh.Model.IsBicycle || veh.Model.IsQuadbike);
+                    // On a bike the controller key is also the headlight key.
+                    if (GetGameTimer() - timer > 380 && inVeh)
                     {
-                        await PickupSnowballOnce();
+                        Game.DisableControlThisFrame(2, Control.VehicleHeadlight);
                     }
+                    if (GetGameTimer() - timer > 400)
+                    {
+                        var t = SwitchHelmetOnce();
+                        while (!t.IsCompleted && !t.IsCanceled && !t.IsFaulted)
+                        {
+                            if (inVeh)
+                            {
+                                Game.DisableControlThisFrame(2, Control.VehicleHeadlight);
+                            }
+                            await Delay(0);
+                        }
+                        break;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine($"[vMenu] visor key: {e.Message}");
+            }
+        }
+
+        private async void OnSnowballReleased()
+        {
+            try
+            {
+                if (!WorldKeysAllowed() || !EventManager.IsSnowEnabled || !IsAllowed(Permission.WPSnowball))
+                {
+                    return;
+                }
+                if (!(Game.PlayerPed.IsInVehicle() || Game.PlayerPed.IsDead || !Fading.IsFadedIn || IsPlayerSwitchInProgress() || Game.IsPaused
+                    || GetInteriorFromEntity(Game.PlayerPed.Handle) != 0 || !Game.PlayerPed.IsOnFoot || Game.PlayerPed.IsInParachuteFreeFall ||
+                    Game.PlayerPed.IsFalling || Game.PlayerPed.IsBeingStunned || Game.PlayerPed.IsWalking || Game.PlayerPed.IsRunning ||
+                    Game.PlayerPed.IsSprinting || Game.PlayerPed.IsSwimming || Game.PlayerPed.IsSwimmingUnderWater || (Game.PlayerPed.IsDiving && GetSelectedPedWeapon(Game.PlayerPed.Handle) == snowball_hash) || GetSelectedPedWeapon(Game.PlayerPed.Handle) == GetHashKey("unarmed")))
+                {
+                    await PickupSnowballOnce();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine($"[vMenu] snowball key: {e.Message}");
+            }
+        }
+
+        private async void OnPointKey(bool controller)
+        {
+            try
+            {
+                var misc = MainMenu.MiscSettingsMenu;
+                if (misc == null || !misc.KbPointKeys || Game.PlayerPed.IsInVehicle())
+                {
+                    return;
+                }
+                // Best effort: a script that disables the point control (for example while cuffed)
+                // still blocks it, as when vMenu read the control itself.
+                if (!Game.IsControlEnabled(0, Control.SpecialAbilitySecondary))
+                {
+                    return;
+                }
+                if (controller)
+                {
+                    // Double tap within 300 ms.
+                    var now = GetGameTimer();
+                    var doubleTap = now - lastPadPointPress < 300;
+                    lastPadPointPress = now;
+                    if (!doubleTap)
+                    {
+                        return;
+                    }
+                }
+                else if (UpdateOnscreenKeyboard() == 0)
+                {
+                    // Typing in the game's onscreen keyboard.
+                    return;
                 }
 
-                // helmet visor
-                if (Game.IsControlPressed(0, Control.SwitchVisor))
+                if (IsPedPointing(Game.PlayerPed.Handle))
                 {
-                    var timer = GetGameTimer();
-                    while (!(MenuController.IsAnyMenuOpen() || MainMenu.DontOpenMenus || !Fading.IsFadedIn || Game.IsPaused || IsPlayerSwitchInProgress() || Game.PlayerPed.IsDead) && Game.IsControlPressed(0, Control.SwitchVisor))
-                    {
-                        await Delay(0);
-                        var veh = GetVehicle();
-                        var inVeh = veh != null && (veh.Model.IsBike || veh.Model.IsBicycle || veh.Model.IsQuadbike);
-                        if (GetGameTimer() - timer > 380 && inVeh)
-                        {
-                            Game.DisableControlThisFrame(2, Control.VehicleHeadlight);
-                        }
-                        if (GetGameTimer() - timer > 400)
-                        {
-                            var t = SwitchHelmetOnce();
-                            while (!t.IsCompleted && !t.IsCanceled && !t.IsFaulted)
-                            {
-                                if (inVeh)
-                                {
-                                    Game.DisableControlThisFrame(2, Control.VehicleHeadlight);
-                                }
-                                await Delay(0);
-                            }
-                            break;
-                        }
-                    }
-                    while (Game.IsControlPressed(0, Control.SwitchVisor))
-                    {
-                        await Delay(0);
-                    }
+                    ClearPedSecondaryTask(Game.PlayerPed.Handle);
+                    return;
                 }
+                if (!await LoadAnimDictAsync("anim@mp_point"))
+                {
+                    return;
+                }
+                TaskMoveNetwork(Game.PlayerPed.Handle, "task_mp_pointing", 0.5f, false, "anim@mp_point", 24);
+                RemoveAnimDict("anim@mp_point");
+                pointingSleeper?.Wake();
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine($"[vMenu] point key: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Steers the pointing animation every frame while pointing started by the point key, and
+        /// stops pointing in a vehicle. Off the tick list the rest of the time.
+        /// </summary>
+        private async Task PointingTick()
+        {
+            var ped = PlayerPedId();
+            if (!IsPedPointing(ped))
+            {
+                pointingSleeper?.Sleep();
+                return;
+            }
+            if (IsPedInAnyVehicle(ped, false))
+            {
+                ClearPedSecondaryTask(ped);
+                return;
+            }
+            SetTaskMoveNetworkSignalFloat(ped, "Pitch", GetPointingPitch());
+            SetTaskMoveNetworkSignalFloat(ped, "Heading", GetPointingHeading());
+            SetTaskMoveNetworkSignalBool(ped, "isBlocked", GetPointingIsBlocked());
+            SetTaskMoveNetworkSignalBool(ped, "isFirstPerson", GetFollowPedCamViewMode() == 4);
+            SetTaskMoveNetworkSignalFloat(ped, "Speed", 0.25f);
+            await Task.FromResult(0);
+        }
+
+        private void OnMinimapReleased()
+        {
+            var misc = MainMenu.MiscSettingsMenu;
+            if (misc == null || !misc.KbRadarKeys || expandedRadarProfile || MenuController.IsAnyMenuOpen() || IsPauseMenuActive()
+                || !Game.IsControlEnabled(0, Control.MultiplayerInfo))
+            {
+                return;
+            }
+            if (IsBigmapActive())
+            {
+                SetBigmapActive(false, false);
+                vMenuOpenedBigmap = false;
+            }
+            else
+            {
+                SetBigmapActive(true, false);
+                radarSwitchTimer = GetGameTimer();
+                vMenuOpenedBigmap = true;
+            }
+        }
+
+        private void SetDriftGrip(bool held)
+        {
+            if (!held)
+            {
+                if (driftVehicle != 0 && DoesEntityExist(driftVehicle))
+                {
+                    SetVehicleReduceGrip(driftVehicle, false);
+                }
+                driftVehicle = 0;
+                return;
+            }
+            var misc = MainMenu.MiscSettingsMenu;
+            if (misc == null || !misc.KbDriftMode || !IsAllowed(Permission.MSDriftMode) || !Game.PlayerPed.IsInVehicle())
+            {
+                return;
+            }
+            var veh = GetVehicle();
+            if (veh != null && veh.Exists() && !veh.IsDead)
+            {
+                SetVehicleReduceGrip(veh.Handle, true);
+                driftVehicle = veh.Handle;
+            }
+        }
+
+        private void OnTeleportToWaypointKey()
+        {
+            var misc = MainMenu.MiscSettingsMenu;
+            if (misc == null || !misc.KbTpToWaypoint || !IsAllowed(Permission.MSTeleportToWp) || !Fading.IsFadedIn || IsPlayerSwitchInProgress())
+            {
+                return;
+            }
+            if (Game.IsWaypointActive)
+            {
+                TeleportToWp();
+                Notify.Success("Teleported to waypoint.");
+            }
+            else
+            {
+                Notify.Error("You need to set a waypoint first.");
             }
         }
         #endregion

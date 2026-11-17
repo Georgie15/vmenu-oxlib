@@ -84,6 +84,9 @@ dotnet run --project tests/clothing-refs
 python tests/clothing-layouts/test_clothing_layouts.py
 dotnet run --project tests/menuapi-compat
 python tests/idle-rests/test_idle_rests.py
+python tests/key-bindings/test_key_bindings.py
+python tests/hud-overlay/test_hud_overlay.py
+python tests/vehicle-rests/test_vehicle_rests.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

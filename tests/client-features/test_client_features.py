@@ -87,6 +87,7 @@ teleport = member(misc, r'else if \(item == tpToCoord\).*?\n                    
 assert 'await GetUserCoords()' in teleport and 'GetUserInput' not in teleport, 'one dialog for X, Y and Z'
 dialog = member(exports_lua, r'exports\("coordsDialog".*?\nend\)')
 assert dialog.count('field("') == 3 and 'GetEntityCoords(cache.ped)' in dialog and 'type = "number"' in dialog
+assert 'default =' not in dialog and 'placeholder =' in dialog, 'the fields start empty (current position only as a hint), so pasting needs no clearing'
 assert 'Export/Import Data' not in misc and 'exportData' not in misc, 'the stub is gone'
 assert re.search(r'if \(GetConvar\("vmenu_backups", "false"\) == "true"\)\s*\{\s*menu\.AddMenuItem\(backupSaves\);\s*menu\.AddMenuItem\(restoreSaves\);', misc)
 for event in ('vMenu:backups:backup', 'vMenu:backups:restore'):

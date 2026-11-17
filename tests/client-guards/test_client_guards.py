@@ -51,8 +51,12 @@ print('PASS: ped pack browse and preview (local ped, spawn still locked)')
 misc = member(fc, r'^        private async Task MiscSettings\(\).*?^        }$')
 assert 'if (vMenuOpenedBigmap && (!IsBigmapActive() || GetGameTimer() - radarSwitchTimer > 8000))' in misc, \
     'only an expanded radar vMenu opened is closed after 8 s'
-assert misc.count('vMenuOpenedBigmap = true;') == 1 and misc.count('vMenuOpenedBigmap = false;') == 2
-assert misc.count('SetBigmapActive(false, false);') == 2, 'no other path closes the expanded radar'
+# Release J: the minimap key is a key binding; its handler opens and closes, MiscSettings closes after 8 s.
+minimap_key = member(fc, r'^        private void OnMinimapReleased\(\).*?^        }$')
+radar = misc + minimap_key
+assert radar.count('vMenuOpenedBigmap = true;') == 1 and radar.count('vMenuOpenedBigmap = false;') == 2
+assert radar.count('SetBigmapActive(false, false);') == 2, 'no other path closes the expanded radar'
+assert '!Game.IsControlEnabled(0, Control.MultiplayerInfo)' in minimap_key and 'expandedRadarProfile' in minimap_key,     'the key still respects other scripts disabling it and the pause menu expanded radar'
 
 # --- fix 5 and 6 --------------------------------------------------------------------------------
 deaths = member(fc, r'^        private async Task DeathNotifications\(\).*?^        }$')

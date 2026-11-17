@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`), on top of release H. **Testing on branch `perf/menuapi4`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `8219b71e57a0ce169eced482a4391b50d0fb39e661ef952efef073477bc1142f` |
+| Latest change | November 17, 2026 — release J: the rest of Enhanced's performance patterns and empty teleport fields (client DLL, `storage.html`, `client/exports.lua`), on top of releases I and H. **Testing on branch `perf/release-j`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `adf681908fab0fc2e73a4909f4b3997b7ac7127e212d5715eadbec8a8ea00aae` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,141 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release J: the rest of Enhanced's performance patterns, empty teleport fields (client DLL, `storage.html`, `client/exports.lua`) — TESTING, branch `perf/release-j`
+
+**Status: test build, not verified in game, not on `main`.** It is built on
+release I (`perf/menuapi4`), which is built on release H. Until it passes an
+in-game check, `main` and `build-2026-11-17-3` stay the live build and the
+fallback.
+
+**Why.** The owner asked for the remaining performance patterns that vMenu
+Enhanced uses, plus one teleport fix. After releases H and I, vMenu still did
+some work every frame that Enhanced does not:
+- a loop for the visor and snowball keys, for every player;
+- the player options loop for every regular player, because Never Wanted
+  defaults to on even without its permission;
+- the vehicle options and vehicle switch loops, every frame in any vehicle;
+- polling the point, minimap, drift and teleport keys while they are switched
+  on;
+- drawing coordinates, location, time and speed with game calls while they
+  are switched on.
+
+**What changed (client DLL):**
+- **Never Wanted** keeps the player options loop running every frame only for
+  players allowed to use it (`vMenu.PlayerOptions.NeverWanted`). For everyone
+  else it never did anything.
+- **Vehicle loops:**
+  - The vehicle switch check (`GeneralTasks`) checks every 100 ms, seated or
+    not. Enhanced checks every 250 ms.
+  - Vehicle options rest 100 ms in a vehicle too, unless an option is on that
+    the game needs every frame: vehicle god mode, freeze, keep clean, torque,
+    no helmet or infinite fuel. `VehicleOptionsEveryFrame()` lists them, with
+    the same permissions. A waiting vehicle switch also keeps it every frame,
+    so the switch settings apply on the next pass. Those are the power
+    multiplier, no siren, turbulence and boat anchor.
+- **Key bindings instead of reading keys every frame** (as Enhanced). Players
+  can change them in Settings > Key Bindings > FiveM. The names follow
+  vMenu's existing `vMenu:<keymapping id>:…` bindings:
+
+  | Key | Default | Was |
+  | --- | --- | --- |
+  | Helmet visor (hold 400 ms) | F11 / D-pad right | the game's visor control |
+  | Pick up snowball (on release) | G / D-pad right | the game's detonate control |
+  | Finger point toggle | B / double tap right stick | the game's special ability control |
+  | Expanded minimap (on release) | Z / D-pad down | the game's multiplayer info control |
+  | Drift mode (hold) | Left Shift / X (Square) | sprint / jump |
+  | Teleport to waypoint | from `vmenu_teleport_to_wp_keybind_key` (168 = F7) | that control |
+
+  - Each handler keeps the conditions the old check had: the option switched
+    on in Misc Settings, permission, menu or pause menu closed, faded in, not
+    dead, on foot or in a vehicle as before, and not typing for the point key.
+  - The point and minimap keys also check that no other script has disabled
+    the game control, as when vMenu read the control itself. Key bindings run
+    outside the game's control handling, so that check is best effort.
+  - Pointing steers its animation every frame only while pointing (a
+    `TickSleeper` loop). The old visor/snowball loop is gone.
+  - The recording keys stay as they were. They are the game's own replay
+    controls, with a hold-and-press combination on controller, and they
+    already rest while switched off.
+- **Coordinates, location, time and speed** are shown on the web page
+  (`storage.html`, `#vmenu-hud`), as Enhanced does, instead of being drawn with
+  game calls every frame.
+  - `HudOverlayTick` sends what to show at most 10 times a second, and only
+    when it changed. It does nothing while every one of these options is off.
+  - The text uses the same screen positions as before and the game's own text
+    heights, in GTA Chalet (Antonio for the speedometer).
+  - It is hidden over the pause menu, fades, player switches and a hidden HUD.
+  - Coordinates now always show a decimal point, whatever the player's Windows
+    number format.
+
+**Teleport To Coords** (`client/exports.lua`): the X, Y and Z fields start
+empty, so pasted coordinates don't have to replace your current position. Your
+position only shows as a faint hint.
+
+**What players will notice.**
+- New entries in Settings > Key Bindings > FiveM ("vMenu Helmet Visor (hold)",
+  "vMenu Finger Point Toggle"…) that can be rebound.
+- The visor key on keyboard is F11 now. Before it was the game's own visor
+  control.
+- **Timing:**
+  - Getting into a vehicle applies the switch settings within about 0.2 s.
+  - Switching an in-vehicle option off takes up to 0.1 s to undo with the menu
+    closed.
+- On-screen text looks slightly different: drawn by the browser, not the game.
+  Its size may need a small tweak after seeing it in game.
+
+**Expected effect.** Not measured. For a player on foot with every option off,
+vMenu's every-frame loops go from 4–5 (release I) to 2: the menu watcher and
+the first-frame death check. MenuAPI's toggle tick remains, as in Enhanced. In
+a vehicle with every option off, two fewer loops run every frame.
+
+**Validation:**
+- **New tests:**
+  - `tests/key-bindings`: binding names, default keys and press or release
+    timing, and that nothing polls these keys any more. It also runs the
+    production point, steering, minimap, drift and teleport handlers against
+    fake natives: 26 checks covering every old condition.
+  - `tests/hud-overlay`: MiscSettings no longer draws text. It runs the
+    production `HudOverlayTick`: rests and hides once while off, sends once per
+    change, hidden over the pause menu, permissions, speed only in a vehicle,
+    both speeds.
+  - `tests/vehicle-rests`: every option the vehicle loop applies every frame
+    keeps it every frame, with the same permission. The switch settings ride
+    on `SwitchedVehicle`. A mutation self-test drops each helper line in turn.
+- **Updated tests:**
+  - `tests/frame-costs`: the visor and snowball handlers run against the same
+    fakes as before. Nothing runs on frames with no key used, and the pickup,
+    snow, walking, menu and visor-hold rules are unchanged.
+  - `tests/idle-rests` still compares this build against `build-2026-11-17-3`
+    frame by frame for everything left in those loops, Never Wanted included.
+  - `tests/client-guards`, `tests/client-fixes` and `tests/client-features`
+    follow the moves. The last one checks that the teleport fields start
+    empty, and it fails on the old dialog.
+- **Browser and runtime checks:**
+  - `storage.html` in a browser: the HUD parts land beside the minimap, top
+    centre and bottom right, and hide when switched off. The storage page's
+    elements are unchanged.
+  - `tests/menuapi-compat`: every member the client uses exists in FiveM's
+    runtime.
+- `tools/ilcompare` against release I's client: only `FunctionsController`
+  changed, in the methods above, plus compiler-generated helpers. One local
+  function was only renumbered.
+- All 35 tests in AGENTS.md pass.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `adf681908fab0fc2e73a4909f4b3997b7ac7127e212d5715eadbec8a8ea00aae` |
+| `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` (unchanged) |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c…` (unchanged) |
+
+**Deploy (test):** on top of release I.
+1. Check the installed `vMenuClient.net.dll` is release I's (`8219b71e…`).
+2. Copy `vMenuClient.net.dll`, `storage.html` and `client/exports.lua`.
+3. Run `restart vMenu` and have players reconnect.
+
+**Roll back to release I:** copy back release I's `vMenuClient.net.dll`,
+`storage.html` and `client/exports.lua`.
 
 ## November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`) — TESTING, branch `perf/menuapi4`
 

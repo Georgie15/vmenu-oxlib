@@ -257,10 +257,71 @@
   #vmenu-storage .sp-pack-btn--no:hover {
     background: rgba(255, 255, 255, 0.1);
   }
+
+  /* vMenu's on-screen text (coordinates, location, time, speedometer). HudOverlayTick in the client
+     sends what to show; positions and sizes are the screen fractions the game drawing used. */
+  #vmenu-hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    font-family: "GTA Chalet", "Helvetica Neue", Arial, sans-serif;
+    color: rgb(240 240 240);
+    text-shadow: 0 0 2px rgb(0 0 0), 1px 1px 1px rgb(0 0 0);
+    line-height: 1;
+  }
+
+  #vmenu-hud > div {
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  #vmenu-hud .red {
+    color: rgb(224 50 50);
+  }
+
+  #vmenu-hud .grey {
+    color: rgb(140 140 140);
+  }
+
+  #vmenu-hud-coords {
+    left: calc(50% - 30px);
+    top: 0;
+    display: grid;
+    grid-template-columns: auto auto;
+    column-gap: 1.2em;
+  }
+
+  #vmenu-hud-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    width: 4vw;
+  }
+
+  #vmenu-hud-time {
+    transform: translateX(-50%);
+  }
+
+  #vmenu-hud-kmh,
+  #vmenu-hud-mph {
+    right: 0.5vw;
+    font-family: Antonio, "GTA Chalet", sans-serif;
+    font-weight: 600;
+  }
 </style>
 
 <body>
   <div id="menuapi"></div>
+
+  <div id="vmenu-hud" hidden>
+    <div id="vmenu-hud-coords" hidden></div>
+    <div id="vmenu-hud-street" hidden></div>
+    <div id="vmenu-hud-zone" hidden></div>
+    <div id="vmenu-hud-heading" hidden><span class="grey">|</span><span id="vmenu-hud-dir"></span><span class="grey">|</span></div>
+    <div id="vmenu-hud-time" class="grey" hidden></div>
+    <div id="vmenu-hud-kmh" hidden></div>
+    <div id="vmenu-hud-mph" hidden></div>
+  </div>
 
   <div id="vmenu-storage">
   <div id="body" hidden>
@@ -339,6 +400,79 @@
   <script src="menuapi/glare.min.js"></script>
   <script src="menuapi/colour-list.min.js"></script>
   <script src="menuapi/menuapi.min.js"></script>
+
+  <script>
+    // vMenu's on-screen text, see #vmenu-hud above.
+    (() => {
+      const hud = document.getElementById("vmenu-hud");
+      const part = (id) => document.getElementById("vmenu-hud-" + id);
+
+      function place(el, x, y, h) {
+        if (x !== undefined) el.style.left = (x * 100) + "vw";
+        if (y !== undefined) el.style.top = (y * 100) + "vh";
+        if (h !== undefined) el.style.fontSize = (h * 100) + "vh";
+      }
+
+      function show(el, on) {
+        el.hidden = !on;
+      }
+
+      function span(text, cls) {
+        const s = document.createElement("span");
+        s.textContent = text;
+        if (cls) s.className = cls;
+        return s;
+      }
+
+      window.addEventListener("message", (event) => {
+        const d = event.data;
+        if (!d || d.action !== "vmenuHud") return;
+        hud.hidden = !d.visible;
+        if (!d.visible) return;
+
+        const coords = part("coords");
+        show(coords, !!d.coords);
+        if (d.coords) {
+          coords.replaceChildren(
+            span("X", "red"), span(d.coords.x), span("Y", "red"), span(d.coords.y),
+            span("Z", "red"), span(d.coords.z), span("Heading", "red"), span(d.coords.heading));
+          place(coords, undefined, undefined, d.coords.h);
+        }
+
+        const street = part("street"), zone = part("zone"), heading = part("heading");
+        const loc = d.location;
+        [street, zone, heading].forEach((el) => show(el, !!loc));
+        if (loc) {
+          street.replaceChildren();
+          if (loc.near) street.append(span("Near ", "grey"));
+          street.append(span(loc.main));
+          if (loc.cross) street.append(span(" / " + loc.cross, "grey"));
+          place(street, loc.x, loc.streetY, loc.streetH);
+          zone.textContent = loc.zone;
+          place(zone, loc.x, loc.zoneY, loc.zoneH);
+          part("dir").textContent = loc.heading;
+          place(heading, loc.headingX - 0.02, loc.headingY, loc.headingH);
+        }
+
+        const time = part("time");
+        show(time, !!d.time);
+        if (d.time) {
+          time.textContent = d.time.text;
+          place(time, d.time.x, d.time.y, d.time.h);
+        }
+
+        const kmh = part("kmh"), mph = part("mph");
+        const speed = d.speed;
+        show(kmh, !!speed && speed.kmh !== null);
+        show(mph, !!speed && speed.mph !== null);
+        if (speed) {
+          // Kilometres at the bottom; miles above it when both are shown, as before.
+          if (speed.kmh !== null) { kmh.textContent = speed.kmh + " KM/h"; place(kmh, undefined, 0.955, speed.h); }
+          if (speed.mph !== null) { mph.textContent = speed.mph + " MPH"; place(mph, undefined, speed.kmh !== null ? 0.925 : 0.955, speed.h); }
+        }
+      });
+    })();
+  </script>
 
   <script>
     const resourceName = GetParentResourceName();
