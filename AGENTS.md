@@ -34,6 +34,13 @@ Instructions for any AI agent or developer working in this repository.
   [docs/current-build.md](docs/current-build.md).
 - Lua, config, `storage.html` and every other deployed file exist only in
   `build/vMenu/`. Edit them there.
+- `build/vMenu/MenuAPI.dll` is MenuAPI v3.2.2 plus `tools/menuapi/`'s patch.
+  Build it as described in the latest MenuAPI section of
+  [docs/current-build.md](docs/current-build.md), including
+  `-p:GenerateRepositoryUrlAttribute=false`, and run
+  `dotnet run --project tests/menuapi-compat` before shipping it. FiveM's
+  client Mono lacks some types the .NET SDK adds, and an unknown attribute type
+  crashed clients once.
 
 ## Tests
 
@@ -68,6 +75,7 @@ python tests/frame-costs/test_frame_costs.py
 python tests/telemetry-leases/test_telemetry_leases.py
 dotnet run --project tests/clothing-refs
 python tests/clothing-layouts/test_clothing_layouts.py
+dotnet run --project tests/menuapi-compat
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

@@ -8,10 +8,10 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — backport the full upstream guard for MenuAPI's legacy menu toggle (MenuAPI DLL) |
+| Latest change | November 17, 2026 — rebuild the toggle-guard MenuAPI without the attribute that crashed clients (MenuAPI DLL) |
 | `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
-| `build/vMenu/MenuAPI.dll` | `c153b57b18f0c85f47a33b8d2684e9ae7ccbfa4a402fdee56506a8e5b2821067` |
+| `build/vMenu/MenuAPI.dll` | `7493926e44724b2f7983e6dd1bc07106dfbd3c403acd5d5afdedbabd1f69db0a` |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll build/vMenu/MenuAPI.dll`.
@@ -21,7 +21,82 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
+## November 17, 2026 — MenuAPI rebuild crashed clients (MenuAPI DLL)
+
+**Do not deploy `build-2026-11-17-2`'s MenuAPI.dll (`c153b57b…`).** It has the
+right V-key guard, but it crashes FiveM clients.
+
+**What broke.** The .NET 9 SDK turns MenuAPI's `RepositoryUrl` project property
+into an `AssemblyMetadataAttribute("RepositoryUrl", …)` on the assembly. Stock
+MenuAPI 3.2.2 doesn't have it. FiveM's client `mscorlib` doesn't define that
+type.
+- vMenu's `dynamic` calls go through `Microsoft.CSharp`'s binder, and that
+  binder reads the attributes of every loaded assembly.
+- So every such call threw `TypeLoadException: Could not resolve type with token
+  0100000e` (TypeRef `0x0100000e` in that DLL is the missing attribute type).
+  The first one seen is `CanDoInteraction` (CommonFunctions.cs:46).
+- Seen on live after deploying it:
+  - The ped was invisible after spawn: the first-spawn appearance restore stopped
+    at the weapon loadout's `CanDoInteraction`.
+  - Noclip and Saved Characters failed.
+  - Then FiveM crashed at `mono-2.0-sgen.dll+2660F5`.
+- The client logs show no such error in any session before the swap.
+- The earlier `ilcompare` review saw this attribute and treated it as harmless.
+
+**Fix.** The same MenuAPI v3.2.2 source and
+[the legacy toggle patch](../tools/menuapi/skip-disabled-legacy-toggle.patch),
+built with `-p:GenerateRepositoryUrlAttribute=false`:
+
+```
+dotnet build MenuAPI/MenuAPI.csproj -c "Release FiveM" --nologo -p:IncludeSourceRevisionInInformationalVersion=false -p:GenerateRepositoryUrlAttribute=false "-p:PathMap=<checkout>=/_/MenuAPI"
+```
+
+A rebuild without the new flag reproduced `c153b57b…`'s IL exactly, so the build
+setup matches the earlier one. The new flag is the only difference.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/MenuAPI.dll` | `7493926e44724b2f7983e6dd1bc07106dfbd3c403acd5d5afdedbabd1f69db0a` |
+| `build/vMenu/vMenuClient.net.dll` | `4fdd0413…` (unchanged) |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c…` (unchanged) |
+
+**Validation:**
+- `tools/ilcompare` against `c153b57b…`: only the `RepositoryUrl` attribute is
+  removed.
+- Against stock 3.2.2 (`8851e2ad…`): the assembly attributes are identical, and
+  the only code change is the guard in `ProcessToggleMenuButton`. The compiler
+  also orders the state-machine setup in `Menu.Draw` and
+  `MenuButtonsDisableChecks` differently; vMenuClient builds with the same SDK
+  and runs fine on live.
+- **New test**, `dotnet run --project tests/menuapi-compat`. It checks that:
+  - the packaged MenuAPI references no external type or member that stock 3.2.2
+    doesn't;
+  - its assembly attributes are stock's;
+  - the guard is present;
+  - when FiveM is installed on the machine, every type that MenuAPI.dll and
+    vMenuClient.net.dll reference exists in FiveM's own runtime assemblies.
+
+  It fails on `c153b57b…` with exactly `AssemblyMetadataAttribute`, and passes
+  on this build.
+- No in-game test has been done yet.
+
+**Deploy:**
+1. Hash the installed `MenuAPI.dll`. It should be `c153b57b…` (the crashing
+   build) or `8851e2ad…` (stock, if it was rolled back). If it is neither, stop.
+2. Copy only `MenuAPI.dll`.
+3. Restart `vMenu`, and have players reconnect.
+4. Check in game:
+   - your ped is visible after spawning;
+   - F1 opens and closes vMenu, and V only switches the camera;
+   - noclip and Saved Characters work;
+   - F8 shows no `TypeLoadException`.
+
+This package is tagged `build-2026-11-17-3`.
+
 ## November 17, 2026 — backport the full legacy menu toggle guard (MenuAPI DLL)
+
+> Superseded: this build's `MenuAPI.dll` (`c153b57b…`) crashes clients. Use
+> `build-2026-11-17-3` (see above).
 
 Stock vMenu 3.8.7 uses [MenuAPI 3.2.4](https://github.com/TomGrobbe/vMenu/pull/584).
 With the legacy toggle set to `-1`, it
