@@ -78,7 +78,10 @@ setup matches the earlier one. The new flag is the only difference.
 
   It fails on `c153b57b…` with exactly `AssemblyMetadataAttribute`, and passes
   on this build.
-- No in-game test has been done yet.
+- **Verified in game on November 17, 2026**, with `7493926e…` deployed on live:
+  - the ped is visible after spawn;
+  - F1 opens and closes vMenu, and V only switches the camera;
+  - no crashes.
 
 **Deploy:**
 1. Hash the installed `MenuAPI.dll`. It should be `c153b57b…` (the crashing
