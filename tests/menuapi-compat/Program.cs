@@ -10,10 +10,15 @@
 //
 // Checks:
 //  1. Assembly-level attributes are the stock MenuAPI 3.2.2 set (NuGet cache).
-//  2. Every type and member referenced outside MenuAPI is also referenced by stock 3.2.2.
+//  2. Every type and member referenced outside MenuAPI is also referenced by stock 3.2.2,
+//     except the members listed in AllowedNewMembers (tools/menuapi/idle-while-closed.patch
+//     takes ticks off the tick list, which stock never does).
 //  3. ProcessToggleMenuButton has the 0..402 toggle-key guard (the V-key fix).
-//  4. If FiveM is installed here, every type referenced by MenuAPI.dll and
-//     vMenuClient.net.dll exists in FiveM's own runtime assemblies.
+//  4. The idle-while-closed patch is wired: Menu.Visible wakes the menu ticks and
+//     ProcessMenus puts them to sleep.
+//  5. If FiveM is installed here, every type referenced by MenuAPI.dll and
+//     vMenuClient.net.dll exists in FiveM's own runtime assemblies, and so does every
+//     member in AllowedNewMembers.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -214,6 +219,71 @@ static class Program
         return result;
     }
 
+    // External members the patches use that stock 3.2.2 doesn't: (assembly, type, member).
+    static readonly (string Assembly, string Type, string Member)[] AllowedNewMembers =
+    {
+        ("CitizenFX.Core.Client", "CitizenFX.Core.BaseScript", "remove_Tick"),
+    };
+
+    static bool IsAllowedNewMember(string rendered) =>
+        AllowedNewMembers.Any(m => rendered.StartsWith($"[{m.Assembly}]{m.Type}::{m.Member} ", StringComparison.Ordinal));
+
+    // Whether a type in a runtime assembly, or the assembly it forwards the type to, defines a
+    // method with this name.
+    static bool RuntimeDefinesMethod(string path, string typeName, string methodName, int depth = 0)
+    {
+        if (depth > 4 || !File.Exists(path)) return false;
+        string forwardedTo = null;
+        using (var pe = new PEReader(File.OpenRead(path)))
+        {
+            var md = pe.GetMetadataReader();
+            foreach (var handle in md.TypeDefinitions)
+            {
+                var td = md.GetTypeDefinition(handle);
+                if (md.GetString(td.Namespace) + "." + md.GetString(td.Name) != typeName) continue;
+                return td.GetMethods().Any(m => md.GetString(md.GetMethodDefinition(m).Name) == methodName);
+            }
+            foreach (var handle in md.ExportedTypes)
+            {
+                var et = md.GetExportedType(handle);
+                if (md.GetString(et.Namespace) + "." + md.GetString(et.Name) != typeName) continue;
+                if (et.Implementation.Kind == HandleKind.AssemblyReference)
+                {
+                    forwardedTo = md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)et.Implementation).Name);
+                }
+            }
+        }
+        return forwardedTo != null
+            && RuntimeDefinesMethod(Path.Combine(Path.GetDirectoryName(path), forwardedTo + ".dll"), typeName, methodName, depth + 1);
+    }
+
+    // Whether the IL of `method` on a type whose name starts with `typePrefix` calls a method
+    // named `callee` defined in this assembly.
+    static bool Calls(Image image, string typePrefix, string method, string callee)
+    {
+        foreach (var handle in image.Md.TypeDefinitions)
+        {
+            var type = image.Md.GetTypeDefinition(handle);
+            if (!image.Md.GetString(type.Name).StartsWith(typePrefix)) continue;
+            foreach (var methodHandle in type.GetMethods())
+            {
+                var def = image.Md.GetMethodDefinition(methodHandle);
+                if (image.Md.GetString(def.Name) != method || def.RelativeVirtualAddress == 0) continue;
+                var il = image.Body(def.RelativeVirtualAddress).GetILBytes();
+                for (int i = 0; i + 5 <= il.Length; i++)
+                {
+                    if (il[i] != 0x28 && il[i] != 0x6F) continue; // call, callvirt
+                    int token = BitConverter.ToInt32(il, i + 1);
+                    if ((token >> 24) != 0x06) continue; // MethodDef
+                    var target = MetadataTokens.MethodDefinitionHandle(token & 0xFFFFFF);
+                    if (MetadataTokens.GetRowNumber(target) > image.Md.MethodDefinitions.Count) continue;
+                    if (image.Md.GetString(image.Md.GetMethodDefinition(target).Name) == callee) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     static bool HasToggleGuard(Image image)
     {
         // ldc.i4 402: the upper bound of the guard copied from MenuAPI 3.2.4.
@@ -258,12 +328,19 @@ static class Program
             (newTypes.Count > 0 ? ": " + string.Join(", ", newTypes) : ""));
 
         var newMembers = packaged.ExternalMemberRefs().Except(stock.ExternalMemberRefs()).ToList();
-        Check(newMembers.Count == 0,
-            "no external member references beyond stock MenuAPI 3.2.2" +
-            (newMembers.Count > 0 ? ": " + string.Join(", ", newMembers) : ""));
+        var unexpectedMembers = newMembers.Where(m => !IsAllowedNewMember(m)).ToList();
+        Check(unexpectedMembers.Count == 0,
+            "no external member references beyond stock MenuAPI 3.2.2 and the allowed list" +
+            (unexpectedMembers.Count > 0 ? ": " + string.Join(", ", unexpectedMembers) : ""));
+        Check(!stock.ExternalMemberRefs().Any(IsAllowedNewMember),
+            "the allowed new members are really new (stock 3.2.2 doesn't reference them)");
 
         Check(HasToggleGuard(packaged), "ProcessToggleMenuButton has the 0..402 toggle-key guard");
         Check(!HasToggleGuard(stock), "the guard check rejects stock MenuAPI 3.2.2");
+
+        Check(Calls(packaged, "Menu", "set_Visible", "WakeMenuTicks"), "Menu.Visible wakes the sleeping menu ticks");
+        Check(Calls(packaged, "<ProcessMenus>", "MoveNext", "SleepMenuTicks"), "ProcessMenus puts the menu ticks to sleep with every menu closed");
+        Check(!Calls(stock, "Menu", "set_Visible", "WakeMenuTicks"), "the idle-patch check rejects stock MenuAPI 3.2.2");
 
         var fivemLib = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -289,6 +366,13 @@ static class Program
                 Check(missing.Count == 0,
                     $"{Path.GetFileName(path)} only references types in FiveM's runtime" +
                     (missing.Count > 0 ? ": missing " + string.Join(", ", missing) : ""));
+            }
+
+            foreach (var (assembly, type, member) in AllowedNewMembers)
+            {
+                var file = Path.Combine(fivemLib, assembly + ".dll");
+                Check(File.Exists(file) && RuntimeDefinesMethod(file, type, member),
+                    $"FiveM's {assembly}.dll defines {type}::{member}");
             }
         }
 

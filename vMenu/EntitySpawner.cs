@@ -20,8 +20,13 @@ namespace vMenuClient
         /// <summary>
         /// Constructor.
         /// </summary>
+        // MoveHandler sleeps while nothing is being placed; SpawnEntity wakes it.
+        private static TickSleeper moveSleeper;
+
         public EntitySpawner()
         {
+            moveSleeper = new TickSleeper(MoveHandler, t => Tick += t, t => Tick -= t);
+            Tick += MoveHandler;
 #if DEBUG
             RegisterCommand("testEntity", new Action<int, List<object>>((source, args) =>
             {
@@ -102,6 +107,7 @@ namespace vMenuClient
             FreezeEntityPosition(handle, true); // Freeze entity to prevent it from falling under the map
 
             Active = true;
+            moveSleeper?.Wake();
         }
 
         /// <summary>
@@ -197,9 +203,9 @@ namespace vMenuClient
         #endregion
 
         /// <summary>
-        /// Main tick method for class
+        /// Main tick method for class. Registered by the constructor; it sleeps while nothing is
+        /// being placed (see TickSleeper) and SpawnEntity wakes it.
         /// </summary>
-        [Tick]
         internal async Task MoveHandler()
         {
             if (Active)
@@ -219,6 +225,10 @@ namespace vMenuClient
                     SetScaleformMovieAsNoLongerNeeded(ref scaleform); // Unload scaleform if there is no need to draw it
                     scaleform = 0;
                 }
+
+                // Nothing is being placed; SpawnEntity wakes this again.
+                moveSleeper?.Sleep();
+                return;
             }
 
             var headingOffset = 0f;

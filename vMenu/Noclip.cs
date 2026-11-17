@@ -34,8 +34,12 @@ namespace vMenuClient
             "100%"
         };
 
+        // NoClipHandler sleeps while noclip is off (see TickSleeper); SetNoclipActive wakes it.
+        private static TickSleeper handlerSleeper;
+
         public NoClip()
         {
+            handlerSleeper = new TickSleeper(NoClipHandler, t => Tick += t, t => Tick -= t);
             Tick += NoClipHandler;
         }
 
@@ -64,6 +68,10 @@ namespace vMenuClient
                 SetScaleformMovieAsNoLongerNeeded(ref Scale);
 
                 Scale = -1;
+            }
+            else
+            {
+                handlerSleeper?.Wake();
             }
         }
 
@@ -104,6 +112,13 @@ namespace vMenuClient
 
         private async Task NoClipHandler()
         {
+            if (!NoclipActive)
+            {
+                // Nothing to do until noclip is switched on, which wakes this again.
+                handlerSleeper?.Sleep();
+                return;
+            }
+
             if (NoclipActive)
             {
                 Scale = RequestScaleformMovie("INSTRUCTIONAL_BUTTONS");

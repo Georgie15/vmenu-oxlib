@@ -52,6 +52,7 @@ assert re.search(r'Tick \+= VehicleOptions;\s*vehicleHealthCheckEnabled = true;\
 assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*Tick \+= ManageCamera;\s*movementLockCheckEnabled = true;', setup)
 assert re.search(r'if \(GetSettingsBool\(Setting\.vmenu_enable_animals_spawn_menu\)\)\s*\{\s*animalCameraCheckEnabled = true;', setup)
 assert 'MenuController.EnableManualGCs = false;' in main_menu, "MenuAPI's forced GC every 60 s is off"
+assert re.search(r'Tick \+= MiscSettings;\s*Tick \+= RadarSettings;', setup), 'the radar settings loop is registered next to MiscSettings'
 assert '(uint)GetHashKey("gadget_parachute")' not in fc, 'the parachute hash is a constant, not hashed every frame'
 weapons = member(fc, r'^        private async Task WeaponOptions\(\).*?^        }$')
 assert 'Game.PlayerPed.Handle' not in weapons.split('var ped = PlayerPedId();')[1], 'weapon options reuse one ped lookup'
@@ -496,8 +497,9 @@ namespace Glow
     public static class S
     {
         public static FrameRuntime Runtime;
-        public static int Delays, OwnDecorWrites;
+        public static int Delays, OwnDecorWrites, DecorReads;
         public static readonly Dictionary<int, int> Decor = new Dictionary<int, int>();
+        public static readonly HashSet<int> Gone = new HashSet<int>();
         public static readonly List<string> Glow = new List<string>();
     }
     public static class Debug { public static void WriteLine(string text) { throw new Exception(text); } }
@@ -505,7 +507,7 @@ namespace Glow
     {
         public readonly int Handle;
         public Ped(int handle) { Handle = handle; }
-        public bool Exists() => true;
+        public bool Exists() => !S.Gone.Contains(Handle);
         public bool IsDead => false;
     }
     public class Player { public Ped Character; }
@@ -517,8 +519,11 @@ namespace Glow
         public static bool DecorIsRegisteredAsType(string name, int type) => true;
         public static void DecorRegister(string name, int type) { }
         public static void DecorSetInt(int ped, string name, int value) { S.OwnDecorWrites++; S.Decor[ped] = value; }
-        public static bool DecorExistOn(int ped, string name) => S.Decor.ContainsKey(ped);
-        public static int DecorGetInt(int ped, string name) => S.Decor[ped];
+        public static bool DecorExistOn(int ped, string name) { S.DecorReads++; return S.Decor.ContainsKey(ped); }
+        public static int DecorGetInt(int ped, string name) { S.DecorReads++; return S.Decor[ped]; }
+        public static int GetGameTimer() => S.Runtime.Now;
+        public static bool DoesEntityExist(int entity) => !S.Gone.Contains(entity);
+        public static bool IsEntityDead(int entity) => false;
         public static void SetPedIlluminatedClothingGlowIntensity(int ped, float intensity) { S.Glow.Add($"{S.Runtime.Now}:{ped}:{intensity:0.00}"); }
     }
 
@@ -527,7 +532,7 @@ namespace Glow
         public const string clothingAnimationDecor = "clothing_animation_type";
         private bool clothingAnimationReverse = false;
         private float clothingOpacity = 1f;
-        public IEnumerable<Player> Players = new[] { new Player { Character = new Ped(1) }, new Player { Character = new Ped(2) }, new Player { Character = new Ped(3) } };
+        public List<Player> Players = new List<Player> { new Player { Character = new Ped(1) }, new Player { Character = new Ped(2) }, new Player { Character = new Ped(3) } };
 ''' + glow + r'''
         public Task Tick() => PlayerClothingAnimationsController();
     }
@@ -539,8 +544,10 @@ namespace Glow
             S.Runtime = new FrameRuntime();
             S.Decor[2] = 0;  // solid
             S.Decor[3] = 3;  // flash
-            S.Runtime.Add(new Glower().Tick);
-            for (var frame = 0; frame < 63; frame++) { S.Runtime.Frame(frame * 16); }  // 1 s at 62.5 fps
+            var glower = new Glower();
+            S.Runtime.Add(glower.Tick);
+            var frame = 0;
+            for (; frame < 63; frame++) { S.Runtime.Frame(frame * 16); }  // 1 s at 62.5 fps
             var passes = S.Glow.Count(g => g.Contains(":3:"));
             Check(passes == 21, $"a glow pass every 25 ms, plus the frame the runtime takes to restart the tick (every 3rd 16 ms frame, as before): {passes} passes");
             Check(S.Delays == passes && S.Runtime.Resumes >= passes - 1 && S.Runtime.Resumes <= passes, $"one wake-up per pass, not one per frame ({S.Delays} delays, {S.Runtime.Resumes} wake-ups)");
@@ -549,7 +556,42 @@ namespace Glow
             Check(S.OwnDecorWrites == 1, "your own decorator is written once");
             var fades = S.Glow.Where(g => g.Contains(":1:")).Select(g => float.Parse(g.Split(':')[2], System.Globalization.CultureInfo.InvariantCulture)).ToList();
             Check(fades.Zip(fades.Skip(1), (x, y) => Math.Abs(x - y)).All(step => step <= 0.051f), "the fade moves 0.05 a pass");
-            Console.WriteLine($"PASS: clothing glow ({passes} passes a second, one wake-up each; solid applied once; fade steps unchanged)");
+            Check(S.DecorReads == 6, $"every player's decorator is read once in the first second, not every pass ({S.DecorReads} reads; it was 6 a pass)");
+
+            // A flashing player leaves: no more writes to their ped from the next pass.
+            S.Gone.Add(3);
+            var before = S.Glow.Count(g => g.Contains(":3:"));
+            for (var end = frame + 6; frame < end; frame++) { S.Runtime.Frame(frame * 16); }
+            Check(S.Glow.Count(g => g.Contains(":3:")) == before, "a ped that has gone is skipped before the next scan");
+
+            // A new fading player is picked up by the next scan, within a second.
+            S.Decor[4] = 2;
+            glower.Players.Add(new Player { Character = new Ped(4) });
+            var addedAt = frame * 16;
+            var firstSeen = -1;
+            for (var end = frame + 70; frame < end; frame++)
+            {
+                S.Runtime.Frame(frame * 16);
+                if (firstSeen < 0 && S.Glow.Any(g => g.Split(':')[1] == "4")) { firstSeen = frame * 16; }
+            }
+            Check(firstSeen >= 0 && firstSeen - addedAt <= 1000 + 50, $"a new glowing player is picked up within a second ({firstSeen - addedAt} ms)");
+            Check(S.DecorReads <= 6 + 2 * 4 + 4, $"about one scan a second ({S.DecorReads} decorator reads over ~2.3 s)");
+
+            // vMenu:updatePedDecors flips your style to -1 for 100 ms so the decorator is sent again;
+            // the 25 ms passes still catch both writes.
+            var writes = S.OwnDecorWrites;
+            PlayerAppearance.ClothingAnimationType = -1;
+            for (var end = frame + 6; frame < end; frame++) { S.Runtime.Frame(frame * 16); }  // ~100 ms
+            PlayerAppearance.ClothingAnimationType = 2;
+            for (var end = frame + 6; frame < end; frame++) { S.Runtime.Frame(frame * 16); }
+            Check(S.OwnDecorWrites == writes + 2 && S.Decor[1] == 2, $"the join resync still rewrites your decorator (-1, then your style): {S.OwnDecorWrites - writes} writes");
+
+            // Changing your own style shows at once (the next 25 ms pass), not at the next scan.
+            PlayerAppearance.ClothingAnimationType = 0; // solid
+            var glowsBefore = S.Glow.Count;
+            for (var end = frame + 4; frame < end; frame++) { S.Runtime.Frame(frame * 16); }
+            Check(S.Glow.Skip(glowsBefore).Any(g => g.Split(':')[1] == "1" && g.EndsWith(":1.00")), "your own new style is applied within a pass");
+            Console.WriteLine($"PASS: clothing glow ({passes} passes a second, one wake-up each; solid applied once; fade steps unchanged; players scanned once a second; join resync kept)");
         }
     }
 }
@@ -562,7 +604,7 @@ perframe = '\n'.join([
     member(fc, r'^        private void VehicleShowHealthOnScreen\(\).*?^        }$'),
     member(fc, r'^        private void DisableMovement\(\).*?^        }$'),
     member(fc, r'^        private bool IsMpCharEditorOpen\(\).*?^        }$'),
-    member(fc, r'^        private void AnimalPedCameraChangeBlocker\(\).*?^        }$'),
+    member(fc, r'^        // Whether the last check found the player using an animal ped\..*?^        private void AnimalPedCameraChangeBlocker\(\).*?^        }$'),
 ])
 controls = sorted(set(re.findall(r'Control\.(\w+)', perframe)))
 perframe_test = r'''
@@ -579,9 +621,12 @@ namespace PerFrame
     public static class S
     {
         public static FrameRuntime Runtime;
-        public static bool EditorOpen, InVehicle, Horn, HornReleased, BrokenVehicle;
+        public static bool EditorOpen, MenuOpen, InVehicle, Horn, HornReleased, BrokenVehicle;
+        // MainMenu's watcher ends every rest when a menu opens (IdleRest.MenuOpened).
+        public static TaskCompletionSource<bool> MenuOpened = new TaskCompletionSource<bool>();
+        public static void OpenMenu() { MenuOpen = true; var t = MenuOpened; MenuOpened = new TaskCompletionSource<bool>(); t.SetResult(true); }
         public static uint Model = 1;
-        public static int Disabled, FirstPersonBlocks, Texts;
+        public static int Disabled, FirstPersonBlocks, Texts, Runs;
         public static bool? HighBeams;
         public static readonly List<string> Log = new List<string>();
     }
@@ -620,7 +665,8 @@ namespace PerFrame
     {
         public static readonly HashSet<uint> AnimalHashes = new HashSet<uint> { 50, 51 };
         public static int PlayerPedId() => 7;
-        public static int GetEntityModel(int entity) => (int)S.Model;
+        public static int GetEntityModel(int entity) { S.Runs++; return (int)S.Model; }
+        public static Task Delay(int ms) => S.Runtime.Delay(ms);
         public static void DisableFirstPersonCamThisFrame() { S.FirstPersonBlocks++; }
         public static bool IsPedInAnyVehicle(int ped, bool atGetIn) => S.InVehicle;
         public static bool IsPauseMenuActive() => false;
@@ -632,6 +678,9 @@ namespace PerFrame
     public class Checks
     {
 ''' + perframe + r'''
+        static bool AnyMenuOpen => S.MenuOpen;
+        const int StateRestMs = 100;
+        static Task Rest(int ms) => Task.WhenAny(Delay(ms), S.MenuOpened.Task);
         public Task Tick() => PerFrameChecks();
         public void EnableAll() { vehicleHealthCheckEnabled = highbeamFlashCheckEnabled = movementLockCheckEnabled = animalCameraCheckEnabled = true; }
     }
@@ -652,25 +701,38 @@ namespace PerFrame
             Check(S.Disabled == 0 && S.FirstPersonBlocks == 0 && S.Texts == 0 && S.HighBeams == null, "checks off: nothing runs");
             checks.EnableAll();
 
-            Reset(); Frames(10);
+            Reset(); Frames(8); S.Runs = 0; Frames(30);
             Check(S.Disabled == 0 && S.FirstPersonBlocks == 0 && S.Texts == 0, "on foot, editor shut, human ped: nothing to do");
+            Check(S.Runs <= 5, $"with nothing to do it rests: {S.Runs} runs in 30 frames (one every ~100 ms instead of every frame)");
 
-            Reset(); S.EditorOpen = true; Frames(10); S.EditorOpen = false;
+            // The character creator coming back after its exit prompt, mid-rest: movement is
+            // locked from the next frame, not when the rest would have ended.
+            Reset(); Frames(3); S.OpenMenu(); S.EditorOpen = true; Frames(10); S.EditorOpen = false;
             Check(S.Disabled == ''' + str(member(fc, r'^        private void DisableMovement\(\).*?^        }$').count('Game.DisableControlThisFrame(')) + r''' * 10, $"MP editor open: movement controls disabled every frame ({S.Disabled})");
+            S.Runs = 0; Frames(10); S.MenuOpen = false;
+            Check(S.Runs == 10, $"any menu open: every frame ({S.Runs} runs in 10 frames)");
 
-            Reset(); S.Model = 50; Frames(5); S.Model = 51; Frames(5); S.Model = 1; Frames(5);
+            Reset(); Frames(8); S.Model = 50; var noticed = -1;
+            for (var i = 0; i < 10; i++) { Frames(1); if (noticed < 0 && S.FirstPersonBlocks > 0) { noticed = i; } }
+            Check(noticed >= 0 && noticed <= 7, $"becoming an animal is noticed within 100 ms ({noticed} frames)");
+            Reset(); Frames(5); S.Model = 51; Frames(5);
             Check(S.FirstPersonBlocks == 10, $"animal ped: first person blocked every frame, through a change of animal ({S.FirstPersonBlocks})");
+            S.Model = 1; Frames(10); Reset(); Frames(10);
+            Check(S.FirstPersonBlocks == 0, "back to a human ped: no more blocks");
 
-            Reset(); S.InVehicle = true; Frames(10);
+            Reset(); S.InVehicle = true; noticed = -1;
+            for (var i = 0; i < 10; i++) { Frames(1); if (noticed < 0 && S.Texts > 0) { noticed = i; } }
+            Check(noticed >= 0 && noticed <= 7, $"getting in: the health text starts within 100 ms, while the door opens ({noticed} frames)");
+            Reset(); Frames(10);
             Check(S.Texts == 30, "vehicle health: three lines every frame");
             S.Horn = true; Frames(1);
             Check(S.HighBeams == true, "honking turns the high beams on");
             S.Horn = false; S.HornReleased = true; Frames(1); S.HornReleased = false;
             Check(S.HighBeams == false, "letting go turns them off");
 
-            Reset(); S.BrokenVehicle = true; S.EditorOpen = true; S.Model = 50; Frames(3); S.BrokenVehicle = false; S.EditorOpen = false; S.Model = 1;
+            Reset(); S.BrokenVehicle = true; S.OpenMenu(); S.EditorOpen = true; S.Model = 50; Frames(3); S.BrokenVehicle = false; S.MenuOpen = S.EditorOpen = false; S.Model = 1;
             Check(S.Log.Count == 6 && S.Disabled > 0 && S.FirstPersonBlocks == 3, "a failing check is logged and the others still run");
-            Console.WriteLine("PASS: shared per-frame tick (movement lock, animal camera, health text, highbeams; errors isolated)");
+            Console.WriteLine("PASS: shared per-frame tick (movement lock, animal camera, health text, highbeams; errors isolated; rests when idle)");
         }
     }
 }

@@ -84,6 +84,23 @@ namespace vMenuClient
 
         public FunctionsController() { }
 
+        // Idle rests. FiveM's C# runtime starts each tick handler again every frame once its last
+        // run has finished, and that start costs more than most handlers' own checks. A handler
+        // that has nothing it must do every frame now ends its run with one of these waits
+        // instead, and checks again afterwards. Each handler stays per-frame while its feature is
+        // on, and while any menu is open, so toggling an option takes effect on the next frame.
+        // Anything a handler still does while resting is a check or a setting that persists, which
+        // is now repeated 4 to 10 times a second instead of every frame.
+        private const int IdleRestMs = 250;
+        // Shorter, for what follows the player getting into a vehicle or dying.
+        private const int StateRestMs = 100;
+
+        private static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();
+
+        // A rest ends early when a menu opens (see IdleRest), so a resting loop is back to every
+        // frame on the frame after the menu appears.
+        private static Task Rest(int ms) => IdleRest.Until(Delay(ms));
+
         /// <summary>
         /// Applies a vMenu override through its latch: enforced on <paramref name="target"/> while
         /// <paramref name="enabled"/>, and the entity vMenu last changed is restored once when the
@@ -113,6 +130,7 @@ namespace vMenuClient
             Tick += PlayerClothingAnimationsController;
             Tick += MiscRecordingKeybinds;
             Tick += MiscSettings;
+            Tick += RadarSettings;
             Tick += GeneralTasks;
 
             // Configuration and permissions based
@@ -216,7 +234,9 @@ namespace vMenuClient
         {
             // Check if the player has switched to a new vehicle.
             // PlayerPedId() is one game call; Game.PlayerPed is two (PlayerId, then GetPlayerPed).
-            if (IsPedInAnyVehicle(PlayerPedId(), false)) // added this for improved performance.
+            var ped = PlayerPedId();
+            var seated = IsPedInAnyVehicle(ped, false);
+            if (seated) // added this for improved performance.
             {
                 var tmpVehicle = GetVehicle();
                 if (tmpVehicle != null && tmpVehicle.Exists() && tmpVehicle.Handle != LastVehicle)
@@ -231,8 +251,17 @@ namespace vMenuClient
                     }
                 }
             }
-            // this can wait 1 ms
-            await Delay(1);
+            // Every frame (a 1 ms wait) while getting into or sitting in a vehicle, so a switch is
+            // seen on the frame you are seated, as before. On foot it rests: getting in takes far
+            // longer than the rest, so this is back to every frame before you are seated.
+            if (seated || IsPedInAnyVehicle(ped, true))
+            {
+                await Delay(1);
+            }
+            else
+            {
+                await Rest(StateRestMs);
+            }
         }
         #endregion
 
@@ -314,7 +343,21 @@ namespace vMenuClient
                 Notify.Custom("Destination reached, the car will now stop driving!");
                 DriveToWpTaskActive = false;
             }
-            await Task.FromResult(0);
+
+            // Every frame while an option here is enforced or watched every frame; otherwise the
+            // god mode and no ragdoll latches only have something to restore, which can wait.
+            var everyFrame = AnyMenuOpen
+                || (MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed)
+                || (MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed)
+                || MainMenu.PlayerOptionsMenu.PlayerInvisible
+                || MainMenu.PlayerOptionsMenu.PlayerSuperJump
+                || MainMenu.PlayerOptionsMenu.PlayerNeverWanted
+                || DriveToWpTaskActive
+                || DriveWanderTaskActive;
+            if (!everyFrame)
+            {
+                await Rest(IdleRestMs);
+            }
         }
         #endregion
 
@@ -413,7 +456,8 @@ namespace vMenuClient
                 ped => new Ped(ped).CanWearHelmet = false, ped => new Ped(ped).CanWearHelmet = true);
 
             // When the player is in a valid vehicle:
-            if (IsPedInAnyVehicle(playerPed, true))
+            var inVehicle = IsPedInAnyVehicle(playerPed, true);
+            if (inVehicle)
             {
                 var veh = GetVehicle();
                 if (veh != null && veh.Exists())
@@ -625,7 +669,19 @@ namespace vMenuClient
                 }
             }
 
-            await Delay(1);
+            // On foot with no menu open, everything above only restores or checks, so it rests for
+            // 100 ms instead of running every frame. Getting in counts as in a vehicle (the check
+            // above includes entering), so the in-vehicle options start while the door opens.
+            // Engine always on keeps its timing.
+            var engineAlwaysOn = MainMenu.VehicleOptionsMenu.VehicleEngineAlwaysOn && IsAllowed(Permission.VOEngineAlwaysOn);
+            if (inVehicle || AnyMenuOpen || engineAlwaysOn)
+            {
+                await Delay(1);
+            }
+            else
+            {
+                await Rest(StateRestMs);
+            }
 
             // Manage vehicle engine always on.
             if (MainMenu.VehicleOptionsMenu.VehicleEngineAlwaysOn && GetVehicle(true) != null && GetVehicle(true).Exists() && !Game.PlayerPed.IsInVehicle() && IsAllowed(Permission.VOEngineAlwaysOn))
@@ -917,20 +973,43 @@ namespace vMenuClient
         /// Run all tasks that need to be handeled for the Misc Settings Menu.
         /// </summary>
         /// <returns></returns>
+        // Pause menu > settings > display > expanded radar, read by RadarSettings.
+        private bool expandedRadarProfile;
+
+        /// <summary>
+        /// The radar settings that persist once set: the pause menu's "show radar" preference and
+        /// its expanded radar option. MiscSettings applied the first and read the second every
+        /// frame; 4 times a second is enough for a setting changed in the pause menu.
+        /// </summary>
+        private async Task RadarSettings()
+        {
+            if (MainMenu.MiscSettingsMenu != null)
+            {
+                // Show radar (or hide it if the user disabled it in pausemenu > settings > display > show radar.
+                // Hide radar is enforced every frame by MiscSettings instead.
+                if (!MainMenu.MiscSettingsMenu.HideRadar && !IsRadarHidden()) // this should allow other resources to still disable it
+                {
+                    DisplayRadar(IsRadarPreferenceSwitchedOn());
+                }
+                expandedRadarProfile = GetProfileSetting(221) == 1; // 221 = settings > display > expanded radar
+            }
+            // Every frame while a menu is open, as before, so unticking Hide Radar or leaving the
+            // character creator follows the preference on the next frame.
+            if (!AnyMenuOpen)
+            {
+                await Rest(IdleRestMs);
+            }
+        }
+
         private async Task MiscSettings()
         {
             DrawMiscSettingsText();
 
             #region Misc Settings
-            // Hide radar.
+            // Hide radar. Showing it again follows the pause menu preference, in RadarSettings.
             if (MainMenu.MiscSettingsMenu.HideRadar)
             {
                 DisplayRadar(false);
-            }
-            // Show radar (or hide it if the user disabled it in pausemenu > settings > display > show radar.
-            else if (!IsRadarHidden()) // this should allow other resources to still disable it
-            {
-                DisplayRadar(IsRadarPreferenceSwitchedOn());
             }
             #endregion
 
@@ -1066,7 +1145,7 @@ namespace vMenuClient
                 }
             }
 
-            if (GetProfileSetting(221) == 1) // 221 = settings > display > expanded radar
+            if (expandedRadarProfile) // 221 = settings > display > expanded radar, read by RadarSettings
             {
                 SetBigmapActive(true, false);
             }
@@ -1094,6 +1173,20 @@ namespace vMenuClient
                     }
                 }
             }
+
+            // Each option above draws, reads a key or enforces a setting every frame while it is
+            // on. With all of them off nothing here does anything, so it rests.
+            var misc = MainMenu.MiscSettingsMenu;
+            var everyFrame = AnyMenuOpen
+                || misc.HideRadar || misc.LockCameraX || misc.LockCameraY
+                || misc.KbTpToWaypoint || misc.KbDriftMode || misc.KbPointKeys || misc.KbRadarKeys
+                || expandedRadarProfile || vMenuOpenedBigmap
+                || misc.ShowCoordinates || misc.ShowLocation || misc.DrawTimeOnScreen
+                || misc.ShowSpeedoKmh || misc.ShowSpeedoMph;
+            if (!everyFrame)
+            {
+                await Rest(IdleRestMs);
+            }
         }
 
         #endregion
@@ -1105,6 +1198,27 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task MiscRecordingKeybinds()
         {
+            if (!MainMenu.MiscSettingsMenu.KbRecordKeys)
+            {
+                // The recording keys are off: nothing to read. Checked again 4 times a second, or
+                // next frame while a menu is open, so switching them on works at once.
+                if (!AnyMenuOpen)
+                {
+                    await Rest(IdleRestMs);
+                }
+                return;
+            }
+
+            // Nothing below acts unless one of these keys is used this frame (the record key, the
+            // discard key while recording, or holding the controller's recording button), so they
+            // are read first. The pause, fade, menu and input mode checks only run when one is.
+            if (!Game.IsControlJustReleased(0, 0 == Control.ReplayStartStopRecording ? Control.SaveReplayClip : Control.ReplayStartStopRecording)
+                && !Game.IsControlJustPressed(0, Control.ReplayClipDelete)
+                && !Game.IsControlPressed(0, Control.MultiplayerInfo))
+            {
+                return;
+            }
+
             if (MainMenu.MiscSettingsMenu.KbRecordKeys)
             {
                 if (!IsPauseMenuActive() && IsScreenFadedIn() && !IsPlayerSwitchInProgress() && !MenuController.IsAnyMenuOpen())
@@ -1417,6 +1531,11 @@ namespace vMenuClient
             {
                 NetworkSetVoiceActive(false);
                 NetworkClearVoiceChannel();
+                // Voice chat is off: these two settings persist, so 4 times a second is enough.
+                if (!AnyMenuOpen)
+                {
+                    await Rest(IdleRestMs);
+                }
             }
         }
         #endregion
@@ -1495,7 +1614,18 @@ namespace vMenuClient
                     SetPlayerHasReserveParachute(PlayerId());
                 }
             }
-            await Task.FromResult(0);
+
+            // With every weapon option off there is nothing to apply; the unlimited ammo latch only
+            // has a weapon to switch back, which happened above.
+            var everyFrame = AnyMenuOpen
+                || MainMenu.WeaponOptionsMenu.NoReload
+                || MainMenu.WeaponOptionsMenu.UnlimitedAmmo
+                || MainMenu.WeaponOptionsMenu.AutoEquipChute
+                || MainMenu.WeaponOptionsMenu.UnlimitedParachutes;
+            if (!everyFrame)
+            {
+                await Rest(IdleRestMs);
+            }
         }
         #endregion
 
@@ -1779,6 +1909,13 @@ namespace vMenuClient
                     camera = null;
                 }
             }
+
+            // The character editor only opens from the menu, and the buttons above are only seen
+            // in it, so with every menu closed this rests.
+            if (!AnyMenuOpen && camera == null)
+            {
+                await Rest(IdleRestMs);
+            }
         }
 
         private int GetCameraIndex(Menu menu)
@@ -1998,6 +2135,8 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task RestorePlayerAfterBeingDead()
         {
+            // Still checked every frame: the appearance and weapons are saved on the first frame
+            // of death, before the game can drop the weapon in hand.
             if (MainMenu.MiscSettingsMenu != null && IsEntityDead(PlayerPedId()))
             {
                 var restoreDefault = MainMenu.MiscSettingsMenu.MiscRespawnDefaultCharacter
@@ -2067,12 +2206,102 @@ namespace vMenuClient
         #endregion
 
         #region Player clothing animations controller.
-        // Static glow (0 = on, 1 = off) last applied per ped. This loop runs every 25 ms over every
-        // player; static modes used to be re-applied each time, and our own decorator written twice.
+        // Static glow (0 = on, 1 = off) last applied per ped. This loop scans every player once a
+        // second (see ScanClothingGlow); static modes used to be re-applied each time, and our own
+        // decorator written twice.
         private readonly Dictionary<int, int> appliedStaticGlow = new();
         private readonly HashSet<int> glowPedsSeen = new();
         private int ownGlowDecorPed;
         private int ownGlowDecorValue = int.MinValue;
+
+        // Peds whose glow animates (decorator 2 = fade, 3 = flash), found by the last scan.
+        private readonly List<KeyValuePair<int, int>> animatedGlowPeds = new();
+        private const int ClothingGlowScanMs = 1000;
+        private bool clothingGlowScanned;
+        private int clothingGlowScannedAt;
+
+        /// <summary>
+        /// Reads every player's glow decorator: applies static glows (0 = on, 1 = off) when they
+        /// change, and lists the animated ones for <see cref="AnimateClothingGlow"/>.
+        /// </summary>
+        private void ScanClothingGlow()
+        {
+            glowPedsSeen.Clear();
+            animatedGlowPeds.Clear();
+            foreach (var player in Players)
+            {
+                var p = player.Character;
+                if (p != null && p.Exists() && !p.IsDead)
+                {
+                    if (DecorExistOn(p.Handle, clothingAnimationDecor))
+                    {
+                        var decorVal = DecorGetInt(p.Handle, clothingAnimationDecor);
+                        glowPedsSeen.Add(p.Handle);
+                        if (decorVal is 0 or 1) // 0 = on solid/no animation, 1 = off.
+                        {
+                            if (!appliedStaticGlow.TryGetValue(p.Handle, out var applied) || applied != decorVal)
+                            {
+                                SetPedIlluminatedClothingGlowIntensity(p.Handle, decorVal == 0 ? 1f : 0f);
+                                appliedStaticGlow[p.Handle] = decorVal;
+                            }
+                            continue;
+                        }
+                        appliedStaticGlow.Remove(p.Handle);
+                        if (decorVal is 2 or 3)
+                        {
+                            animatedGlowPeds.Add(new KeyValuePair<int, int>(p.Handle, decorVal));
+                        }
+                    }
+                }
+            }
+            // Forget peds that left, died or respawned.
+            if (appliedStaticGlow.Count > glowPedsSeen.Count)
+            {
+                foreach (var ped in appliedStaticGlow.Keys.Where(ped => !glowPedsSeen.Contains(ped)).ToList())
+                {
+                    appliedStaticGlow.Remove(ped);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sets this step's intensity on every animated glow the last scan found, skipping peds
+        /// that have since gone or died (the scan used to skip those every pass).
+        /// </summary>
+        private void AnimateClothingGlow()
+        {
+            foreach (var glow in animatedGlowPeds)
+            {
+                var handle = glow.Key;
+                if (!DoesEntityExist(handle) || IsEntityDead(handle))
+                {
+                    continue;
+                }
+                if (glow.Value == 2) // fade.
+                {
+                    SetPedIlluminatedClothingGlowIntensity(handle, clothingOpacity);
+                }
+                else // 3, flash.
+                {
+                    var result = 0f;
+                    if (clothingAnimationReverse)
+                    {
+                        if (clothingOpacity is >= 0f and <= 0.5f) // || (clothingOpacity >= 0.5f && clothingOpacity <= 0.75f))
+                        {
+                            result = 1f;
+                        }
+                    }
+                    else
+                    {
+                        if (clothingOpacity is >= 0.5f and <= 1.0f) //|| (clothingOpacity >= 0.75f && clothingOpacity <= 1.0f))
+                        {
+                            result = 1f;
+                        }
+                    }
+                    SetPedIlluminatedClothingGlowIntensity(handle, result);
+                }
+            }
+        }
 
         /// <summary>
         /// Writes our clothing animation decorator only when our ped or the chosen mode changed.
@@ -2088,6 +2317,9 @@ namespace vMenuClient
             DecorSetInt(ped, clothingAnimationDecor, value);
             ownGlowDecorPed = ped;
             ownGlowDecorValue = value;
+            // Your own style or ped changed: scan on this pass, so your glow follows at once
+            // instead of at the next once-a-second scan.
+            clothingGlowScanned = false;
         }
 
         private async Task PlayerClothingAnimationsController()
@@ -2121,60 +2353,17 @@ namespace vMenuClient
                     Debug.WriteLine($"Error Location: {e.StackTrace}\nError info: {e.Message}");
                     await Delay(1000);
                 }
-                glowPedsSeen.Clear();
-                foreach (var player in Players)
+                // The pass over every player (about five game calls each) runs once a second
+                // instead of every 25 ms. It applies static glows when they change and lists the
+                // animated ones; in between, only those are updated, every 25 ms as before.
+                var now = GetGameTimer();
+                if (!clothingGlowScanned || now - clothingGlowScannedAt >= ClothingGlowScanMs)
                 {
-                    var p = player.Character;
-                    if (p != null && p.Exists() && !p.IsDead)
-                    {
-                        if (DecorExistOn(p.Handle, clothingAnimationDecor))
-                        {
-                            var decorVal = DecorGetInt(p.Handle, clothingAnimationDecor);
-                            glowPedsSeen.Add(p.Handle);
-                            if (decorVal is 0 or 1) // 0 = on solid/no animation, 1 = off.
-                            {
-                                if (!appliedStaticGlow.TryGetValue(p.Handle, out var applied) || applied != decorVal)
-                                {
-                                    SetPedIlluminatedClothingGlowIntensity(p.Handle, decorVal == 0 ? 1f : 0f);
-                                    appliedStaticGlow[p.Handle] = decorVal;
-                                }
-                                continue;
-                            }
-                            appliedStaticGlow.Remove(p.Handle);
-                            if (decorVal == 2) // fade.
-                            {
-                                SetPedIlluminatedClothingGlowIntensity(p.Handle, clothingOpacity);
-                            }
-                            else if (decorVal == 3) // flash.
-                            {
-                                var result = 0f;
-                                if (clothingAnimationReverse)
-                                {
-                                    if (clothingOpacity is >= 0f and <= 0.5f) // || (clothingOpacity >= 0.5f && clothingOpacity <= 0.75f))
-                                    {
-                                        result = 1f;
-                                    }
-                                }
-                                else
-                                {
-                                    if (clothingOpacity is >= 0.5f and <= 1.0f) //|| (clothingOpacity >= 0.75f && clothingOpacity <= 1.0f))
-                                    {
-                                        result = 1f;
-                                    }
-                                }
-                                SetPedIlluminatedClothingGlowIntensity(p.Handle, result);
-                            }
-                        }
-                    }
+                    clothingGlowScanned = true;
+                    clothingGlowScannedAt = now;
+                    ScanClothingGlow();
                 }
-                // Forget peds that left, died or respawned.
-                if (appliedStaticGlow.Count > glowPedsSeen.Count)
-                {
-                    foreach (var ped in appliedStaticGlow.Keys.Where(ped => !glowPedsSeen.Contains(ped)).ToList())
-                    {
-                        appliedStaticGlow.Remove(ped);
-                    }
-                }
+                AnimateClothingGlow();
                 if (clothingAnimationReverse)
                 {
                     clothingOpacity -= 0.05f;
@@ -2691,6 +2880,17 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task ModelDrawDimensions()
         {
+            // Everything below draws inside one of the three outline options. While a menu is open
+            // this checks every frame, so switching one on shows at once.
+            if (!OutlinesWanted())
+            {
+                if (!AnyMenuOpen)
+                {
+                    await Rest(IdleRestMs);
+                }
+                return;
+            }
+
             if (MainMenu.PermissionsSetupComplete && MainMenu.MiscSettingsMenu != null)
             {
                 // Vehicles
@@ -2842,9 +3042,13 @@ namespace vMenuClient
         /// This is to prevent them crashing their game or falling out of the sky as ~~birds~~ bricks.
         /// Runs every frame, from PerFrameChecks: first person stays blocked for every frame the ped is an animal.
         /// </summary>
+        // Whether the last check found the player using an animal ped.
+        private bool playerIsAnimal;
+
         private void AnimalPedCameraChangeBlocker()
         {
-            if (AnimalHashes.Contains((uint)GetEntityModel(PlayerPedId())))
+            playerIsAnimal = AnimalHashes.Contains((uint)GetEntityModel(PlayerPedId()));
+            if (playerIsAnimal)
             {
                 DisableFirstPersonCamThisFrame();
             }
@@ -2879,7 +3083,20 @@ namespace vMenuClient
             {
                 try { AnimalPedCameraChangeBlocker(); } catch (Exception e) { LogPerFrameCheckError(nameof(AnimalPedCameraChangeBlocker), e); }
             }
-            await Task.FromResult(0);
+
+            // These checks only act every frame in a vehicle (health text, high beams), in the
+            // character editor (which is a menu) or as an animal. Otherwise this rests; getting in
+            // counts as in a vehicle, so the text and high beams are on by the time you are seated.
+            var vehicleChecks = MainMenu.VehicleOptionsMenu != null
+                && ((vehicleHealthCheckEnabled && MainMenu.VehicleOptionsMenu.VehicleShowHealth)
+                    || (highbeamFlashCheckEnabled && MainMenu.VehicleOptionsMenu.FlashHighbeamsOnHonk));
+            var everyFrame = AnyMenuOpen
+                || (animalCameraCheckEnabled && playerIsAnimal)
+                || (vehicleChecks && IsPedInAnyVehicle(PlayerPedId(), true));
+            if (!everyFrame)
+            {
+                await Rest(StateRestMs);
+            }
         }
 
         private static void LogPerFrameCheckError(string check, Exception e)
@@ -2894,9 +3111,26 @@ namespace vMenuClient
         /// Slow functions for the model dimensions outline entities lists.
         /// </summary>
         /// <returns></returns>
+        private static bool OutlinesWanted() =>
+            MainMenu.PermissionsSetupComplete && MainMenu.MiscSettingsMenu != null
+            && (MainMenu.MiscSettingsMenu.ShowPropModelDimensions
+                || MainMenu.MiscSettingsMenu.ShowPedModelDimensions
+                || MainMenu.MiscSettingsMenu.ShowVehicleModelDimensions);
+
         private async Task SlowMiscTick()
         {
             const int delay = 50;
+            // With every outline option off this returned at once, so it ran every frame. It still
+            // does while a menu is open, so switching one on is picked up at once.
+            if (!OutlinesWanted())
+            {
+                if (!AnyMenuOpen)
+                {
+                    await Rest(IdleRestMs);
+                }
+                return;
+            }
+
             if (MainMenu.PermissionsSetupComplete && MainMenu.MiscSettingsMenu != null)
             {
                 var pp = Game.PlayerPed.Position;

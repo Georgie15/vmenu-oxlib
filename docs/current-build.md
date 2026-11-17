@@ -8,10 +8,10 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — rebuild the toggle-guard MenuAPI without the attribute that crashed clients (MenuAPI DLL) |
-| `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
+| Latest change | November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL). **Testing on branch `perf/closed-menu`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `ca395987150938132a901f4024e182d2709e3fc0003ceaddb7f446ab26814b99` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
-| `build/vMenu/MenuAPI.dll` | `7493926e44724b2f7983e6dd1bc07106dfbd3c403acd5d5afdedbabd1f69db0a` |
+| `build/vMenu/MenuAPI.dll` | `67336ff29bfa804e63d1807f1ad930ba9fe9a2b09ef363af648ac896244c3d86` |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll build/vMenu/MenuAPI.dll`.
@@ -20,6 +20,212 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL) — TESTING, branch `perf/closed-menu`
+
+**Status: test build, not verified in game, not on `main`.** It lives on the
+`perf/closed-menu` branch until it passes an in-game check. Until then, `main`
+and the `build-2026-11-17-3` package stay the live build and the fallback.
+
+**Why.** vMenu Enhanced (upstream's rewrite) uses 2–3 times less client CPU
+than this build. It runs on the same C# runtime, so the difference is in how
+its loops are organised:
+- A loop only exists while its feature is on, and most of them check every
+  100–500 ms instead of every frame.
+- MenuAPI 4.x stops its own loops while every menu is closed.
+
+FiveM's C# runtime starts every registered tick handler again each frame once
+its last run has finished. October's profile put that start at about 3 µs per
+handler, more than most of these handlers' own checks. With the menu closed and
+every option off, this build still started about 20 handlers a frame: about 15
+of vMenu's and 5 of MenuAPI's.
+
+**What changed.** Client DLL and MenuAPI DLL only; the server DLL and every Lua,
+config and HTML file are unchanged.
+
+- **Idle rests.** A loop with nothing that must happen every frame ends its run
+  with a 250 ms wait instead of being started again next frame, or 100 ms for
+  what follows getting into a vehicle or dying. While a loop's feature is on,
+  or any menu is open, it runs every frame exactly as before, so switching an
+  option takes effect on the next frame. These loops rest:
+  - player options;
+  - weapon options;
+  - vehicle options (on foot);
+  - voice chat (off);
+  - the MP editor camera;
+  - the entity outlines;
+  - the shared per-frame checks;
+  - the misc settings loop (with every display, key and camera option off);
+  - the recording keys (when off).
+
+  A rest ends early when a menu opens (`vMenu/IdleRest.cs`). The menu watcher
+  in `MainMenu.OnTick` still runs every frame and signals it, so on the frame
+  after any menu appears every resting loop is back to every frame. That
+  includes the character creator returning from its "exit without saving"
+  prompt: its back button guard, camera and movement lock are back on the next
+  frame, as before.
+
+  These stay every frame:
+  - the respawn restore, which saves your appearance and weapons on the first
+    frame of death;
+  - the menu watcher;
+  - the vehicle switch check while you are getting in or seated.
+- **Noclip and prop placement** take their loops off the tick list while
+  they're off. `SetNoclipActive` and `SpawnEntity` put them back, so they start
+  on the next frame, as before (`vMenu/TickSleeper.cs`).
+- **Vehicle switch check** (`GeneralTasks`): every frame while you are
+  getting in or seated, as before. On foot it rests 100 ms, which is shorter
+  than getting in.
+- **Radar preference and expanded radar.** A new `RadarSettings` loop applies
+  the pause menu's radar preference and reads its expanded-radar option 4 times
+  a second with every menu closed, and every frame while one is open;
+  `MiscSettings` used to do both every frame. Hide Radar is still enforced
+  every frame.
+- **Recording keys:** the three keys are read first. The pause, fade, menu and
+  input-mode checks only run when one is used.
+- **Clothing glow:** the pass over every player in scope (about five game calls
+  each) runs once a second instead of every 25 ms. Animated glows are still
+  updated every 25 ms, and your own decorator is still checked every 25 ms, so
+  the join re-sync's 100 ms style flip still gets through. A change to your own
+  style or ped scans on that same pass, so your glow follows at once.
+- **MenuAPI** gets a second local patch,
+  [`tools/menuapi/idle-while-closed.patch`](../tools/menuapi/idle-while-closed.patch),
+  on top of the toggle guard:
+  - When every menu is closed, its draw and button ticks unload the menu
+    textures and the button scaleform once, then take themselves off the tick
+    list. `Menu.Visible` puts them back when a menu opens, so the menu draws on
+    the next frame, as before.
+  - The onscreen-keyboard watcher checks 10 times a second while every menu is
+    closed.
+  - The vMenu client uses no new MenuAPI API, so either DLL can be rolled back
+    on its own.
+
+**What players may notice: nothing, by design.** The only timing changes:
+- Being warped straight into a vehicle by another script starts the in-vehicle
+  options (vehicle god mode, torque) and the vehicle switch settings (power
+  multiplier, no siren, turbulence, anchor, personal vehicle) up to 100 ms
+  later. Getting in normally starts them while the door opens.
+- Becoming an animal ped with every menu closed (the default-character
+  restore) blocks first person up to 100 ms later.
+- With every menu closed, the radar follows a change to the pause menu's
+  radar options, or another resource showing it, within 250 ms.
+- Another player's glow style, or a new player's glow, shows within a second.
+
+**Not changed.**
+- The snowball and visor keys: two key reads a frame, already cut in release G.
+- Player blips: they already rest at 2 Hz when off.
+- Time and weather sync: both are off on this server.
+- Keys stay as polled controls, not FiveM key mappings. Key mappings ignore
+  other scripts that block those controls (for example while cuffed), and they
+  would save only a few microseconds more.
+
+**Expected effect.** Not measured; estimated from the October profile:
+- With the menu closed, roughly 3–5 handlers start per frame instead of about
+  20.
+- vMenu should land around 0.1 ms per frame instead of about 0.2 ms.
+
+Measure with `resmon 1`, or `profiler record 1000` and `profiler view`, standing
+still with the menu closed, before and after.
+
+**Validation:**
+- New test `python tests/idle-rests/test_idle_rests.py`. It compiles this
+  build's MiscSettings, RadarSettings, MiscRecordingKeybinds, PlayerOptions,
+  WeaponOptions and VoiceChat, and `build-2026-11-17-3`'s versions of the same
+  methods (read from git). It runs both against one fake game for 19,178 frames:
+  - each option switched on two frames after the menu opens, then used with
+    the menu closed;
+  - then 120 random cycles of option sets, keys, vehicle and heli changes,
+    weapon swaps, wanted levels, respawns, the waypoint, auto pilot cancels,
+    voice, controller and keyboard modes, and radar changes by other resources.
+
+  Everything the two versions do to the game matches on every frame. Persistent
+  settings re-applied 4 times a second (radar preference, expanded radar, voice
+  off) may lag by up to 600 ms after another resource changes them, and must
+  then match again. The test also checks that each loop rests while idle and
+  still runs as often as before while its option is on. It fails if any of
+  these is removed:
+  - the every-frame condition for the point keys, super jump or no-reload;
+  - the early end of a rest when a menu opens.
+
+  It runs the real `IdleRest` and checks that it never lists more than one
+  rest per loop. The rests are tracked in its own list rather than through
+  `Task.WhenAny`, so nothing piles up on a long stretch with the menu closed. It also tests `TickSleeper` against a model of the runtime's tick list
+  (`code/client/clrcore/BaseScript.cs`): asleep costs nothing, a woken handler
+  starts on the next frame, and it never runs twice at once.
+- `tests/frame-costs` is extended:
+  - the shared per-frame checks rest when idle, and still run every frame in a
+    vehicle, as an animal (noticed within 100 ms) and in the MP editor (from
+    the frame after it reopens, mid-rest);
+  - the glow scans every player once a second, picks up a new glowing player
+    within a second, skips one who has gone, applies your own new style on the
+    next pass, and still rewrites your decorator through the join re-sync;
+  - `RadarSettings` is wired.
+- `tests/menuapi-compat` now:
+  - allows exactly one new runtime member, `BaseScript::remove_Tick`, and checks
+    that it exists in this machine's FiveM `CitizenFX.Core` runtime;
+  - checks that `Menu.Visible` wakes the menu ticks and `ProcessMenus` puts
+    them to sleep;
+  - fails on the previous MenuAPI.
+- MenuAPI rebuilt from a clean v3.2.2 checkout (`8787b79`) with both patches is
+  IL-identical to the packaged DLL. Its hash differs only by the checkout path.
+- `tools/ilcompare` against `build-2026-11-17-3`:
+  - client: only the methods above, plus compiler-renumbered local functions;
+  - MenuAPI: `Menu.set_Visible`, `MenuController` (constructor,
+    `SleepMenuTicks`, `WakeMenuTicks`, `ProcessMenus`,
+    `MenuButtonsDisableChecks`) and two new fields.
+- All 32 tests in AGENTS.md pass.
+- Problems found and fixed before this build:
+  - **By an independent review of the change:**
+    - the creator's back button guard returning late after the exit prompt;
+    - a 100 ms late death snapshot;
+    - the radar showing for up to 250 ms after Hide Radar was unticked;
+    - your own glow change taking up to a second.
+
+    It found nothing wrong with the MenuAPI patch or `TickSleeper`.
+  - **By the side-by-side test:** recording keys and entity outlines starting
+    up to 250 ms after being switched on.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `ca395987150938132a901f4024e182d2709e3fc0003ceaddb7f446ab26814b99` |
+| `build/vMenu/MenuAPI.dll` | `67336ff29bfa804e63d1807f1ad930ba9fe9a2b09ef363af648ac896244c3d86` |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c…` (unchanged) |
+
+**Build MenuAPI** from a v3.2.2 checkout (`8787b7916204e605ed0827da7a93c4462282fa09`):
+1. Apply `tools/menuapi/skip-disabled-legacy-toggle.patch`.
+2. Apply `tools/menuapi/idle-while-closed.patch`.
+3. Run:
+
+   ```
+   dotnet build MenuAPI/MenuAPI.csproj -c "Release FiveM" --nologo -p:IncludeSourceRevisionInInformationalVersion=false -p:GenerateRepositoryUrlAttribute=false "-p:PathMap=<checkout>=/_/MenuAPI"
+   ```
+
+4. Run `dotnet run --project tests/menuapi-compat`.
+
+**Deploy (test):**
+1. Hash the installed `vMenuClient.net.dll` and `MenuAPI.dll`. They should be
+   `4fdd0413…` and `7493926e…` (`build-2026-11-17-3`). If not, stop.
+2. Copy only those two files.
+3. Restart `vMenu`, and have players reconnect.
+
+**In-game check:**
+- F1 opens and closes vMenu instantly, and the menu draws and navigates
+  normally;
+- noclip toggles instantly and moves as before;
+- prop placement follows the camera;
+- player options (god mode, super jump, invisible, never wanted), weapon
+  options (no reload, unlimited ammo, parachutes) and vehicle options (god
+  mode, torque, health text, high beams on honk) work;
+- coordinates, location, time and speedometer show;
+- the point (B), teleport-to-waypoint, radar (Z), drift and recording keys
+  work;
+- respawning restores your appearance and loadout;
+- clothing glow animates for you and others;
+- `resmon` shows lower vMenu ms with the menu closed.
+
+**Roll back:** copy back `build-2026-11-17-3`'s two DLLs (`4fdd0413…`,
+`7493926e…`), or just the one at fault. Each works with the other build's
+version of the other file.
 
 ## November 17, 2026 — MenuAPI rebuild crashed clients (MenuAPI DLL)
 

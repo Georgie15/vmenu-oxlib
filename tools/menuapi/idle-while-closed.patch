@@ -1,0 +1,102 @@
+diff --git a/MenuAPI/Menu.cs b/MenuAPI/Menu.cs
+index 9038a4f..5537709 100644
+--- a/MenuAPI/Menu.cs
++++ b/MenuAPI/Menu.cs
+@@ -384,6 +384,8 @@ namespace MenuAPI
+                 if (value)
+                 {
+                     MenuController.VisibleMenus.Add(this);
++                    // PSRP: the menu ticks sleep while every menu is closed; run them again.
++                    MenuController.WakeMenuTicks();
+                 }
+                 else
+                 {
+diff --git a/MenuAPI/MenuController.cs b/MenuAPI/MenuController.cs
+index 65b86ba..41ea252 100644
+--- a/MenuAPI/MenuController.cs
++++ b/MenuAPI/MenuController.cs
+@@ -133,6 +133,7 @@ namespace MenuAPI
+         /// </summary>
+         public MenuController()
+         {
++            instance = this;
+             Tick += ProcessMenus;
+ #if FIVEM
+             Tick += DrawInstructionalButtons;
+@@ -143,6 +144,43 @@ namespace MenuAPI
+             Tick += MenuButtonsDisableChecks;
+         }
+ 
++        // PSRP: with every menu closed, the draw and button ticks have nothing to do, but the runtime
++        // still starts each of them every frame. ProcessMenus takes them off the tick list when it
++        // finds every menu closed, and Menu.Visible puts them back when a menu opens, so they run
++        // again from the next frame, as they would have anyway.
++        private static MenuController instance;
++        private static bool menuTicksAsleep;
++
++        private void SleepMenuTicks()
++        {
++            if (menuTicksAsleep)
++            {
++                return;
++            }
++            menuTicksAsleep = true;
++            Tick -= ProcessMenus;
++#if FIVEM
++            Tick -= DrawInstructionalButtons;
++#endif
++            Tick -= ProcessMainButtons;
++            Tick -= ProcessDirectionalButtons;
++        }
++
++        internal static void WakeMenuTicks()
++        {
++            if (!menuTicksAsleep || instance == null)
++            {
++                return;
++            }
++            menuTicksAsleep = false;
++            instance.Tick += ProcessMenus;
++#if FIVEM
++            instance.Tick += DrawInstructionalButtons;
++#endif
++            instance.Tick += instance.ProcessMainButtons;
++            instance.Tick += instance.ProcessDirectionalButtons;
++        }
++
+         /// <summary>
+         /// This binds the <paramref name="childMenu"/> menu to the <paramref name="menuItem"/> and sets the menu's parent to <paramref name="parentMenu"/>.
+         /// </summary>
+@@ -798,6 +836,13 @@ namespace MenuAPI
+                 }
+                 DisableMenuButtons = buttonsState;
+             }
++            // PSRP: with every menu closed, look for the onscreen keyboard 10 times a second instead
++            // of every frame. A keyboard is open for far longer than that, and once it is seen this
++            // runs every frame again until it closes, as before.
++            else if (!IsAnyMenuOpen())
++            {
++                await Delay(100);
++            }
+         }
+         #endregion
+ 
+@@ -960,6 +1005,18 @@ namespace MenuAPI
+         /// <returns></returns>
+         private static async Task ProcessMenus()
+         {
++            // PSRP: what the closed-menu frames did every frame (unload the menu textures, and in
++            // DrawInstructionalButtons dispose the button scaleform) is done once, then the menu
++            // ticks sleep until a menu opens.
++            if (!IsAnyMenuOpen() && instance != null)
++            {
++                UnloadAssets();
++#if FIVEM
++                DisposeInstructionalButtonsScaleform();
++#endif
++                instance.SleepMenuTicks();
++                return;
++            }
+ 
+             if (Menus.Count > 0 &&
+                 IsAnyMenuOpen() &&

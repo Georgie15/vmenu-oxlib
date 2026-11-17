@@ -550,6 +550,12 @@ namespace vMenuClient
                 if (isMenuOpen != _wasMenuOpen)
                 {
                     _wasMenuOpen = isMenuOpen;
+                    if (isMenuOpen)
+                    {
+                        // Ends every idle rest in progress, so the resting loops are back to every
+                        // frame while the menu is open (see IdleRest).
+                        IdleRest.MenuOpened();
+                    }
                     TriggerEvent("vMenu:MenuStateChanged", isMenuOpen);
                     if (!isMenuOpen)
                     {
@@ -589,11 +595,16 @@ namespace vMenuClient
                     }
                 }
 
-                if (Game.IsDisabledControlJustReleased(0, Control.PhoneCancel) && MpPedCustomization.DisableBackButton)
+                // The flag is read first: the key only matters while it is set, which is only in
+                // the character creator.
+                if (MpPedCustomization.DisableBackButton && Game.IsDisabledControlJustReleased(0, Control.PhoneCancel))
                 {
                     await Delay(0);
                     Notify.Alert("You must save your ped first before exiting, or click the ~r~Exit Without Saving~s~ button.");
                 }
+
+                // This still runs every frame. It sets the character creator's back button guard
+                // the frame its menu reappears, and wakes the resting loops when any menu opens.
 
                 #endregion
             }
