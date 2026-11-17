@@ -9,7 +9,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 | | |
 | --- | --- |
 | Latest change | November 17, 2026 — release J: the rest of Enhanced's performance patterns and empty teleport fields (client DLL, `storage.html`, `client/exports.lua`), on top of releases I and H. **Testing on branch `perf/release-j`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `adf681908fab0fc2e73a4909f4b3997b7ac7127e212d5715eadbec8a8ea00aae` |
+| `build/vMenu/vMenuClient.net.dll` | `dece98b426477274f47302c1ad2038b2d5a57ba0378b3636c8e6edaa1caf25bd` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -60,7 +60,7 @@ some work every frame that Enhanced does not:
   | Key | Default | Was |
   | --- | --- | --- |
   | Helmet visor (hold 400 ms) | F11 / D-pad right | the game's visor control |
-  | Pick up snowball (on release) | G / D-pad right | the game's detonate control |
+  | Pick up snowball (on release) | G / D-pad left | the game's detonate control |
   | Finger point toggle | B / double tap right stick | the game's special ability control |
   | Expanded minimap (on release) | Z / D-pad down | the game's multiplayer info control |
   | Drift mode (hold) | Left Shift / X (Square) | sprint / jump |
@@ -73,7 +73,11 @@ some work every frame that Enhanced does not:
     the game control, as when vMenu read the control itself. Key bindings run
     outside the game's control handling, so that check is best effort.
   - Pointing steers its animation every frame only while pointing (a
-    `TickSleeper` loop). The old visor/snowball loop is gone.
+    `TickSleeper` loop). It waits half a second for the pointing task to
+    start before going back to sleep. The old visor/snowball loop is gone.
+  - The minimap and drift keys do nothing in noclip, which uses Z and Shift.
+    Point, drift and teleport do nothing over the pause menu, and teleport
+    does nothing with a menu open.
   - The recording keys stay as they were. They are the game's own replay
     controls, with a hold-and-press combination on controller, and they
     already rest while switched off.
@@ -87,6 +91,11 @@ some work every frame that Enhanced does not:
   - It is hidden over the pause menu, fades, player switches and a hidden HUD.
   - Coordinates now always show a decimal point, whatever the player's Windows
     number format.
+  - The text is aligned to the top of the game's safe zone, as the old
+    `SetScriptGfxAlign` did, so a safe zone under 100% moves it inside, as
+    before.
+  - With both speeds shown, the game's street name is hidden every frame (in
+    `MiscSettings`), as before, because MPH sits where it is.
 
 **Teleport To Coords** (`client/exports.lua`): the X, Y and Z fields start
 empty, so pasted coordinates don't have to replace your current position. Your
@@ -140,11 +149,23 @@ a vehicle with every option off, two fewer loops run every frame.
 - `tools/ilcompare` against release I's client: only `FunctionsController`
   changed, in the methods above, plus compiler-generated helpers. One local
   function was only renumbered.
+- **Independent review.** It found these, all fixed:
+  - the coordinates and compass blocks not hiding when switched off (their
+    CSS `display` beat `hidden`);
+  - the snowball's controller key, which is D-pad left, not right;
+  - pointing that could go unsteered;
+  - Z in noclip toggling the minimap;
+  - point and teleport working over the pause menu;
+  - the safe-zone alignment;
+  - the street-name hide.
+
+  It also noted that the overlay hides when another resource hides the HUD
+  (phone, tablet, Photo Mode). Game-drawn text used to stay.
 - All 35 tests in AGENTS.md pass.
 
 | File | SHA-256 |
 | --- | --- |
-| `build/vMenu/vMenuClient.net.dll` | `adf681908fab0fc2e73a4909f4b3997b7ac7127e212d5715eadbec8a8ea00aae` |
+| `build/vMenu/vMenuClient.net.dll` | `dece98b426477274f47302c1ad2038b2d5a57ba0378b3636c8e6edaa1caf25bd` |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` (unchanged) |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c…` (unchanged) |
 
