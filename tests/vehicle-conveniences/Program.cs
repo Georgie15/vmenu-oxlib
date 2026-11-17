@@ -1,6 +1,6 @@
 // Run: dotnet run --project tests/vehicle-conveniences
 // Drives the production SavedVehicleTracker (the "save your changes?" offer) and
-// PersonalVehicleAutoLock, then checks how vMenu wires them and the vehicle key bindings.
+// the personal vehicle lock shortcuts, then checks how vMenu wires them.
 using System;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -76,6 +76,31 @@ static class Program
         Check(!autoLock.Update(false, 16f, false, false), "option off: never locks");
         Check(!autoLock.Update(true, 16f, false, false), "turning it off disarms it");
         Console.WriteLine("PASS: auto-lock once per walk away, never with someone inside");
+
+        // --- manual lock input ----------------------------------------------------------------------
+        var lockInput = new PersonalVehicleLockInput();
+        var lastTackleFrame = -1;
+        bool Tap(int frame, int time, bool fromHorn = false) =>
+            lockInput.RegisterTap(frame, time, fromHorn, tapFrame => lastTackleFrame >= tapFrame);
+
+        Check(!Tap(10, 1000), "one tap does not toggle");
+        Check(!Tap(10, 1010, fromHorn: true), "the same key on both shortcuts still counts as one tap");
+        Check(Tap(15, 1100), "two quick taps toggle once");
+        Check(!Tap(15, 1300, fromHorn: true), "a delayed horn release cannot toggle the same pair again");
+        Check(!Tap(16, 1400, fromHorn: true), "the previous pair does not carry over to the next press");
+        Check(!Tap(17, 1500), "taps on different shortcuts do not form a pair");
+        lastTackleFrame = 18;
+        Check(!Tap(18, 1600), "a tackle cannot be the second tap");
+        Check(!Tap(19, 1700), "a tackle invalidates the pending first tap");
+        Check(!Tap(18, 1750, fromHorn: true), "a late release of a tackle press is still ignored");
+        Check(Tap(20, 1800), "two fresh taps work after the tackle");
+        Check(!Tap(21, 1900, fromHorn: true), "the horn needs two taps on its own");
+        Check(!Tap(35, 2400, fromHorn: true), "a tap after the horn window starts a new pair");
+        Check(Tap(36, 2500, fromHorn: true), "the horn shortcut locks on the second quick tap");
+        Check(!Tap(37, 2600, fromHorn: true), "arm the horn shortcut again");
+        lockInput.ResetHornTap();
+        Check(!Tap(38, 2700, fromHorn: true), "leaving range clears the pending horn tap");
+        Console.WriteLine("PASS: double-tap locks, tackle cancellation and shared-key deduplication");
 
         // --- wiring --------------------------------------------------------------------------------
         var dir = AppContext.BaseDirectory;

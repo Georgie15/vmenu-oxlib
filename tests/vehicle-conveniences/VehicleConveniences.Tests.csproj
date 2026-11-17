@@ -6,5 +6,6 @@
   <ItemGroup>
     <Compile Include="../../vMenu/SavedVehicleTracker.cs" Link="SavedVehicleTracker.cs" />
     <Compile Include="../../vMenu/PersonalVehicleAutoLock.cs" Link="PersonalVehicleAutoLock.cs" />
+    <Compile Include="../../vMenu/PersonalVehicleLockInput.cs" Link="PersonalVehicleLockInput.cs" />
   </ItemGroup>
 </Project>

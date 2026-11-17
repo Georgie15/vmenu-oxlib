@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 16, 2026 — tackle takes priority over both personal vehicle lock shortcuts (client DLL) |
-| `build/vMenu/vMenuClient.net.dll` | `75af8685c13ed4c950de61239963a1b5b7806e0a1c3ecaf1a2ea7e9bbe940edb` |
+| Latest change | November 16, 2026 — double-tap vehicle locking ignores tackle input (client DLL) |
+| `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
 
 Check a checkout with
@@ -19,6 +19,37 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 16, 2026 — double-tap vehicle locking ignores tackle input (client DLL)
+
+The horn shortcut keeps its 500 ms double-tap window. The configurable
+`vMenu PV Lock/Unlock` binding now uses the same window. Each shortcut counts
+its own taps, and a shared `E` binding toggles the car only once per pair.
+`Shift+E` takes priority even on a miss or during cooldown. It invalidates any
+pending first tap. After releasing Shift, two fresh `E` taps can toggle the
+lock immediately, including during recovery. The shortcuts use the horn and
+lock status message for feedback.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
+| `PSRP_Framework/client/cl_tackle.lua` (LF as committed) | `cb96f45a3bde87642c5c2152683b4b86bd64d3c215abc7390ff7defb6b928dd1` |
+
+This package uses `build-2026-11-16-3` to preserve the earlier same-day tags.
+The client build, IL comparison, vehicle convenience, client feature, client
+guard, client fix, and both Framework tackle tests passed locally.
+
+Deploy this client DLL with `PSRP_Framework/client/cl_tackle.lua` from
+PSRP-Development commit `fc6b47598b7793d407d951ab43c94e14c36c077c`. Check the
+installed files against the previous November 16 entry below, then replace
+those two files and restart both resources.
+
+In FiveM, check one tap and then a double-tap with `E` as the horn shortcut.
+Bind the mapped lock shortcut to `E` too and verify a double-tap still toggles
+the car once. Try a single `E`, then `Shift+E`, then another single `E`.
+The car should stay in its original lock state until two fresh plain taps.
+Repeat when the tackle misses and while it is on cooldown. The in-game check
+is pending.
 
 ## November 16, 2026 — tackle takes priority over vehicle locking (client DLL)
 

@@ -18,6 +18,7 @@ namespace vMenuClient.menus
         // Variables
         private Menu menu;
         private MenuItem currentVehicleInfoItem;
+        private readonly PersonalVehicleLockInput lockInput = new();
         private bool lockToggleInProgress;
         public bool BlipOnExit { get; private set; } = UserDefaults.PVBlipOnExit;
         // Personal Vehicle > Auto-Lock When I Walk Away (FunctionsController locks the car).
@@ -79,12 +80,7 @@ namespace vMenuClient.menus
             if (IsAllowed(Permission.PVLockDoors))
             {
                 RegisterCommand($"vMenu:{keyMappingId}:PVLock", new Action<int, List<object>, string>(async (source, args, rawCommand) =>
-                {
-                    var inputFrame = GetFrameCount();
-                    // Give the tackle key callback time to claim the same input, regardless of dispatch order.
-                    await BaseScript.Delay(0);
-                    await ToggleLocksFromKey(inputFrame);
-                }), false);
+                    await HandleLockKeyTap(GetFrameCount(), fromHorn: false)), false);
                 RegisterKeyMapping($"vMenu:{keyMappingId}:PVLock", "vMenu PV Lock/Unlock", "keyboard", "");
             }
             if (IsAllowed(Permission.PVToggleEngine))
@@ -507,9 +503,14 @@ namespace vMenuClient.menus
             }
         }
 
-        internal async Task ToggleLocksFromKey(int inputFrame)
+        internal void ResetHornLockTap() => lockInput.ResetHornTap();
+
+        internal async Task HandleLockKeyTap(int inputFrame, bool fromHorn)
         {
-            if (lockToggleInProgress || TackleBlocksPersonalVehicleLock(inputFrame))
+            var tapTime = GetGameTimer();
+            // Let both callbacks see the same input before counting it toward a double-tap.
+            await BaseScript.Delay(0);
+            if (lockToggleInProgress || !lockInput.RegisterTap(inputFrame, tapTime, fromHorn, TackleBlocksPersonalVehicleLock))
             {
                 return;
             }

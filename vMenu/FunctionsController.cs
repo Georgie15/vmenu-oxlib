@@ -2956,7 +2956,6 @@ namespace vMenuClient
 
         private bool didShowPvHelpMessage = false;
         private int? pvHornPressFrame;
-        private int? lastPvHornReleaseTime;
 
         private async Task AutoPVBlipOnExitTick()
         {
@@ -3035,7 +3034,7 @@ namespace vMenuClient
                 || ped.Position.DistanceToSquared(veh.Position) >= 650.0f)
             {
                 pvHornPressFrame = null;
-                lastPvHornReleaseTime = null;
+                personalVehicleMenu?.ResetHornLockTap();
                 await Delay(100);
                 return;
             }
@@ -3044,25 +3043,10 @@ namespace vMenuClient
             {
                 pvHornPressFrame = GetFrameCount();
             }
-            if (Game.IsControlJustReleased(0, Control.VehicleHorn))
+            if (Game.IsControlJustReleased(0, Control.VehicleHorn) && pvHornPressFrame is { } inputFrame)
             {
-                var releaseTime = GetGameTimer();
-                var inputFrame = pvHornPressFrame ?? GetFrameCount();
                 pvHornPressFrame = null;
-                await Delay(0);
-                if (TackleBlocksPersonalVehicleLock(inputFrame))
-                {
-                    lastPvHornReleaseTime = null;
-                }
-                else if (lastPvHornReleaseTime.HasValue && releaseTime - lastPvHornReleaseTime.Value < 500)
-                {
-                    lastPvHornReleaseTime = null;
-                    await personalVehicleMenu.ToggleLocksFromKey(inputFrame);
-                }
-                else
-                {
-                    lastPvHornReleaseTime = releaseTime;
-                }
+                await personalVehicleMenu.HandleLockKeyTap(inputFrame, fromHorn: true);
             }
             if (!didShowPvHelpMessage)
             {
