@@ -59,11 +59,15 @@ static class Program
         string Read(params string[] parts) => File.ReadAllText(Path.Combine(dir, Path.Combine(parts))).Replace("\r\n", "\n");
         var mp = Read("vMenu", "menus", "MpPedCustomization.cs");
         var menu = Regex.Match(mp, @"private void CreateSavedOutfitsMenu\(Menu outfitsMenu\).*?\n        \}\n", RegexOptions.Singleline).Value;
+        // Saving and wearing go through the capture and wear shared with characters' own outfits and
+        // department outfits (tests/character-wardrobe checks those too).
+        var wear = Regex.Match(mp, @"private bool WearOutfit\(ClothingSave save, string what\).*?\n        \}\n", RegexOptions.Singleline).Value;
+        var capture = Regex.Match(mp, @"private static SavedOutfit CaptureCurrentOutfit\(\).*?\n        \}\n", RegexOptions.Singleline).Value;
         Check(mp.Contains("CreateSavedOutfitsMenu(savedOutfitsMenu);"), "MP Ped Customization has the menu");
-        Check(menu.Contains("if (!IsCurrentPedMpFreemode())") && menu.Contains("outfit.Model == model") && menu.Contains("save.Model != (uint)GetEntityModel(ped)"), "only for MP characters, and only outfits of the current body type");
-        Check(menu.Contains("currentCharacter = ReplacePedDataClothing(currentCharacter, keepUnresolved: true);"), "wearing updates the character being edited, so saving keeps it");
-        Check(menu.Contains("ClothingService.Resolve(save, ClothingResolver.OutfitSlots, ped)") && menu.Contains("ClothingService.Report($\"Outfit {name}\", resolution, true);"), "wearing resolves by collection and reports pieces left off");
-        Check(menu.Contains("(slot, global, texture) => ClothingResolver.Capture(slot, global, texture, ClothingService.Layouts, runtime)"), "saving records collection references");
+        Check(menu.Contains("if (!IsCurrentPedMpFreemode())") && menu.Contains("outfit.Model == model") && wear.Contains("save.Model != (uint)GetEntityModel(ped)"), "only for MP characters, and only outfits of the current body type");
+        Check(menu.Contains("if (!WearOutfit(save, $\"Outfit {name}\"))") && wear.Contains("currentCharacter = ReplacePedDataClothing(currentCharacter, keepUnresolved: true);"), "wearing updates the character being edited, so saving keeps it");
+        Check(wear.Contains("ClothingService.Resolve(save, ClothingResolver.OutfitSlots, ped)") && wear.Contains("ClothingService.Report(what, resolution, true);"), "wearing resolves by collection and reports pieces left off");
+        Check(Regex.Matches(menu, @"CaptureCurrentOutfit\(\)\.ToJson\(\)").Count == 2 && capture.Contains("(slot, global, texture) => ClothingResolver.Capture(slot, global, texture, ClothingService.Layouts, runtime)"), "saving records collection references");
         Check(menu.Contains("await GetUserConfirmation(\"Delete Outfit\""), "deleting asks first");
         Check(Regex.IsMatch(menu, @"if \(!string\.IsNullOrEmpty\(GetResourceKvpString\(SavedOutfit\.KeyFor\(name\)\)\)\)\s*\{\s*Notify\.Error"), "saving never overwrites an outfit");
         foreach (var side in new[] { "client", "server" })

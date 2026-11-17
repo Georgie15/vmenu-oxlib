@@ -26,3 +26,21 @@ CREATE TABLE IF NOT EXISTS `vmenu_backups` (
     `updated` datetime NOT NULL DEFAULT current_timestamp(),
     PRIMARY KEY (`license`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC;
+
+-- Department Outfits (MP Ped Customization > Department Outfits, setr vmenu_dept_outfits true).
+-- One row per published preset: the PoliceEMSActivity org id, the freemode model it is for and the
+-- Saved Outfits JSON (server/deptOutfits.lua). Names are unique per org and body type.
+CREATE TABLE IF NOT EXISTS `vmenu_dept_outfits` (
+    `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+    `org` varchar(32) NOT NULL,
+    `name` varchar(40) NOT NULL,
+    `model` int(10) unsigned NOT NULL,
+    `payload` text NOT NULL,
+    `created_by` varchar(64) DEFAULT NULL,
+    `created_by_name` varchar(64) DEFAULT NULL,
+    `updated_by_name` varchar(64) DEFAULT NULL,
+    `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+    `updated_at` datetime NOT NULL DEFAULT current_timestamp(),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `org_model_name` (`org`, `model`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC;
