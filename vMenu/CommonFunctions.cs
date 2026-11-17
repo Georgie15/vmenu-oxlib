@@ -1317,10 +1317,9 @@ namespace vMenuClient
             }
             vehicle.CurrentRPM = rpm;
 
-            await Delay(1); // Mandatory delay - without it radio station will not set properly
-
-            // Set the radio station to default set by player in Vehicle Menu
-            vehicle.RadioStation = (RadioStation)UserDefaults.VehicleDefaultRadio;
+            // The radio is left alone here. It used to be set to the "default radio station" on every
+            // spawn, which forced Los Santos Rock Radio for anyone who never picked one. The player's
+            // radio choices are applied when they get in (VehicleRadio).
 
             // Discard the model.
             SetModelAsNoLongerNeeded(vehicleHash);
@@ -1442,6 +1441,10 @@ namespace vMenuClient
                 ToggleVehicleMod(vehicle.Handle, 20, vehicleInfo.tyreSmoke);
                 ToggleVehicleMod(vehicle.Handle, 22, vehicleInfo.xenonHeadlights);
                 SetVehicleLivery(vehicle.Handle, vehicleInfo.livery);
+                if (VehicleStyle.ShouldRestoreRoofLivery(vehicleInfo.roofLivery, GetVehicleRoofLiveryCount(vehicle.Handle)))
+                {
+                    SetVehicleRoofLivery(vehicle.Handle, vehicleInfo.roofLivery.Value);
+                }
 
                 if (IsSavedColourCustom(vehicleInfo.colors, "customPrimary"))
                 {
@@ -1548,6 +1551,10 @@ namespace vMenuClient
             public int headlightColor;
             public float enveffScale;
             public string Category;
+            // Only for vehicles with roof liveries (-1 for none). Left out of the JSON otherwise, so
+            // saves and share codes of other vehicles are unchanged, and older saves load without it.
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public int? roofLivery;
         };
         #endregion
 
@@ -1661,7 +1668,8 @@ namespace vMenuClient
                 bulletProofTires = !veh.CanTiresBurst,
                 headlightColor = VehicleOptions.GetHeadlightsColorForVehicle(veh),
                 enveffScale = GetVehicleEnveffScale(veh.Handle),
-                Category = string.IsNullOrEmpty(category) ? "Uncategorized" : category
+                Category = string.IsNullOrEmpty(category) ? "Uncategorized" : category,
+                roofLivery = GetVehicleRoofLiveryCount(veh.Handle) > 0 ? GetVehicleRoofLivery(veh.Handle) : (int?)null
             };
         }
 

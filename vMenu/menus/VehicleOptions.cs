@@ -70,6 +70,7 @@ namespace vMenuClient.menus
         private MenuItem clearPresetButton;
         // Same for the Liveries menu.
         private MenuListItem liveryListItem;
+        private MenuListItem roofLiveryListItem;
         private MenuItem liveriesBackButton;
         #endregion
 
@@ -270,23 +271,22 @@ namespace vMenuClient.menus
             };
             var vehicleLights = new MenuListItem("Vehicle Lights", lights, 0, "Turn vehicle lights on/off.");
 
-            var stationNames = new List<string>();
-
-            foreach (var radioStationName in Enum.GetNames(typeof(RadioStation)))
+            // Radio choices (VehicleRadio). The list is refreshed each time this menu opens.
+            VehicleRadio.Initialize();
+            var radioEntryValues = new List<string>();
+            var radioOnEntry = new MenuListItem("Radio When Getting In", new List<string>(), 0, "What the radio does when you get into a vehicle as its driver. " +
+                "~b~Leave As Is~s~ never touches it. Your choice is saved as you scroll; press ~r~enter~s~ to also apply it to this vehicle now.");
+            void RefreshRadioOnEntry()
             {
-                stationNames.Add(radioStationName);
+                radioEntryValues = VehicleRadioSettings.EntryOptions(VehicleRadio.Stations(), UserDefaults.VehicleEntryRadio);
+                radioOnEntry.ListItems = radioEntryValues.Select(VehicleRadio.DisplayName).ToList();
+                radioOnEntry.ListIndex = VehicleRadioSettings.EntryIndex(radioEntryValues, UserDefaults.VehicleEntryRadio);
             }
-
-            var radioIndex = UserDefaults.VehicleDefaultRadio;
-
-            if (radioIndex == (int)RadioStation.RadioOff)
-            {
-                var stations = (RadioStation[])Enum.GetValues(typeof(RadioStation));
-                var index = Array.IndexOf(stations, RadioStation.RadioOff);
-                radioIndex = index;
-            }
-
-            var radioStations = new MenuListItem("Default radio station", stationNames, radioIndex, "Select a defalut radio station to be set when spawning new car");
+            RefreshRadioOnEntry();
+            var blockedStationsMenu = new Menu("Vehicle Radio", "Blocked Radio Stations");
+            var blockedStationsBtn = new MenuItem("Blocked Radio Stations", "Stations you block are hidden from the radio wheel and never play.") { Label = "→→→" };
+            var unblockAllStations = new MenuItem("Unblock All", "Lets every station play again.");
+            var stationCheckboxes = new Dictionary<MenuCheckboxItem, string>();
 
             var tiresList = new List<string>() { "All Tires", "Tire #1", "Tire #2", "Tire #3", "Tire #4", "Tire #5", "Tire #6", "Tire #7", "Tire #8" };
             var vehicleTiresList = new MenuListItem("Fix / Destroy Tires", tiresList, 0, "Fix or destroy a specific vehicle tire, or all of them at once. Note, not all indexes are valid for all vehicles, some might not do anything on certain vehicles.");
@@ -547,8 +547,13 @@ namespace vMenuClient.menus
             // always allowed
             menu.AddMenuItem(showHealth); // SHOW VEHICLE HEALTH
 
-            // I don't really see why would you want to disable this so I will not add useless permissions
-            menu.AddMenuItem(radioStations);
+            if (VehicleRadio.Allowed) // RADIO
+            {
+                menu.AddMenuItem(radioOnEntry);
+                menu.AddMenuItem(blockedStationsBtn);
+                MenuController.AddSubmenu(menu, blockedStationsMenu);
+                MenuController.BindMenuItem(menu, blockedStationsMenu, blockedStationsBtn);
+            }
 
             if (IsAllowed(Permission.VONoSiren) && !GetSettingsBool(Setting.vmenu_use_els_compatibility_mode)) // DISABLE SIREN
             {
@@ -1170,17 +1175,65 @@ namespace vMenuClient.menus
                         Notify.Error(CommonErrors.NoVehicle);
                     }
                 }
-                else if (item == radioStations)
+                else if (item == radioOnEntry)
                 {
-                    var newStation = (RadioStation)Enum.GetValues(typeof(RadioStation)).GetValue(listIndex);
-
+                    UserDefaults.VehicleEntryRadio = radioEntryValues[listIndex];
                     var veh = GetVehicle();
-                    if (veh != null && veh.Exists())
+                    if (veh != null && veh.Exists() && veh.Driver == Game.PlayerPed)
                     {
-                        veh.RadioStation = newStation;
+                        VehicleRadio.ApplyTo(veh.Handle);
                     }
+                }
+            };
+            #endregion
 
-                    UserDefaults.VehicleDefaultRadio = (int)newStation;
+            #region Radio
+            if (VehicleRadio.Allowed)
+            {
+                menu.OnMenuOpen += (_) => RefreshRadioOnEntry();
+            }
+            menu.OnListIndexChange += (sender, item, oldIndex, newIndex, itemIndex) =>
+            {
+                if (item == radioOnEntry)
+                {
+                    UserDefaults.VehicleEntryRadio = radioEntryValues[newIndex];
+                }
+            };
+            // Rebuilt each time it's opened, like the Liveries menu.
+            menu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item != blockedStationsBtn)
+                {
+                    return;
+                }
+                blockedStationsMenu.ClearMenuItems();
+                stationCheckboxes.Clear();
+                blockedStationsMenu.AddMenuItem(unblockAllStations);
+                var blocked = VehicleRadioSettings.ParseBlocked(UserDefaults.VehicleBlockedRadioStations);
+                foreach (var station in VehicleRadio.Stations())
+                {
+                    var checkbox = new MenuCheckboxItem(VehicleRadio.DisplayName(station), "Ticked stations are hidden from the radio wheel and never play.", blocked.Contains(station));
+                    stationCheckboxes[checkbox] = station;
+                    blockedStationsMenu.AddMenuItem(checkbox);
+                }
+                blockedStationsMenu.RefreshIndex();
+            };
+            blockedStationsMenu.OnCheckboxChange += (sender, item, index, _checked) =>
+            {
+                if (stationCheckboxes.TryGetValue(item, out var station))
+                {
+                    VehicleRadio.SetBlocked(station, _checked);
+                }
+            };
+            blockedStationsMenu.OnItemSelect += (sender, item, index) =>
+            {
+                if (item == unblockAllStations)
+                {
+                    VehicleRadio.UnblockAll();
+                    foreach (var checkbox in stationCheckboxes.Keys)
+                    {
+                        checkbox.Checked = false;
+                    }
                 }
             };
             #endregion
@@ -1210,7 +1263,7 @@ namespace vMenuClient.menus
             customizeColorMenu.AddMenuItem(secondaryColorsBtn);
             MenuController.BindMenuItem(customizeColorMenu, secondaryColorsMenu, secondaryColorsBtn);
 
-            var presetColorsBtn = new MenuListItem("Preset Colors", new List<string>(), 0);
+            var presetColorsBtn = new MenuListItem("Preset Colors", new List<string>(), 0, "The factory colour combinations this vehicle comes in. Picking one replaces custom paint.");
             customizeColorMenu.AddMenuItem(presetColorsBtn);
 
             // color lists
@@ -1275,11 +1328,22 @@ namespace vMenuClient.menus
             var wheelColorsList = new MenuListItem("Wheel Color", wheelColors, 0);
             var dashColorList = new MenuListItem("Dashboard Color", classic, 0);
             var intColorList = new MenuListItem("Interior / Trim Color", classic, 0);
-            var vehicleEnveffScale = new MenuSliderItem("Vehicle Enveff Scale", "This works on certain vehicles only, like the besra for example. It 'fades' certain paint layers.", 0, 20, 10, true);
+            // The game's "enveff scale": 0 is fresh paint, the far right fully faded.
+            var vehicleEnveffScale = new MenuSliderItem("Paint Fade", "How faded and sun-bleached the paint looks, from fresh on the left to fully faded on the right. " +
+                "Only some vehicles show it, like the Besra. Saved with your vehicle.", 0, 20, 10, true);
 
             var chrome = new MenuItem("Chrome");
             customizeColorMenu.AddMenuItem(chrome);
             VehicleColorsMenu.AddMenuItem(vehicleEnveffScale);
+            // Start the slider where this vehicle's paint is (it always started in the middle).
+            VehicleColorsMenu.OnMenuOpen += (_) =>
+            {
+                var veh = GetVehicle();
+                if (veh != null && veh.Exists())
+                {
+                    vehicleEnveffScale.Position = MathUtil.Clamp((int)Math.Round(GetVehicleEnveffScale(veh.Handle) * 20f), 0, 20);
+                }
+            };
 
             customizeColorMenu.OnMenuOpen += (_) =>
             {
@@ -1335,6 +1399,9 @@ namespace vMenuClient.menus
                 var veh = GetVehicle();
                 if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
                 {
+                    // Custom paint covers the combination's colours, so it only showed on unpainted vehicles.
+                    ClearVehicleCustomPrimaryColour(veh.Handle);
+                    ClearVehicleCustomSecondaryColour(veh.Handle);
                     SetVehicleColourCombination(veh.Handle, index);
                 }
                 else
@@ -1496,26 +1563,44 @@ namespace vMenuClient.menus
                 }
             }
 
+            // "Hex Colour Code" items, one per menu. Both they and Custom Colour paint a custom colour.
+            var hexColourItems = new List<MenuItem>();
+            var hexColoursAllowed = IsAllowedWithFallback(Permission.VOHexColors, Permission.VOColors);
+
             async void HandleItemSelect(Menu menu, MenuItem menuItem, int itemIndex)
             {
                 Vehicle veh = GetVehicle();
                 if (veh != null && veh.Exists() && !veh.IsDead && veh.Driver == Game.PlayerPed)
-                {   
+                {
+                    var primary = menu == primaryColorsMenu;
 
-                    int vehicleType = (menu == primaryColorsMenu) ? 1 : 2;
-
-                    var chosenColour = await GetUserColourInput(vehicleType);
+                    string chosenColour;
+                    if (hexColourItems.Contains(menuItem))
+                    {
+                        chosenColour = await GetUserInput("Hex colour code, like #FF8800", CurrentCustomColourCode(veh.Handle, primary), 7);
+                    }
+                    else
+                    {
+                        chosenColour = await GetUserColourInput(primary ? 1 : 2);
+                    }
                     if (string.IsNullOrEmpty(chosenColour))
                     {
                         return;
                     }
 
-                    chosenColour = chosenColour.Replace("#", "");
-                    int r = Convert.ToInt32(chosenColour.Substring(0, 2), 16);
-                    int g = Convert.ToInt32(chosenColour.Substring(2, 2), 16);
-                    int b = Convert.ToInt32(chosenColour.Substring(4, 2), 16);
+                    if (!VehicleStyle.TryParseColourCode(chosenColour, out var r, out var g, out var b))
+                    {
+                        Notify.Error("That isn't a colour code. Type it as #RRGGBB, like #FF8800.");
+                        return;
+                    }
 
-                    if (vehicleType == 1)
+                    // The vehicle can be gone, or someone else can be driving, by the time the dialog closes.
+                    if (!veh.Exists() || veh.Driver != Game.PlayerPed)
+                    {
+                        return;
+                    }
+
+                    if (primary)
                     {
                         SetVehicleCustomPrimaryColour(veh.Handle, r, g, b);
                     }
@@ -1526,9 +1611,30 @@ namespace vMenuClient.menus
                 }
             }
 
+            // The vehicle's custom colour as a hex code, or nothing when its paint isn't custom.
+            static string CurrentCustomColourCode(int vehicle, bool primary)
+            {
+                int r = 0, g = 0, b = 0;
+                if (primary && GetIsVehiclePrimaryColourCustom(vehicle))
+                {
+                    GetVehicleCustomPrimaryColour(vehicle, ref r, ref g, ref b);
+                }
+                else if (!primary && GetIsVehicleSecondaryColourCustom(vehicle))
+                {
+                    GetVehicleCustomSecondaryColour(vehicle, ref r, ref g, ref b);
+                }
+                else
+                {
+                    return "";
+                }
+                return VehicleStyle.FormatColourCode(r, g, b);
+            }
+
             for (var i = 0; i < 2; i++)
             {
                 var customColour = new MenuItem("Custom Colour") { Label = ">>>" };
+                var hexColour = new MenuItem("Hex Colour Code", "Type a hex colour code, like #FF8800, for custom paint.") { Label = "#" };
+                hexColourItems.Add(hexColour);
                 var pearlescentList = new MenuListItem("Pearlescent", classic, 0);
                 var classicList = new MenuListItem("Classic", classic, 0);
                 var metallicList = new MenuListItem("Metallic", classic, 0);
@@ -1553,6 +1659,11 @@ namespace vMenuClient.menus
 
                         primaryColorsMenu.AddMenuItem(chameleonList);
                     }
+                    // Last: HandleListIndexChanges knows the lists by their position.
+                    if (hexColoursAllowed)
+                    {
+                        primaryColorsMenu.AddMenuItem(hexColour);
+                    }
 
                     primaryColorsMenu.OnListIndexChange += HandleListIndexChanges;
                     primaryColorsMenu.OnItemSelect += HandleItemSelect;
@@ -1567,6 +1678,10 @@ namespace vMenuClient.menus
                     secondaryColorsMenu.AddMenuItem(metalList);
                     secondaryColorsMenu.AddMenuItem(utilList);
                     secondaryColorsMenu.AddMenuItem(wornList);
+                    if (hexColoursAllowed)
+                    {
+                        secondaryColorsMenu.AddMenuItem(hexColour);
+                    }
 
                     secondaryColorsMenu.OnListIndexChange += HandleListIndexChanges;
                     secondaryColorsMenu.OnItemSelect += HandleItemSelect;
@@ -1762,9 +1877,23 @@ namespace vMenuClient.menus
                         {
                             VehicleLiveriesMenu.ClearMenuItems();
                             liveryListItem = null;
+                            roofLiveryListItem = null;
                             liveriesBackButton = null;
                             SetVehicleModKit(veh.Handle, 0);
                             var liveryCount = GetVehicleLiveryCount(veh.Handle);
+                            // Convertible tops like the Tornado Custom's. The game says -1 when there are none.
+                            var roofLiveryCount = IsAllowedWithFallback(Permission.VORoofLivery, Permission.VOLiveries) ? GetVehicleRoofLiveryCount(veh.Handle) : 0;
+
+                            if (roofLiveryCount > 0)
+                            {
+                                var roofLiveryList = new List<string>() { "None" };
+                                for (var i = 0; i < roofLiveryCount; i++)
+                                {
+                                    roofLiveryList.Add($"Roof Livery #{i + 1}");
+                                }
+                                roofLiveryListItem = new MenuListItem("Set Roof Livery", roofLiveryList,
+                                    VehicleStyle.RoofLiveryListIndex(GetVehicleRoofLivery(veh.Handle), roofLiveryCount), "Choose a livery for this vehicle's roof.");
+                            }
 
                             if (liveryCount > 0)
                             {
@@ -1780,7 +1909,12 @@ namespace vMenuClient.menus
                                 VehicleLiveriesMenu.RefreshIndex();
                                 //VehicleLiveriesMenu.UpdateScaleform();
                             }
-                            else
+                            if (roofLiveryListItem != null)
+                            {
+                                VehicleLiveriesMenu.AddMenuItem(roofLiveryListItem);
+                                VehicleLiveriesMenu.RefreshIndex();
+                            }
+                            if (liveryCount <= 0 && roofLiveryListItem == null)
                             {
                                 Notify.Error("This vehicle does not have any liveries.");
                                 VehicleLiveriesMenu.CloseMenu();
@@ -1815,6 +1949,14 @@ namespace vMenuClient.menus
                     if (veh != null && veh.Exists())
                     {
                         SetVehicleLivery(veh.Handle, newIndex);
+                    }
+                }
+                else if (listItem == roofLiveryListItem)
+                {
+                    var veh = GetVehicle();
+                    if (veh != null && veh.Exists())
+                    {
+                        SetVehicleRoofLivery(veh.Handle, VehicleStyle.RoofLiveryFromListIndex(newIndex));
                     }
                 }
             };

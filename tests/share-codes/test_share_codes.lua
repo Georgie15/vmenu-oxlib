@@ -60,7 +60,7 @@ local function outfit()
 end
 
 local function vehicle()
-    return { model = 2046537925, name = 'Police Cruiser', plateText = 'LSPD 01', livery = 2, turbo = true, enveffScale = 0.5,
+    return { model = 2046537925, name = 'Police Cruiser', plateText = 'LSPD 01', livery = 2, roofLivery = 1, turbo = true, enveffScale = 0.5,
              colors = { primary = 111, secondary = 0, customPrimary = 0 }, extras = { ['1'] = true, ['2'] = false },
              mods = { ['11'] = 3, ['12'] = 2 }, cadSaveToken = 'token-of-the-sharer', Category = 'My Police Cars', version = 1 }
 end
@@ -95,8 +95,8 @@ check(s.nextId == 3, 'no refused outfit was stored')
 id = s.call('vMenu:Vehicles:Generate', 1, vehicle())
 local stored = json.decode(s.rows[id].data)
 check(type(id) == 'number' and s.rows[id].table == 'vmenu_vehicles', 'a real saved vehicle is stored')
-check(stored.cadSaveToken == nil and stored.Category == 'Uncategorized' and stored.extras['1'] == true,
-    'the sharer\'s CAD token and category are dropped, the rest kept')
+check(stored.cadSaveToken == nil and stored.Category == 'Uncategorized' and stored.extras['1'] == true and stored.roofLivery == 1,
+    'the sharer\'s CAD token and category are dropped, the rest (roof livery too) kept')
 s.expire()
 
 local badVehicles = {
@@ -214,7 +214,8 @@ for what, reply in pairs({ ['not JSON'] = '{', ['a list'] = '[]', ['no model'] =
         'a damaged vehicle code is reported, not saved: ' .. what)
 end
 local c = newClient(json.encode(vehicle()))
-check(c.exports.loadSharedVehicle() == true and json.decode(c.kvps.veh_Imported).cadSaveToken == nil, 'a good vehicle code is saved without the CAD token')
+check(c.exports.loadSharedVehicle() == true and json.decode(c.kvps.veh_Imported).cadSaveToken == nil and json.decode(c.kvps.veh_Imported).roofLivery == 1,
+    'a good vehicle code is saved without the CAD token, with its roof livery')
 
 local character = json.encode({ SaveName = 'mp_ped_Main', DrawableVariations = { clothes = { ['3'] = { Key = 1, Value = 0 } } } })
 for what, reply in pairs({ ['not JSON'] = '{', ['no clothes'] = '{"Props":{}}', ['clothes that are text'] = '{"Clothes":"x","Props":{}}' }) do

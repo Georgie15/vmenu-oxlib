@@ -30,7 +30,6 @@ namespace vMenuClient
             public static void RememberRecent(uint model) => Recent.Add(model);
             public static string GetVehicleName(uint model) => "car" + model;
         }
-        static class UserDefaults { public static int VehicleDefaultRadio = 0; }
         class IdentityStub
         {
             public Task<string> BeginVehicleIdentity(uint hash, string token) => Task.FromResult("ticket");
@@ -147,10 +146,11 @@ namespace vMenuClient
                 if (failure == "airborne") Surfaces.Add(new Surface(0));
                 var handle = await Spawn();
                 Near(Positions[handle].Z, failure == "airborne" ? 100 : -19, "no local floor preserves requested altitude: " + failure);
-                Check(PlaceCalls == 0 && Now == 1001, "failed/pending collision times out without global ground placement: " + failure);
+                // 1000: the collision wait. Spawning no longer waits a frame afterwards to set the radio.
+                Check(PlaceCalls == 0 && Now == 1000, "failed/pending collision times out without global ground placement: " + failure);
             }
             Reset(); Now = uint.MaxValue - 499;
-            await Spawn(); Check(PlaceCalls == 0 && Now == 501, "collision timeout survives game timer wrap");
+            await Spawn(); Check(PlaceCalls == 0 && Now == 500, "collision timeout survives game timer wrap");
             Console.WriteLine("PASS: streamed collision, pending/invalid rays, walls, out-of-range hits, airborne and timer wrap");
 
             Reset(); Surfaces.Add(new Surface(-20)); Surfaces.Add(new Surface(-19.2f, flags: 2)); Surfaces.Add(new Surface(-19.1f, flags: 4));
@@ -253,7 +253,6 @@ namespace CitizenFX.Core
     }
     public enum VehicleClass { Boats = 14, Helicopters = 15, Trains = 21 }
     public enum VehicleSeat { Driver }
-    public enum RadioStation { Default }
     public class Model { public bool IsTrain => Native.API.ModelClass == 21; }
     public class Vehicle
     {
@@ -261,7 +260,6 @@ namespace CitizenFX.Core
         public int Handle;
         public bool NeedsToBeHotwired, PreviouslyOwnedByPlayer, IsPersistent, IsStolen, IsWanted, IsEngineRunning;
         public float CurrentRPM, BodyHealth = 1000, EngineHealth = 1000;
-        public RadioStation RadioStation;
         public Model Model = new Model();
         public VehicleClass ClassType => (VehicleClass)Native.API.ModelClass;
         public Ped Driver => Game.PlayerPed;

@@ -168,10 +168,37 @@ namespace vMenuClient
             set { SetSavedSettingsBool("vehicleBikeSeatbelt", value); }
         }
 
-        public static int VehicleDefaultRadio
+        /// <summary>
+        /// What the radio does when the player gets into a vehicle (VehicleRadioSettings): empty
+        /// leaves it alone, "OFF" turns it off, anything else is a station name.
+        /// </summary>
+        public static string VehicleEntryRadio
         {
-            get { return GetSettingsInt("vehicleDefaultRadio"); }
-            set { SetSavedSettingsInt("vehicleDefaultRadio", value); }
+            get { return GetSettingsString("vehicleEntryRadio"); }
+            set { SetSavedSettingsString("vehicleEntryRadio", value); }
+        }
+
+        /// <summary>
+        /// Comma-separated station names the player has blocked.
+        /// </summary>
+        public static string VehicleBlockedRadioStations
+        {
+            get { return GetSettingsString("vehicleBlockedRadioStations"); }
+            set { SetSavedSettingsString("vehicleBlockedRadioStations", value); }
+        }
+
+        /// <summary>
+        /// The old "Default radio station" setting (a CitizenFX RadioStation value, 0 when never set),
+        /// read once to carry it over to <see cref="VehicleEntryRadio"/>, then removed.
+        /// </summary>
+        public static int TakeLegacyVehicleDefaultRadio()
+        {
+            var value = GetSettingsInt("vehicleDefaultRadio");
+            if (value != 0)
+            {
+                DeleteResourceKvp(SETTINGS_PREFIX + "vehicleDefaultRadio");
+            }
+            return value;
         }
         #endregion
 
@@ -499,6 +526,24 @@ namespace vMenuClient
         private static void SetSavedSettingsInt(string kvpString, int newValue)
         {
             SetResourceKvpInt(SETTINGS_PREFIX + kvpString, newValue);
+        }
+
+        // An empty value is stored as no setting at all.
+        private static string GetSettingsString(string kvpString)
+        {
+            return GetResourceKvpString(SETTINGS_PREFIX + kvpString) ?? "";
+        }
+
+        private static void SetSavedSettingsString(string kvpString, string newValue)
+        {
+            if (string.IsNullOrEmpty(newValue))
+            {
+                DeleteResourceKvp(SETTINGS_PREFIX + kvpString);
+            }
+            else
+            {
+                SetResourceKvp(SETTINGS_PREFIX + kvpString, newValue);
+            }
         }
         #endregion
 
