@@ -8,10 +8,10 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL). **Testing on branch `perf/closed-menu`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `ca395987150938132a901f4024e182d2709e3fc0003ceaddb7f446ab26814b99` |
+| Latest change | November 17, 2026 — release I: MenuAPI 4.1.3 (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`), on top of release H. **Testing on branch `perf/menuapi4`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `8219b71e57a0ce169eced482a4391b50d0fb39e661ef952efef073477bc1142f` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
-| `build/vMenu/MenuAPI.dll` | `67336ff29bfa804e63d1807f1ad930ba9fe9a2b09ef363af648ac896244c3d86` |
+| `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
 Check a checkout with
 `sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll build/vMenu/MenuAPI.dll`.
@@ -20,6 +20,214 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release I: MenuAPI 4.1.3 (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`) — TESTING, branch `perf/menuapi4`
+
+**Status: test build, not verified in game, not on `main`.** It is built on top
+of release H (`perf/closed-menu`), so testing it tests release H too. Until it
+passes an in-game check, `main` and `build-2026-11-17-3` stay the live build
+and the fallback.
+
+**Why.** With a menu open, MenuAPI 3.2.2 draws every visible row, label, banner
+and description with game calls every frame, inside vMenu's script time.
+MenuAPI 4 draws the menu on the resource's web page (NUI), so vMenu's C# only
+reads input. 4.1.3 is the version vMenu Enhanced uses. It also has built in
+what this build patched into 3.2.2: its loops stop while every menu is closed,
+and its toggle key is a key binding, so the V-key bug can't happen.
+
+**What changed.**
+- **MenuAPI 4.1.3**, built from the v4.1.3 source without the `RepositoryUrl`
+  attribute (command below), plus one local patch,
+  [`tools/menuapi/checkbox-left-toggle-4.1.3.patch`](../tools/menuapi/checkbox-left-toggle-4.1.3.patch):
+  left toggles a checkbox, as in 3.2.2. An upstream refactor (`095af43`, 2021)
+  dropped that, so in stock 4.x left on a checkbox goes back a menu, and holding
+  it can close vMenu. vMenu has about 100 checkboxes.
+  - The NuGet package's DLL carries `AssemblyMetadataAttribute`, which FiveM's
+    client `mscorlib` doesn't have: the November 17 crash. So that DLL is
+    never shipped.
+  - `tools/ilcompare` finds every type, field and method identical to the
+    NuGet DLL, plus the patch's one new method, `MenuCheckboxItem.GoLeft`. The
+    version strings and that attribute are the only other differences.
+  - MenuAPI 4 is LGPL-3.0-or-later. It ships as its own DLL, with the license
+    texts and a notice in `menuapi/`. The notice names the patch, which is under
+    the same license and kept in this repository.
+- **`storage.html` is now also MenuAPI's page.**
+  - It loads MenuAPI's stylesheets and scripts, and has `<div id="menuapi">`.
+  - The old page (ped pack store prompt, import/export) lives in
+    `#vmenu-storage`, and every one of its style rules is scoped to it. Before,
+    its `*` rule set the font and centring of every element on the page, which
+    would have restyled the menu.
+  - It only reacts to its own two messages, `showPedPackPrompt` and
+    `showImportExport`. Before, any other message opened the import/export
+    screen, and MenuAPI messages this page all the time. Nothing sends
+    `showImportExport` (that screen was unreachable before as well).
+- **`fxmanifest.lua`** adds `menuapi/**/*` to `files`.
+- **`menuapi/`**: MenuAPI's web files from the MenuAPI.FiveM 4.1.3 package, and
+  its license texts.
+- **Client**, only what 4.x no longer has:
+  - Menus close when the ped dies, in `MainMenu.OnTick`, as 3.2.2 did. 4.x's
+    own close-on-death sits behind its "player is dead" draw gate and never
+    runs, so a menu open at death came back after respawn.
+  - Spacer headings ("↓ Vehicle Categories ↓" and five others) pad with
+    non-breaking spaces. The web page collapses ordinary spaces, which put them
+    against the left edge. In a browser they now centre at 47–49% of the row.
+  - The menu toggle: `MenuController.EnableMenuToggleKey = false`, set in
+    `MainMenu`'s constructor. vMenu opens the menu with its own key mapping, as
+    before. `EnableManualGCs` is gone because 4.x has no forced GC.
+  - The three in-menu keys, used in five menus, are now FiveM key bindings with
+    the same keys (`vMenu/MenuKeys.cs`):
+    - Space filters the male, female and other ped lists.
+    - Delete deletes an unavailable saved vehicle.
+    - Space opens or closes every door in the vehicle mod menu.
+
+    On a controller all three are X / Square, as before. Players can rebind
+    them in Settings > Key Bindings > FiveM. The ped filter and the delete key
+    still disable the game control on that key while their menu is open, as
+    3.2.2 did, so Space doesn't also jump.
+  - The character creator's camera hints (turn head, turn character, turn
+    camera) are button hints. They are rebuilt when their menu opens and when
+    the player switches between keyboard and controller.
+
+**What players will notice.**
+- Menus look the same. No skin is set, and the banner still comes from
+  `stream/commonmenu.ytd`. The browser draws them, so text may be slightly
+  sharper.
+- Menu keys are FiveM key bindings, listed in Settings > Key Bindings > FiveM
+  ("Menu up", "Menu select"…), and can be rebound.
+  - By default: arrow keys, Enter, Backspace or Escape, and the mouse wheel.
+    The left and right mouse buttons now select and go back.
+  - Other resources that disable game controls no longer block menu
+    navigation. vMenu's own blocks (`DontOpenMenus`, `DisableMenuButtons`)
+    still apply.
+- Take Photo no longer captures an open menu, because the web page isn't part
+  of the game image.
+
+**Expected effect.** Not measured.
+- **Menu closed:** the same as release H. MenuAPI 4 stops its loops just as
+  release H's patch did, and both keep one toggle tick every frame.
+- **Menu open:** vMenu no longer draws the rows itself, so `resmon` should show
+  noticeably less. Part of that work moves to the browser layer, which
+  `resmon` doesn't count.
+
+**Validation:**
+- `tests/menuapi-compat` is rewritten for 4.1.3. It checks:
+  - the packaged MenuAPI is 4.1.3, and the client was built against 4.1.3;
+  - assembly attributes are only types FiveM's `mscorlib` has, and there is no
+    `AssemblyMetadataAttribute`;
+  - through `tools/ilcompare`, the code is the official release;
+  - the only code difference from the official release is the patch's
+    `MenuCheckboxItem.GoLeft`, and that method selects an enabled checkbox;
+  - it uses the same outside types and members as the official release, apart
+    from that attribute;
+  - on a machine with FiveM installed, every type and member that MenuAPI and
+    the client use exists in FiveM's runtime: 237 and 1,085 members.
+
+  It fails on the NuGet DLL. The MenuAPI build is reproducible: two checkouts
+  in different folders give the same hash.
+- `tests/frame-costs`: the MenuAPI GC check now requires MenuAPI 4.1.3, which
+  has no forced GC.
+- Checked by reading the code:
+  - **List values.** 4.x copies a list item's values instead of keeping the
+    list vMenu passed in. Every list vMenu mutates is filled before its item is
+    built.
+  - **Text codes.** Every text code vMenu puts in menu text renders the same:
+    colours, `~h~`, `~n~`, `~italic~`, `~s~`. The `~INPUT_…~` codes appear only
+    in game-drawn help and notifications.
+- **The merged page in a browser:**
+  - all 43 menu elements keep MenuAPI's font and alignment;
+  - with Font Awesome loaded, all 48 elements of the ped pack prompt and the
+    import/export panel have the same computed styles as before, and the lock
+    icon keeps its icon font;
+  - MenuAPI's messages don't open the import/export panel.
+- All 32 tests in AGENTS.md pass.
+- **Two independent reviews**, one of the change and one of how 4.1.3 behaves
+  differently from 3.2.2 everywhere vMenu uses MenuAPI. Fixed from them:
+  - the lock icon losing its font to the scoped reset (now `:where()`, zero
+    specificity like the old `*`);
+  - left on checkboxes;
+  - menus left open at death;
+  - spacer centring;
+  - the controller buttons for the three in-menu keys;
+  - hints following a switch between keyboard and controller.
+
+  Found and left as they are:
+  - **Another resource disabling every control freezes the menu.** MenuAPI 4
+    treats control 360 being disabled as "F8 console open" and ignores keys.
+    `DisableAllControlActions` does that; vMenu's Photo Mode does so after
+    closing the menus, but the toggle key can reopen them during Photo Mode.
+  - **The game's M / pad Select control (244) is disabled while a menu is
+    open**, so other resources that read it ignore it then.
+  - **vMenu's own back/select calls do nothing while the weapon wheel is
+    open**, for example closing a vehicle-only menu when you leave the vehicle.
+  - **"Disable Controller Support" does nothing.** It already didn't in
+    `build-2026-11-17-3`.
+  - **The unreachable import/export panel can't scroll.**
+  - **The `↓` arrows in two spacers are garbled in the source** (`â†“`), as
+    before.
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `8219b71e57a0ce169eced482a4391b50d0fb39e661ef952efef073477bc1142f` |
+| `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
+| `build/vMenu/vMenuServer.net.dll` | `8827cd4c…` (unchanged) |
+
+`storage.html`, `fxmanifest.lua` and `menuapi/` are text and fonts. Git
+normalises text line endings, so compare those by content, not hash.
+
+**Build MenuAPI** from a v4.1.3 checkout
+(`51f745da63cc7b98844d5331e5f4317197783b7e`), without Node, which only re-minifies
+the web files. Apply `tools/menuapi/checkbox-left-toggle-4.1.3.patch` first
+(`git apply`), then:
+
+```
+dotnet build MenuAPI/MenuAPI.csproj -c Release -p:MenuApiFlavor=Legacy --nologo -p:Version=4.1.3 -p:IncludeSourceRevisionInInformationalVersion=false -p:GenerateRepositoryUrlAttribute=false "-p:PathMap=<checkout>=/_/MenuAPI"
+```
+
+1. Copy `MenuAPI/bin/Release/net452/MenuAPI.dll` to `build/vMenu/`.
+2. Copy the web files from the NuGet package
+   (`~/.nuget/packages/menuapi.fivem/4.1.3/contentFiles/any/any/menuapi/`) to
+   `build/vMenu/menuapi/`.
+3. Copy `LICENSE.md` and `LICENSE.GPL.md` from the package to
+   `menuapi/MenuAPI-LICENSE.md` and `menuapi/MenuAPI-LICENSE.GPL.md`, and keep
+   `menuapi/MenuAPI-NOTICE.txt` up to date.
+4. Run `dotnet run --project tests/menuapi-compat`.
+
+**Deploy (test):**
+1. Hash the installed `vMenuClient.net.dll` and `MenuAPI.dll`. They should be
+   `4fdd0413…` and `7493926e…` (`build-2026-11-17-3`). If not, stop.
+2. Check that the installed `storage.html` and `fxmanifest.lua` match
+   `build-2026-11-17-3`'s by content. If not, stop.
+3. Copy `vMenuClient.net.dll`, `MenuAPI.dll`, `storage.html`,
+   `fxmanifest.lua` and the `menuapi` folder.
+4. Run `refresh`, then `restart vMenu`, because the manifest changed. Have
+   players reconnect.
+
+**In-game check:** everything in release H's list, plus:
+- F1 opens and closes the menu. It looks as before and navigates with the
+  arrows, Enter, Backspace, Escape and the mouse wheel.
+- Left and right both toggle checkboxes; left on a plain button goes back.
+- Spacer headings ("↓ Vehicle Categories ↓") are centred.
+- Dying with a menu open closes it.
+- Long lists scroll, list values change with left and right, and checkboxes
+  and sliders work.
+- The colour and opacity panels work in MP ped customization, and so do the
+  weapon and vehicle stats.
+- The character creator's camera hints show, its back-button guard works,
+  and "Exit Without Saving" works.
+- Space filters the ped lists without jumping, Delete removes an unavailable
+  saved vehicle, and Space toggles the doors in the mod menu.
+- The right-aligned menu option works.
+- The ped pack store prompt shows and closes, and nothing else pops up on the
+  page.
+- Typing in chat or an ox_lib dialog doesn't move the menu.
+- `resmon` with the menu open is lower than on release H.
+
+**Roll back:** copy back all four of `build-2026-11-17-3`'s files
+(`vMenuClient.net.dll`, `MenuAPI.dll`, `storage.html`, `fxmanifest.lua`),
+delete `menuapi/`, `refresh` and `restart vMenu`. These go back together:
+unlike release H, this client doesn't run with MenuAPI 3.2.2, and MenuAPI 4
+needs the new page. To keep release H only, use release H's two DLLs with
+`build-2026-11-17-3`'s `storage.html` and `fxmanifest.lua`.
 
 ## November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL) — TESTING, branch `perf/closed-menu`
 

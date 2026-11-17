@@ -1,0 +1,25 @@
+diff --git a/MenuAPI/items/MenuCheckboxItem.cs b/MenuAPI/items/MenuCheckboxItem.cs
+index 77eb076..38c29e1 100644
+--- a/MenuAPI/items/MenuCheckboxItem.cs
++++ b/MenuAPI/items/MenuCheckboxItem.cs
+@@ -101,6 +101,20 @@ public class MenuCheckboxItem(string text, string? description, bool _checked) :
+         ParentMenu?.SelectItem(this);
+     }
+ 
++    // PSRP: left toggles a checkbox too, as MenuAPI 3.x did. Commit 095af43 moved this into the item
++    // classes and only kept right. A disabled checkbox still goes back, as before.
++    internal override void GoLeft()
++    {
++        if (Enabled)
++        {
++            ParentMenu?.SelectItem(this);
++        }
++        else
++        {
++            base.GoLeft();
++        }
++    }
++
+     internal override void Select()
+     {
+         Checked = !Checked;

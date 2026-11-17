@@ -34,13 +34,19 @@ Instructions for any AI agent or developer working in this repository.
   [docs/current-build.md](docs/current-build.md).
 - Lua, config, `storage.html` and every other deployed file exist only in
   `build/vMenu/`. Edit them there.
-- `build/vMenu/MenuAPI.dll` is MenuAPI v3.2.2 plus `tools/menuapi/`'s patch.
-  Build it as described in the latest MenuAPI section of
-  [docs/current-build.md](docs/current-build.md), including
+- `build/vMenu/MenuAPI.dll` is MenuAPI 4.1.3, the version vMenu Enhanced uses,
+  built from the v4.1.3 source plus `tools/menuapi/checkbox-left-toggle-4.1.3.patch`.
+  Build it as described in the latest
+  MenuAPI section of [docs/current-build.md](docs/current-build.md), including
   `-p:GenerateRepositoryUrlAttribute=false`, and run
   `dotnet run --project tests/menuapi-compat` before shipping it. FiveM's
   client Mono lacks some types the .NET SDK adds, and an unknown attribute type
-  crashed clients once.
+  crashed clients once. The NuGet package's DLL has that attribute, so never
+  ship it as it is.
+- MenuAPI 4 draws the menus on `build/vMenu/storage.html` with the web files in
+  `build/vMenu/menuapi/`, copied from the MenuAPI.FiveM package of the same
+  version as the DLL. Keep `storage.html`'s own styles scoped to
+  `#vmenu-storage`, so they can't restyle the menu.
 
 ## Tests
 

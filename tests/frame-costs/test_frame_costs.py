@@ -51,7 +51,10 @@ assert re.search(r'Tick \+= VehicleOptions;\s*vehicleHealthCheckEnabled = true;\
     'health text and highbeams keep their permissions'
 assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*Tick \+= ManageCamera;\s*movementLockCheckEnabled = true;', setup)
 assert re.search(r'if \(GetSettingsBool\(Setting\.vmenu_enable_animals_spawn_menu\)\)\s*\{\s*animalCameraCheckEnabled = true;', setup)
-assert 'MenuController.EnableManualGCs = false;' in main_menu, "MenuAPI's forced GC every 60 s is off"
+# MenuAPI 3 forced a GC.Collect() every 60 s unless EnableManualGCs was off. MenuAPI 4 has no manual GC.
+csproj = (root / 'vMenu' / 'vMenuClient.csproj').read_text(encoding='utf-8-sig')
+assert '<PackageReference Include="MenuAPI.FiveM" Version="4.1.3" />' in csproj, 'the client is built against MenuAPI 4.1.3'
+assert 'EnableManualGCs' not in main_menu, "MenuAPI 4 has no forced GC to turn off"
 assert re.search(r'Tick \+= MiscSettings;\s*Tick \+= RadarSettings;', setup), 'the radar settings loop is registered next to MiscSettings'
 assert '(uint)GetHashKey("gadget_parachute")' not in fc, 'the parachute hash is a constant, not hashed every frame'
 weapons = member(fc, r'^        private async Task WeaponOptions\(\).*?^        }$')

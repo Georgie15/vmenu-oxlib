@@ -162,10 +162,9 @@ namespace vMenuClient
             {
                 MenuToggleKey = "M";
             }
-            MenuController.MenuToggleKey = (Control)(-1); // disables the menu toggle key
-            // MenuAPI otherwise forces a full GC.Collect() every 60 s while no menu is open: a periodic
-            // hitch. The runtime collects on its own when needed (release A removed vMenu's own 60 s GC).
-            MenuController.EnableManualGCs = false;
+            // vMenu opens the menu with its own key mapping (below). MenuAPI reads this one frame after
+            // it starts and then registers no toggle key at all, so it must be set here in the constructor.
+            MenuController.EnableMenuToggleKey = false;
             RegisterCommand($"vMenu:{KeyMappingID}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
             {
                 if (!MenuEnabled || !PermissionsSetupComplete || !ConfigOptionsSetupComplete || Menu == null)
@@ -545,8 +544,16 @@ namespace vMenuClient
             if (ConfigOptionsSetupComplete)
             {
                 #region Handle Opening/Closing of the menu.
+                // MenuAPI 3 closed every menu when the ped died. MenuAPI 4's own check sits behind its
+                // "player is dead" draw gate and never runs, so a menu open at death came back after
+                // respawn. The death native is only read while a menu is open.
+                if (MenuController.IsAnyMenuOpen() && IsEntityDead(PlayerPedId()))
+                {
+                    MenuController.CloseAllMenus();
+                }
                 var tmpMenu = GetOpenMenu();
                 var isMenuOpen = tmpMenu != null;
+                MenuKeys.OnFrame(tmpMenu);
                 if (isMenuOpen != _wasMenuOpen)
                 {
                     _wasMenuOpen = isMenuOpen;

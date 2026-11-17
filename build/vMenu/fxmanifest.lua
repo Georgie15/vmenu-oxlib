@@ -28,7 +28,9 @@ files {
     'config/addons.json',
     'config/pedpack.json',
     'config/clothing-layouts.json',
-    'storage.html'
+    'storage.html',
+    -- MenuAPI 4 draws the menus on storage.html with these files.
+    'menuapi/**/*'
 }
 
 client_scripts {

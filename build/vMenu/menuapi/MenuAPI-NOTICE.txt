@@ -1,0 +1,12 @@
+MenuAPI
+Copyright (C) 2018-2026 Tom Grobbe
+https://github.com/TomGrobbe/MenuAPI
+
+This resource uses MenuAPI under the GNU Lesser General Public License v3.0 or
+later (MenuAPI-LICENSE.md, with the GPL text in MenuAPI-LICENSE.GPL.md).
+
+MenuAPI.dll is MenuAPI 4.1.3 (tag v4.1.3, 51f745da63cc7b98844d5331e5f4317197783b7e)
+with one change: left toggles a checkbox, as MenuAPI 3 did. The change is
+tools/menuapi/checkbox-left-toggle-4.1.3.patch in the PSRP vMenu repository,
+and is under the same license. The web files in this folder are MenuAPI 4.1.3's,
+unmodified. MenuAPI.dll is a separate file, so it can be replaced.

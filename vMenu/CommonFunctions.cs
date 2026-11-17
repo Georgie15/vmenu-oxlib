@@ -2970,9 +2970,11 @@ namespace vMenuClient
             var length = title.Length;
             var totalSize = 80 - length;
 
+            // Non-breaking spaces: the menu is a web page now (MenuAPI 4), and it collapses runs of
+            // ordinary spaces, which left these headings against the left edge.
             for (var i = 0; i < (totalSize / 2) - (length / 2); i++)
             {
-                output += " ";
+                output += " ";
             }
             output += title;
             var item = new MenuItem(output, description ?? "")

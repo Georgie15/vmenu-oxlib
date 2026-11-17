@@ -524,7 +524,7 @@ namespace vMenuClient.menus
                     otherPedsMenu.AddMenuItem(pedBtn);
                 }
 
-                async void FilterMenu(Menu m, Control c)
+                async void FilterMenu(Menu m)
                 {
                     var input = await GetUserInput("Filter by ped model name, leave this empty to reset the filter");
                     if (!string.IsNullOrEmpty(input))
@@ -548,14 +548,12 @@ namespace vMenuClient.menus
                 malePedsMenu.OnMenuClose += ResetMenuFilter;
                 femalePedsMenu.OnMenuClose += ResetMenuFilter;
 
-                otherPedsMenu.InstructionalButtons.Add(Control.Jump, "Filter List");
-                otherPedsMenu.ButtonPressHandlers.Add(new Menu.ButtonPressHandler(Control.Jump, Menu.ControlPressCheckType.JUST_RELEASED, new Action<Menu, Control>(FilterMenu), true));
-
-                malePedsMenu.InstructionalButtons.Add(Control.Jump, "Filter List");
-                malePedsMenu.ButtonPressHandlers.Add(new Menu.ButtonPressHandler(Control.Jump, Menu.ControlPressCheckType.JUST_RELEASED, new Action<Menu, Control>(FilterMenu), true));
-
-                femalePedsMenu.InstructionalButtons.Add(Control.Jump, "Filter List");
-                femalePedsMenu.ButtonPressHandlers.Add(new Menu.ButtonPressHandler(Control.Jump, Menu.ControlPressCheckType.JUST_RELEASED, new Action<Menu, Control>(FilterMenu), true));
+                // Space, or X / Square on a controller, as before. The three menus share one key binding.
+                foreach (var pedsMenu in new[] { otherPedsMenu, malePedsMenu, femalePedsMenu })
+                {
+                    MenuKeys.Add(pedsMenu, "filterpeds", "Filter the ped list", "SPACE", "RLEFT_INDEX",
+                        MenuKeyPressType.JUST_RELEASED, FilterMenu, "Filter List", Control.Jump);
+                }
 
 
                 async void SpawnPed(Menu m, MenuItem item, int index)
