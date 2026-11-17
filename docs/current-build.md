@@ -8,17 +8,47 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 16, 2026 — double-tap vehicle locking ignores tackle input (client DLL) |
+| Latest change | November 17, 2026 — disable MenuAPI's legacy keyboard toggle when vMenu supplies its own binding (MenuAPI DLL) |
 | `build/vMenu/vMenuClient.net.dll` | `4fdd0413a9c59e9748246273f2b4a6adc338be1e8511601597faab214cd134f0` |
 | `build/vMenu/vMenuServer.net.dll` | `8827cd4c4bd6e7862322458a3ed07ccb86b2bad89f51c41ae8b25037c3bdca2f` (built from this source) |
+| `build/vMenu/MenuAPI.dll` | `6ac2d121fc226bbb1df8d46535484b71849b20db661d6758522ef79cca918a59` |
 
 Check a checkout with
-`sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll`.
+`sha256sum build/vMenu/vMenuClient.net.dll build/vMenu/vMenuServer.net.dll build/vMenu/MenuAPI.dll`.
 When the package changes, update this table, add a dated section below and tag
 the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — camera key opening vMenu (MenuAPI DLL)
+
+Players reported that `V` opened vMenu alongside `F1`. The saved vMenu
+binding on the affected client was `F1`. vMenu already sets MenuAPI's old
+keyboard control to `-1`, but MenuAPI 3.2.2 passed that value to the game
+when checking whether to open or close a menu. The patch skips those checks
+and skips disabling the input when the configured control is negative. The
+explicit vMenu binding and MenuAPI's controller handling remain available.
+
+Build from the [MenuAPI v3.2.2 tag](https://github.com/TomGrobbe/MenuAPI/tree/v3.2.2)
+at `8787b7916204e605ed0827da7a93c4462282fa09` with .NET SDK 9.0.321. Apply
+[the keyboard toggle patch](../tools/menuapi/disable-legacy-keyboard-toggle.patch)
+with `git apply` inside that checkout, then run
+`dotnet build MenuAPI/MenuAPI.csproj -c "Release FiveM" --nologo -p:IncludeSourceRevisionInInformationalVersion=false`.
+The output is `MenuAPI/bin/Release FiveM/net452/MenuAPI.dll`. The shipped
+build maps the checkout path to `/_/MenuAPI` with `-p:PathMap`.
+
+`tools/ilcompare` against an unpatched build with the same SDK shows only
+changes in `ProcessToggleMenuButton`'s state machine. Local checks exercised
+ignored negative controls, ordinary keyboard toggles and controller holds.
+The frame-cost, client-feature, vehicle-convenience and face-selection tests
+also passed. The in-game check is pending.
+
+Verify the installed `MenuAPI.dll` SHA-256 is
+`8851e2ad462e2a7b8149802fd4a56522067e3ac6b122fcac4641d61800f1a472`, then
+replace only `MenuAPI.dll` with the package copy and restart `vMenu`. In
+FiveM, verify `V` changes the camera with the menu closed, `F1` opens and
+closes vMenu, and the controller opens it with the configured shortcut.
 
 ## November 16, 2026 — double-tap vehicle locking ignores tackle input (client DLL)
 
