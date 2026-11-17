@@ -275,6 +275,11 @@
     white-space: nowrap;
   }
 
+  /* The coordinates (grid) and heading (flex) set display, which would beat the browser's [hidden]. */
+  #vmenu-hud [hidden] {
+    display: none !important;
+  }
+
   #vmenu-hud .red {
     color: rgb(224 50 50);
   }
@@ -436,7 +441,7 @@
           coords.replaceChildren(
             span("X", "red"), span(d.coords.x), span("Y", "red"), span(d.coords.y),
             span("Z", "red"), span(d.coords.z), span("Heading", "red"), span(d.coords.heading));
-          place(coords, undefined, undefined, d.coords.h);
+          place(coords, undefined, d.coords.top, d.coords.h);
         }
 
         const street = part("street"), zone = part("zone"), heading = part("heading");

@@ -856,6 +856,8 @@ namespace vMenuClient
             // The game drawing was not shown over the pause menu or a fade either.
             var visible = !IsPauseMenuActive() && IsScreenFadedIn() && !IsPlayerSwitchInProgress() && !IsHudHidden();
             var safeZone = GetSafeZoneSize();
+            // The game drawing was aligned to the top of the safe zone (SetScriptGfxAlign, 'T').
+            var top = (1f - safeZone) / 2f;
 
             object coords = null;
             if (coordsOn)
@@ -867,6 +869,7 @@ namespace vMenuClient
                     y = Math.Round(pos.Y, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
                     z = Math.Round(pos.Z, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
                     heading = Math.Round(GetEntityHeading(ped), 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    top,
                     h = GetTextScaleHeight(0.5f, 6),
                 };
             }
@@ -883,9 +886,9 @@ namespace vMenuClient
                     heading = headingDisplay,
                     x = 0.234f + safeZoneSizeX,
                     headingX = 0.208f + safeZoneSizeX,
-                    streetY = safeZone - GetTextScaleHeight(0.48f, 6) - GetTextScaleHeight(0.48f, 6),
-                    zoneY = safeZone - GetTextScaleHeight(0.45f, 6) - GetTextScaleHeight(0.95f, 6),
-                    headingY = safeZone - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6),
+                    streetY = top + safeZone - GetTextScaleHeight(0.48f, 6) - GetTextScaleHeight(0.48f, 6),
+                    zoneY = top + safeZone - GetTextScaleHeight(0.45f, 6) - GetTextScaleHeight(0.95f, 6),
+                    headingY = top + safeZone - GetTextScaleHeight(1.2f, 6) - GetTextScaleHeight(0.4f, 6),
                     streetH = GetTextScaleHeight(0.48f, 6),
                     zoneH = GetTextScaleHeight(0.45f, 6),
                     headingH = GetTextScaleHeight(1.2f, 6),
@@ -900,7 +903,7 @@ namespace vMenuClient
                 {
                     text = $"{day.Hours:00}:{day.Minutes:00}",
                     x = 0.208f + safeZoneSizeX,
-                    y = safeZone - GetTextScaleHeight(0.4f, 1),
+                    y = top + safeZone - GetTextScaleHeight(0.4f, 1),
                     h = GetTextScaleHeight(0.4f, 6),
                 };
             }
@@ -1024,7 +1027,13 @@ namespace vMenuClient
 
         private async Task MiscSettings()
         {
-            // Coordinates, location, time and speed are on the web page now (HudOverlayTick).
+            // Coordinates, location, time and speed are on the web page now (HudOverlayTick). With both
+            // speeds shown, MPH sits where the game's street name is, so that is hidden every frame, as before.
+            var bothSpeeds = MainMenu.MiscSettingsMenu.ShowSpeedoKmh && MainMenu.MiscSettingsMenu.ShowSpeedoMph;
+            if (bothSpeeds && IsPedInAnyVehicle(PlayerPedId(), false))
+            {
+                HideHudComponentThisFrame((int)HudComponent.StreetName);
+            }
 
             #region Misc Settings
             // Hide radar. Showing it again follows the pause menu preference, in RadarSettings.
@@ -1075,7 +1084,7 @@ namespace vMenuClient
             var misc = MainMenu.MiscSettingsMenu;
             var everyFrame = AnyMenuOpen
                 || misc.HideRadar || misc.LockCameraX || misc.LockCameraY
-                || expandedRadarProfile || vMenuOpenedBigmap;
+                || expandedRadarProfile || vMenuOpenedBigmap || bothSpeeds;
             if (!everyFrame)
             {
                 await Rest(IdleRestMs);
@@ -2661,6 +2670,8 @@ namespace vMenuClient
         private int lastPadPointPress;
         private int driftVehicle;
         private TickSleeper pointingSleeper;
+        // The pointing task can take a few frames to start after the key; the steering loop waits.
+        private int pointingWokenAt;
 
         // Keyboard key names for the controls vmenu_teleport_to_wp_keybind_key may hold.
         private static readonly Dictionary<int, string> TeleportKeyNames = new Dictionary<int, string>
@@ -2693,7 +2704,7 @@ namespace vMenuClient
             Command($"+vMenu:{id}:Snowball", () => { });
             Command($"-vMenu:{id}:Snowball", OnSnowballReleased);
             RegisterKeyMapping($"+vMenu:{id}:Snowball", "vMenu Pick Up Snowball", "keyboard", "G");
-            RegisterKeyMapping($"+vMenu:{id}:Snowball", "vMenu Pick Up Snowball (controller)", "PAD_ANALOGBUTTON", "LRIGHT_INDEX");
+            RegisterKeyMapping($"+vMenu:{id}:Snowball", "vMenu Pick Up Snowball (controller)", "PAD_ANALOGBUTTON", "LLEFT_INDEX");
 
             // Finger point toggle: B, or a double tap of the right stick. Misc Settings > Keybind
             // Settings > Finger Point Controls must be on.
@@ -2798,7 +2809,7 @@ namespace vMenuClient
             try
             {
                 var misc = MainMenu.MiscSettingsMenu;
-                if (misc == null || !misc.KbPointKeys || Game.PlayerPed.IsInVehicle())
+                if (misc == null || !misc.KbPointKeys || IsPauseMenuActive() || Game.PlayerPed.IsInVehicle())
                 {
                     return;
                 }
@@ -2836,6 +2847,7 @@ namespace vMenuClient
                 }
                 TaskMoveNetwork(Game.PlayerPed.Handle, "task_mp_pointing", 0.5f, false, "anim@mp_point", 24);
                 RemoveAnimDict("anim@mp_point");
+                pointingWokenAt = GetGameTimer();
                 pointingSleeper?.Wake();
             }
             catch (Exception e)
@@ -2853,7 +2865,11 @@ namespace vMenuClient
             var ped = PlayerPedId();
             if (!IsPedPointing(ped))
             {
-                pointingSleeper?.Sleep();
+                // Not pointing yet right after the key: give the task half a second to start.
+                if (GetGameTimer() - pointingWokenAt >= 500)
+                {
+                    pointingSleeper?.Sleep();
+                }
                 return;
             }
             if (IsPedInAnyVehicle(ped, false))
@@ -2872,8 +2888,9 @@ namespace vMenuClient
         private void OnMinimapReleased()
         {
             var misc = MainMenu.MiscSettingsMenu;
+            // Noclip uses Z to go down, and disables the game control vMenu used to read.
             if (misc == null || !misc.KbRadarKeys || expandedRadarProfile || MenuController.IsAnyMenuOpen() || IsPauseMenuActive()
-                || !Game.IsControlEnabled(0, Control.MultiplayerInfo))
+                || NoClip.IsNoclipActive() || !Game.IsControlEnabled(0, Control.MultiplayerInfo))
             {
                 return;
             }
@@ -2902,7 +2919,8 @@ namespace vMenuClient
                 return;
             }
             var misc = MainMenu.MiscSettingsMenu;
-            if (misc == null || !misc.KbDriftMode || !IsAllowed(Permission.MSDriftMode) || !Game.PlayerPed.IsInVehicle())
+            if (misc == null || !misc.KbDriftMode || !IsAllowed(Permission.MSDriftMode) || IsPauseMenuActive() || NoClip.IsNoclipActive()
+                || !Game.PlayerPed.IsInVehicle())
             {
                 return;
             }
@@ -2917,7 +2935,8 @@ namespace vMenuClient
         private void OnTeleportToWaypointKey()
         {
             var misc = MainMenu.MiscSettingsMenu;
-            if (misc == null || !misc.KbTpToWaypoint || !IsAllowed(Permission.MSTeleportToWp) || !Fading.IsFadedIn || IsPlayerSwitchInProgress())
+            if (misc == null || !misc.KbTpToWaypoint || !IsAllowed(Permission.MSTeleportToWp) || !Fading.IsFadedIn || IsPlayerSwitchInProgress()
+                || IsPauseMenuActive() || MenuController.IsAnyMenuOpen())
             {
                 return;
             }

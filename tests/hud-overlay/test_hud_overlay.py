@@ -33,8 +33,13 @@ def member(source, pattern):
 
 # --- source checks ---------------------------------------------------------------------------
 misc = member(fc, r'^        private async Task MiscSettings\(\).*?^        }$')
-for gone in ('DrawMiscSettingsText', 'ShowCoordinates', 'ShowLocation', 'DrawTimeOnScreen', 'ShowSpeedo'):
+for gone in ('DrawMiscSettingsText', 'ShowCoordinates', 'ShowLocation', 'DrawTimeOnScreen', 'DrawTextOnScreen'):
     assert gone not in misc, f'MiscSettings no longer draws or runs every frame for {gone}'
+# With both speeds shown, MPH sits where the game's street name is: hidden every frame, as before.
+assert re.search(r'var bothSpeeds = MainMenu\.MiscSettingsMenu\.ShowSpeedoKmh && MainMenu\.MiscSettingsMenu\.ShowSpeedoMph;\s*'
+                 r'if \(bothSpeeds && IsPedInAnyVehicle\(PlayerPedId\(\), false\)\)\s*\{\s*HideHudComponentThisFrame\(\(int\)HudComponent\.StreetName\);', misc)
+assert '|| bothSpeeds;' in misc, 'and MiscSettings runs every frame while both speeds are on'
+assert '#vmenu-hud [hidden] {' in page and 'display: none !important;' in page, 'the grid and flex parts still hide'
 for gone in ('private void DrawMiscSettingsText', 'private void ShowLocation()', 'private void ShowSpeedKmh', 'private void ShowSpeedMph'):
     assert gone not in fc, f'{gone} is gone'
 setup = member(fc, r'^        public void SetupTickFunctions\(\).*?^        }$')
@@ -64,7 +69,7 @@ namespace Hud
     {
         public static bool Coords, Location, Time, Kmh, Mph, Pause, InVehicle, MenuOpen;
         public static HashSet<Permission> Denied = new HashSet<Permission>();
-        public static float X = 1, Y = 2, Z = 3, Heading = 90, Speed = 10;
+        public static float X = 1, Y = 2, Z = 3, Heading = 90, Speed = 10, SafeZone = 1f;
         public static List<string> Sent = new List<string>();
         public static int Rests, Delays;
     }
@@ -84,7 +89,7 @@ namespace Hud
         public static bool IsScreenFadedIn() => true;
         public static bool IsPlayerSwitchInProgress() => false;
         public static bool IsHudHidden() => false;
-        public static float GetSafeZoneSize() => 1f;
+        public static float GetSafeZoneSize() => W.SafeZone;
         public static Vector3 GetEntityCoords(int e, bool alive) => new Vector3 { X = W.X, Y = W.Y, Z = W.Z };
         public static float GetEntityHeading(int e) => W.Heading;
         public static float GetTextScaleHeight(float scale, int font) => scale * 0.05f;
@@ -147,6 +152,11 @@ namespace Hud
 
             W.Kmh = false; W.Time = true; t.Run();
             Check(W.Sent[W.Sent.Count - 1].Contains("\"time\":{\"text\":\"14:05\""), "time: HH:MM");
+            W.SafeZone = 0.9f; W.Coords = true; t.Run();
+            var safe = W.Sent[W.Sent.Count - 1];
+            // Aligned to the top of the safe zone, as SetScriptGfxAlign 'T' did: 5% down at a 0.9 safe zone.
+            Check(safe.Contains("\"top\":0.05") && safe.Contains("\"y\":0.93"), "a smaller safe zone moves the text inside it (coordinates 0.05 from the top; time at 0.05 + 0.9 - 0.02)");
+            W.SafeZone = 1f; W.Coords = false;
 
             W.Time = false; var before = W.Sent.Count; t.Run(); t.Run();
             Check(W.Sent.Count == before + 1 && W.Sent[W.Sent.Count - 1] == "{\"action\":\"vmenuHud\",\"visible\":false}", "all off again: hidden once, then nothing");

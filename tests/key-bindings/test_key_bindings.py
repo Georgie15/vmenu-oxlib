@@ -33,7 +33,8 @@ def member(source, pattern):
 bindings = member(fc, r'^        private void RegisterKeyBindings\(\).*?^        }$')
 expected = [
     ('+vMenu:{id}:Visor', 'keyboard', 'F11'), ('+vMenu:{id}:Visor', 'PAD_ANALOGBUTTON', 'LRIGHT_INDEX'),
-    ('+vMenu:{id}:Snowball', 'keyboard', 'G'), ('+vMenu:{id}:Snowball', 'PAD_ANALOGBUTTON', 'LRIGHT_INDEX'),
+    # The game's detonate control (the old snowball key) is G / D-pad left.
+    ('+vMenu:{id}:Snowball', 'keyboard', 'G'), ('+vMenu:{id}:Snowball', 'PAD_ANALOGBUTTON', 'LLEFT_INDEX'),
     ('vMenu:{id}:Point', 'keyboard', 'B'), ('vMenu:{id}:PointPad', 'PAD_ANALOGBUTTON', 'R3_INDEX'),
     ('+vMenu:{id}:Minimap', 'keyboard', 'Z'), ('+vMenu:{id}:Minimap', 'PAD_ANALOGBUTTON', 'LDOWN_INDEX'),
     ('+vMenu:{id}:Drift', 'keyboard', 'LSHIFT'), ('+vMenu:{id}:Drift', 'PAD_ANALOGBUTTON', 'RLEFT_INDEX'),
@@ -73,14 +74,14 @@ namespace Keys
     public static class W
     {
         public static bool KbPointKeys, KbRadarKeys, KbDriftMode, KbTpToWaypoint, InVehicle, Pointing, Typing, MenuOpen, Pause, Bigmap,
-            Waypoint, FadedIn = true, VehicleExists = true, VehicleDead;
+            Waypoint, FadedIn = true, VehicleExists = true, VehicleDead, Noclip;
         public static HashSet<Control> Disabled = new HashSet<Control>();
         public static HashSet<Permission> Denied = new HashSet<Permission>();
         public static int Now, PointStarts, PointClears, Signals, GripOn, GripOff, Teleports, Wakes, Sleeps;
         public static List<string> Notes = new List<string>();
         public static void Reset()
         {
-            KbPointKeys = KbRadarKeys = KbDriftMode = KbTpToWaypoint = InVehicle = Pointing = Typing = MenuOpen = Pause = Bigmap = Waypoint = VehicleDead = false;
+            KbPointKeys = KbRadarKeys = KbDriftMode = KbTpToWaypoint = InVehicle = Pointing = Typing = MenuOpen = Pause = Bigmap = Waypoint = VehicleDead = Noclip = false;
             FadedIn = VehicleExists = true; Disabled.Clear(); Denied.Clear(); Notes.Clear();
             PointStarts = PointClears = Signals = GripOn = GripOff = Teleports = Wakes = Sleeps = 0;
         }
@@ -92,6 +93,7 @@ namespace Keys
     }
     public static class MainMenu { public static Misc MiscSettingsMenu = new Misc(); }
     public static class MenuController { public static bool IsAnyMenuOpen() => W.MenuOpen; }
+    public static class NoClip { public static bool IsNoclipActive() => W.Noclip; }
     public static class Fading { public static bool IsFadedIn => W.FadedIn; }
     public static class Debug { public static void WriteLine(string s) => throw new Exception(s); }
     public static class Notify { public static void Success(string s) => W.Notes.Add("ok:" + s); public static void Error(string s) => W.Notes.Add("err:" + s); }
@@ -135,6 +137,7 @@ namespace Keys
         private int lastPadPointPress;
         private int driftVehicle;
         private TickSleeper pointingSleeper = new TickSleeper();
+        private int pointingWokenAt;
         bool vMenuOpenedBigmap;
         int radarSwitchTimer;
         public bool expandedRadarProfile;
@@ -176,14 +179,21 @@ namespace Keys
             Check(W.PointStarts == 2, "point: a double tap within 300 ms toggles");
             W.Now = 2000; h.Point(true); W.Now = 2400; h.Point(true);
             Check(W.PointClears == 1, "point: taps 400 ms apart are not a double tap");
+            W.Pointing = false; W.Pause = true; var starts = W.PointStarts; h.Point(false); W.Pause = false;
+            Check(W.PointStarts == starts, "point: not over the pause menu");
 
-            // Steering loop
+            // Steering loop: right after the key the task may not have started yet.
+            W.Reset(); W.Now = 10000; W.KbPointKeys = true; h.Point(false); W.Pointing = false;
+            W.Now = 10016; h.Tick();
+            Check(W.Sleeps == 0, "steering: not asleep before the pointing task starts (first frames after the key)");
+            W.Now = 10600; h.Tick();
+            Check(W.Sleeps == 1, "steering: asleep once nothing is pointing half a second after the key");
             W.Reset(); W.Pointing = true; h.Tick();
             Check(W.Signals == 5 && W.Sleeps == 0, "steering: all five signals every frame while pointing");
             W.InVehicle = true; h.Tick();
             Check(W.PointClears == 1, "steering: getting in a vehicle stops pointing");
             W.InVehicle = false; W.Pointing = false; h.Tick();
-            Check(W.Sleeps == 1, "steering: off the tick list once not pointing");
+            Check(W.Sleeps == 1, "steering: off the tick list once not pointing (long after the key)");
 
             // Minimap
             W.Reset(); h.Minimap();
@@ -196,7 +206,8 @@ namespace Keys
             W.Pause = true; h.Minimap(); W.Pause = false;
             W.Disabled.Add(Control.MultiplayerInfo); h.Minimap(); W.Disabled.Clear();
             h.expandedRadarProfile = true; h.Minimap(); h.expandedRadarProfile = false;
-            Check(!W.Bigmap, "minimap: not with a menu open, the pause menu open, the control disabled or the pause menu's expanded radar on");
+            W.Noclip = true; h.Minimap(); W.Noclip = false;
+            Check(!W.Bigmap, "minimap: not with a menu open, the pause menu open, the control disabled, the pause menu's expanded radar on, or in noclip (Z goes down)");
 
             // Drift
             W.Reset(); W.InVehicle = true; h.Drift(true); h.Drift(false);
@@ -210,7 +221,9 @@ namespace Keys
             W.Denied.Add(Permission.MSDriftMode); h.Drift(true); W.Denied.Clear();
             W.InVehicle = false; h.Drift(true); W.InVehicle = true;
             W.VehicleDead = true; h.Drift(true); W.VehicleDead = false;
-            Check(W.GripOn == 1, "drift: not without permission, on foot or in a wrecked vehicle");
+            W.Noclip = true; h.Drift(true); W.Noclip = false;
+            W.Pause = true; h.Drift(true); W.Pause = false;
+            Check(W.GripOn == 1, "drift: not without permission, on foot, in a wrecked vehicle, in noclip (Shift is its speed key) or paused");
             h.Drift(true); W.VehicleExists = false; h.Drift(false);
             Check(W.GripOff == 1, "drift: a deleted vehicle is not touched on release");
 
@@ -222,8 +235,10 @@ namespace Keys
             W.Waypoint = false; h.Teleport();
             Check(W.Teleports == 1 && W.Notes.Contains("err:You need to set a waypoint first."), "teleport: no waypoint, an error");
             W.Waypoint = true; W.FadedIn = false; h.Teleport(); W.FadedIn = true;
+            W.Pause = true; h.Teleport(); W.Pause = false;
+            W.MenuOpen = true; h.Teleport(); W.MenuOpen = false;
             W.Denied.Add(Permission.MSTeleportToWp); h.Teleport();
-            Check(W.Teleports == 1, "teleport: not while faded out or without permission");
+            Check(W.Teleports == 1, "teleport: not while faded out, over the pause menu, with a menu open or without permission");
 
             Console.WriteLine(failures == 0 ? "PASS: key binding handlers keep the old conditions" : $"{failures} check(s) failed");
             return failures == 0 ? 0 : 1;
