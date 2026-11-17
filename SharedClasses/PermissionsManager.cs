@@ -378,6 +378,13 @@ namespace vMenuShared
             VCShowSpeaker,
             VCStaffChannel,
             #endregion
+
+            // Vehicle Options, added later. At the end so no other permission's number changes.
+            #region vehicle options (later)
+            VORoofLivery,
+            VOHexColors,
+            VORadio,
+            #endregion
         };
 
         public static Dictionary<Permission, bool> Permissions { get; private set; } = new Dictionary<Permission, bool>();
@@ -410,6 +417,14 @@ namespace vMenuShared
         /// <param name="checkAnyway">if true, then the permissions will be checked even if they aren't setup yet.</param>
         /// <returns></returns>
         public static bool IsAllowed(Permission permission, bool checkAnyway = false) => IsAllowedClient(permission, checkAnyway);
+
+        /// <summary>
+        /// For a permission newer than the server's vMenu build. The server sends the permissions it
+        /// knows, so one built before <paramref name="permission"/> never sends it: until the server is
+        /// updated, <paramref name="serverFallback"/> answers instead.
+        /// </summary>
+        public static bool IsAllowedWithFallback(Permission permission, Permission serverFallback)
+            => IsAllowed(Permissions != null && Permissions.ContainsKey(permission) ? permission : serverFallback);
 
         // The answer for every permission, built once in SetPermissions. IsAllowed runs dozens of
         // times per frame; it used to read the staff-only convar and re-check the parent

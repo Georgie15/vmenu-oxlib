@@ -246,6 +246,8 @@ namespace vMenuClient
                     // Set the last vehicle to the new vehicle entity.
                     LastVehicle = tmpVehicle.Handle;
                     SwitchedVehicle = true;
+                    // The player's radio choices (Vehicle Options), once per vehicle they get into.
+                    VehicleRadio.ApplyTo(tmpVehicle.Handle);
 
                     if (IsAllowed(Permission.PVMenu) && MainMenu.PermissionsSetupComplete && MainMenu.PersonalVehicleMenu != null && Game.PlayerPed == tmpVehicle.Driver)
                     {
