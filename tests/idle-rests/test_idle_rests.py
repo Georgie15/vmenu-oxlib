@@ -88,6 +88,7 @@ namespace Rests
     public enum Setting { vmenu_handle_invisibility }
     public enum InputMode { MouseAndKeyboard, GamePad }
     public enum Alignment { Left, Center, Right }
+    public enum HudComponent { StreetName = 9 }
     public enum WeaponHash : uint { Unarmed = 0xA2719263, Minigun = 0x42BF8A85, Parachute = 0xFBAB5776, Pistol = 0x1B06D571 }
 
     // FiveM's C# runtime, as in tests/frame-costs: each frame, Delays that are due resume, then
@@ -269,6 +270,8 @@ namespace Rests
         public static void SetGameplayCamRelativePitch(float p, float s) => Fx("SetGameplayCamRelativePitch", p, s);
         public static void SetGameplayCamRelativeHeading(float h) => Fx("SetGameplayCamRelativeHeading", h);
         public static void SetVehicleReduceGrip(int veh, bool on) => Fx("SetVehicleReduceGrip", veh, on);
+        public static bool IsPedInAnyVehicle(int ped, bool atGetIn) => W.InVehicle;
+        public static void HideHudComponentThisFrame(int component) => Fx("HideHudComponentThisFrame", component);
         public static void ClearPedSecondaryTask(int ped) { Fx("ClearPedSecondaryTask", ped); W.Pointing = false; }
         public static void TaskMoveNetwork(int ped, string task, float m, bool b, string dict, int flags) { Fx("TaskMoveNetwork", ped, task); W.Pointing = true; }
         public static void RemoveAnimDict(string dict) => Fx("RemoveAnimDict", dict);
