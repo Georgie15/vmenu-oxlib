@@ -1,9 +1,18 @@
 ﻿/*
     Data generated using a custom made by Tom Grobbe.
     Data source: GTA V <update>_overlays.xml files.
+    overlays.json is classic vMenu legacy v3.9.2's list (TomGrobbe/vMenu, branch legacy).
+    TattooCatalog checks it against the running game and adds newer shop tattoos.
 */
 
+using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+using CitizenFX.Core.Native;
+
+using static CitizenFX.Core.Native.API;
+using static vMenuClient.CommonFunctions;
 
 namespace vMenuClient.data
 {
@@ -69,6 +78,21 @@ namespace vMenuClient.data
 
     internal static class TattoosData
     {
+        // GET_TATTOO_SHOP_DLC_ITEM_DATA fills a script struct of 8-byte fields: the collection hash
+        // is at 0x10 and the tattoo (preset) hash at 0x18. The buffer is far bigger than the struct,
+        // so a longer struct in a later game build can't write past it.
+        private const ulong GetTattooShopDlcItemDataNative = 0xFF56381874F82086;
+        private const int ShopItemBufferSize = 0x200;
+        private const int ShopItemCollectionOffset = 0x10;
+        private const int ShopItemNameOffset = 0x18;
+        private const int MaxShopItems = 20000;
+
+        /// <summary>
+        /// The hash SetPedDecoration needs for a saved collection or tattoo name. Tattoos known only
+        /// from the game's shops are saved by hash (<see cref="TattooCatalog.HashName"/>).
+        /// </summary>
+        internal static uint HashOf(string name) => TattooCatalog.TryParseHashName(name, out var hash) ? hash : (uint)GetHashKey(name);
+
         private static bool isDataSetup = false;
         internal static void GenerateTattoosData()
         {
@@ -79,7 +103,21 @@ namespace vMenuClient.data
 
             isDataSetup = true;
 
-            foreach (var tattoo in Newtonsoft.Json.JsonConvert.DeserializeObject<List<Tattoo>>(Properties.Resources.overlays))
+            var listed = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Tattoo>>(Properties.Resources.overlays);
+            TattooCatalog.Result catalog;
+            try
+            {
+                catalog = TattooCatalog.Build(listed, (collection, name) => GetPedDecorationZoneFromHashes(collection, name), ReadShopTattoos());
+            }
+            catch (Exception e)
+            {
+                Log($"[vMenu] [Tattoos] Could not read the game's tattoo data, using vMenu's list as is: {e.Message}");
+                catalog = TattooCatalog.Build(listed, null, null);
+            }
+            Log($"[vMenu] [Tattoos] {catalog.FromList} from vMenu's list, {catalog.NotInGame} left out (not in this game build), " +
+                $"{catalog.FromShops} more from the game's shops. Game checked: {catalog.GameChecked}, shops used: {catalog.ShopsUsed}.");
+
+            foreach (var tattoo in catalog.Tattoos)
             {
                 if (!string.IsNullOrEmpty(tattoo.name))
                 {
@@ -176,6 +214,41 @@ namespace vMenuClient.data
                 }
             }
 
+        }
+
+        /// <summary>
+        /// Every tattoo the game's shops sell to MP male (shop character type 3) and MP female (4)
+        /// characters, as hashes. TattooCatalog decides whether the result can be trusted.
+        /// </summary>
+        private static List<ShopTattoo> ReadShopTattoos()
+        {
+            var items = new List<ShopTattoo>();
+            var zeros = new byte[ShopItemBufferSize];
+            var buffer = Marshal.AllocHGlobal(ShopItemBufferSize);
+            try
+            {
+                for (var gender = 0; gender <= 1; gender++)
+                {
+                    var characterType = 3 + gender;
+                    var count = Math.Min(GetNumTattooShopDlcItems(characterType), MaxShopItems);
+                    for (var index = 0; index < count; index++)
+                    {
+                        Marshal.Copy(zeros, 0, buffer, ShopItemBufferSize);
+                        if (!Function.Call<bool>((Hash)GetTattooShopDlcItemDataNative, characterType, index, buffer))
+                        {
+                            continue;
+                        }
+                        items.Add(new ShopTattoo(gender,
+                            unchecked((uint)Marshal.ReadInt32(buffer, ShopItemCollectionOffset)),
+                            unchecked((uint)Marshal.ReadInt32(buffer, ShopItemNameOffset))));
+                    }
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+            return items;
         }
 
         /*
