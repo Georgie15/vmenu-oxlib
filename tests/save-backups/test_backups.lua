@@ -147,6 +147,8 @@ local SAVES = {
     vmenu_outfit_Work = '{"model":1885233650,"clothes":{"11":[5,0]},"props":{}}',
     vmenu_ped_favourites = '[3459037009]',
     vmenu_ped_recent = '[3459037009]',
+    ['vmenu_character_outfit_Main|Patrol'] = '{"model":1885233650,"clothes":{"11":[5,0]},"props":{}}',
+    ['vmenu_character_style_Main|Bun'] = '{"v":1,"model":1885233650,"hair":12,"overlays":{}}',
 }
 local NOT_SAVES = {
     settings_noclip_speed = '3',
@@ -175,7 +177,7 @@ check(#c.latent == 1 and c.latent[1].name == 'vMenu:backups:upload' and c.latent
 local sent = json.decode(c.latent[1].args[1])
 check(count(sent) == count(SAVES), 'only saves are backed up (got ' .. count(sent) .. ')')
 for k, v in pairs(SAVES) do check(sent[k] == v, 'backed up unchanged: ' .. k) end
-check(c.dialogs[1].content:find('16 saves', 1, true), 'the confirmation says how many saves')
+check(c.dialogs[1].content:find('18 saves', 1, true), 'the confirmation says how many saves')
 
 c.fire('vMenu:backups:backup')
 check(#c.latent == 1 and c.lastNote().msg:find('in progress', 1, true), 'one transfer at a time')
@@ -185,7 +187,7 @@ check(#c.latent == 2, 'the server reply ends the transfer')
 c.now = c.now + 61000
 c.fire('vMenu:backups:backup')
 check(#c.latent == 3, 'no reply within a minute also ends it')
-print('PASS: backups hold saves, categories, loadouts, presets, outfits, favourites, recents and defaults, not settings or temporary keys')
+print('PASS: backups hold saves, categories, loadouts, presets, outfits, characters\' own outfits and styles, favourites, recents and defaults, not settings or temporary keys')
 
 c = newClient(copy(SAVES))
 c.answer = 'cancel'
@@ -209,7 +211,7 @@ local payload = c.latent[1].args[1]
 check(s.info(1) == false, 'no backup yet')
 s.send(1, 'vMenu:backups:upload', payload)
 check(s.lastReply().name == 'vMenu:backups:uploadResult' and s.lastReply().target == 1 and s.lastReply().args[1] == true, 'a valid backup is stored')
-check(s.rows['license:aaa'].entries == 16 and count(json.decode(s.rows['license:aaa'].data)) == 16, 'stored per license with its count')
+check(s.rows['license:aaa'].entries == 18 and count(json.decode(s.rows['license:aaa'].data)) == 18, 'stored per license with its count')
 s.send(1, 'vMenu:backups:upload', payload)
 check(s.lastReply().args[1] == false and s.lastReply().args[2]:find('once a minute', 1, true), 'backups are limited to one a minute')
 s.now = s.now + 60000
@@ -259,7 +261,7 @@ print('PASS: server validation, rate limit, license, convar and database errors'
 -- Info and download.
 s.now = s.now + 3000
 local info = s.info(1)
-check(type(info) == 'table' and info.entries == 16 and info.updated == '2026-10-21 12:00', 'info returns the count and date')
+check(type(info) == 'table' and info.entries == 18 and info.updated == '2026-10-21 12:00', 'info returns the count and date')
 local ok, reason = s.info(1)
 check(ok == false and reason:find('wait', 1, true), 'info is rate limited')
 s.send(1, 'vMenu:backups:download')
@@ -281,7 +283,7 @@ c = newClient({ veh_Cruiser = '{"model":1,"mine":"newer"}', settings_noclip_spee
 c.info = function() return backupInfo end
 c.fire('vMenu:backups:restore')
 check(#c.server == 1 and c.server[1].name == 'vMenu:backups:download', 'confirming asks the server for the backup')
-check(c.dialogs[1].content:find('2026-10-21 12:00 (16 saves)', 1, true), 'the confirmation names the backup')
+check(c.dialogs[1].content:find('2026-10-21 12:00 (18 saves)', 1, true), 'the confirmation names the backup')
 local restored = json.decode(s.latent[1].args[1])
 restored.settings_injected = 'x'
 c.fire('vMenu:backups:restoreData', json.encode(restored))
@@ -290,7 +292,7 @@ check(c.kvps.settings_injected == nil and c.kvps.settings_noclip_speed == '1', '
 for k, v in pairs(SAVES) do
     if k ~= 'veh_Cruiser' then check(c.kvps[k] == v, 'restored: ' .. k) end
 end
-check(c.lastNote().msg == 'Restored 15 saves. 1 you already had were kept as they are. Reopen the menu to see them.', 'reports what was added and kept: ' .. c.lastNote().msg)
+check(c.lastNote().msg == 'Restored 17 saves. 1 you already had were kept as they are. Reopen the menu to see them.', 'reports what was added and kept: ' .. c.lastNote().msg)
 c.fire('vMenu:backups:restoreData', json.encode(restored))
 check(c.lastNote().msg:find('Nothing to restore', 1, true), 'restoring twice adds nothing')
 c.fire('vMenu:backups:restoreData', 'garbage')

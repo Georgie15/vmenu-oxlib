@@ -14,6 +14,8 @@ local BACKUP_PREFIXES = {
     'vmenu_string_saved_weapon_loadout_', 'vmenu_vehicle_preset_', 'vmenu_outfit_',
     -- Originals of saves upgraded to collection references (docs/clothing-refs.md).
     'vmenu_clothing_backup_',
+    -- A saved character's own outfits and hair & makeup styles (vMenu/CharacterWardrobe.cs).
+    'vmenu_character_outfit_', 'vmenu_character_style_',
 }
 local BACKUP_KEYS = {
     'vmenu_default_character', 'vmenu_last_character', 'vmenu_string_default_loadout',
