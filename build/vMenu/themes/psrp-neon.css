@@ -1,31 +1,81 @@
 /*
-  PSRP Neon: the vMenu skin. Purple-to-blue highlight on dark violet glass, to match the PSRP
-  banner. PSRP purple and blue are the same colours as the ped pack prompt in storage.html.
+  PSRP Neon: the vMenu skin. Dark glass with one accent, PSRP purple, kept for what is active:
+  the selected row, the subtitle, the description rule and the filled part of sliders and
+  stats. Everything else is the same dark glass with a faint edge, so the banner stays the
+  loudest thing on screen.
 
   MenuAPI 4 reads these tokens; anything not set keeps MenuAPI's default (the GTA look).
   Token reference: MenuAPI 4.1.3 docs, "Theming and banners". storage.html links this file
   after MenuAPI's own stylesheets.
 */
 #menuapi {
-  --menuapi-radius: 10px;
-  --menuapi-shadow: 0 0 0 1px rgb(138 43 226 / 55%), 0 10px 30px rgb(40 0 80 / 45%);
-  --menuapi-subtitle-bg: linear-gradient(90deg, rgb(34 12 64 / 97%), rgb(14 10 34 / 97%));
-  --menuapi-freemode: rgb(214 160 255);
-  --menuapi-rows-bg: rgb(18 10 34 / 84%);
-  --menuapi-row-text: rgb(236 230 250);
-  --menuapi-row-selected-bg: linear-gradient(90deg, rgb(138 43 226), rgb(74 92 255));
+  /* The palette. Everything below uses these. */
+  --psrp-glass: rgb(17 14 26 / 86%);
+  --psrp-glass-strong: rgb(24 19 37 / 94%);
+  --psrp-edge: rgb(255 255 255 / 7%);
+  --psrp-text: rgb(236 233 245);
+  --psrp-text-muted: rgb(132 126 152);
+  --psrp-accent: rgb(128 64 230);
+  --psrp-accent-soft: rgb(178 150 255);
+
+  --menuapi-radius: 8px;
+  --menuapi-shadow: 0 0 0 1px var(--psrp-edge), 0 8px 24px rgb(0 0 0 / 35%);
+
+  --menuapi-subtitle-bg: var(--psrp-glass-strong);
+  --menuapi-freemode: var(--psrp-accent-soft);
+
+  --menuapi-rows-bg: var(--psrp-glass);
+  --menuapi-row-text: var(--psrp-text);
+  --menuapi-row-disabled-text: var(--psrp-text-muted);
+  --menuapi-row-selected-bg: var(--psrp-accent);
   --menuapi-row-selected-text: rgb(255 255 255);
-  --menuapi-row-selected-disabled-text: rgb(215 195 245);
-  --menuapi-desc-bg: rgb(18 10 34 / 84%);
-  --menuapi-desc-rule: rgb(138 43 226 / 85%);
-  --menuapi-stat-upgrade: rgb(150 110 255);
+  --menuapi-row-selected-disabled-text: rgb(212 196 248);
+
+  --menuapi-overflow-bg: var(--psrp-glass);
+  --menuapi-desc-bg: var(--psrp-glass);
+  --menuapi-desc-rule: linear-gradient(90deg, var(--psrp-accent), rgb(128 64 230 / 0%));
+  --menuapi-slider-divider: rgb(255 255 255 / 60%);
+
+  --menuapi-stats-bg: var(--psrp-glass);
+  --menuapi-stat-track: rgb(255 255 255 / 12%);
+  --menuapi-stat-value: var(--psrp-text);
+  --menuapi-stat-upgrade: var(--psrp-accent-soft);
+  --menuapi-stat-upgrade-reduced: rgb(226 96 96);
+
+  --menuapi-panel-bg: var(--psrp-glass);
+  --menuapi-panel-accent: 178, 150, 255;
+  --menuapi-panel-text: var(--psrp-text);
+  --menuapi-panel-swatch-selected: rgb(255 255 255);
+  --menuapi-panel-opacity-bar: rgb(255 255 255 / 30%);
 }
 
-/* The key hints in the bottom right. */
+/* vMenu's sliders keep MenuAPI's blue (set on each slider, not by a token), so they are recoloured
+   here: a soft track with the accent, and white on the selected row. */
+#menuapi .menuapi-slider { background-color: rgb(255 255 255 / 14%) !important; }
+#menuapi .menuapi-slider__bar { background-color: var(--psrp-accent-soft) !important; }
+#menuapi .menuapi-row--selected .menuapi-slider { background-color: rgb(255 255 255 / 28%) !important; }
+#menuapi .menuapi-row--selected .menuapi-slider__bar { background-color: rgb(255 255 255) !important; }
+
+/* The colour and opacity panels: the same rounded glass as the rest. */
+#menuapi .menuapi-panel {
+  border-radius: var(--menuapi-radius);
+  overflow: hidden;
+  box-shadow: var(--menuapi-shadow);
+}
+
+/* MenuAPI draws icons and checkboxes black on the selected row, for GTA's white highlight. On
+   purple they are white, like the text. (vMenu's icons are all plain white sprites.) */
+#menuapi .menuapi-row--selected .menuapi-icon { --tint: rgb(255 255 255) !important; }
+#menuapi .menuapi-row--selected .menuapi-icon--checkbox { filter: invert(1); }
+#menuapi .menuapi-row--selected.menuapi-row--disabled .menuapi-icon { opacity: 0.6; }
+
+/* The key hints in the bottom right: the same glass, light keys. */
 #menuapi-buttons {
-  --menuapi-buttons-bg: rgb(18 10 34 / 90%);
-  --menuapi-buttons-radius: 10px;
-  --menuapi-buttons-border: 1px solid rgb(138 43 226 / 55%);
-  --menuapi-buttons-key-bg: rgb(138 43 226);
-  --menuapi-buttons-key-text: rgb(255 255 255);
+  --menuapi-buttons-bg: rgb(17 14 26 / 88%);
+  --menuapi-buttons-radius: 8px;
+  --menuapi-buttons-border: 1px solid rgb(255 255 255 / 7%);
+  --menuapi-buttons-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  --menuapi-buttons-key-bg: rgb(226 222 238);
+  --menuapi-buttons-key-text: rgb(24 19 37);
+  --menuapi-buttons-key-radius: 4px;
 }

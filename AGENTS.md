@@ -96,6 +96,7 @@ dotnet run --project tests/request-guard
 lua tests/request-guard/test_request_guard.lua
 python tests/sleeping-loops/test_sleeping_loops.py
 python tests/upstream-bug-fixes/test_upstream_bug_fixes.py
+python tests/psrp-skin/test_psrp_skin.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

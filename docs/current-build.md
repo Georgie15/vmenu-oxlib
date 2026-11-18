@@ -8,7 +8,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release L: upstream bug fixes (plates, eyebrows, arrows, doors, loadouts), a Kick Passengers range, and loops that sleep while idle (client DLL, server DLL), on top of releases K, J, I and H. **Testing on branch `perf/release-l`; `main` keeps `build-2026-11-17-3`** |
+| Latest change | November 17, 2026 — release L: upstream bug fixes (plates, eyebrows, arrows, doors, loadouts), a Kick Passengers range, loops that sleep while idle, and a calmer PSRP Neon skin (client DLL, server DLL, `themes/psrp-neon.css`), on top of releases K, J, I and H. **Testing on branch `perf/release-l`; `main` keeps `build-2026-11-17-3`** |
 | `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
@@ -21,7 +21,7 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
-## November 17, 2026 — release L: upstream bug fixes and sleeping loops (client DLL, server DLL) — TESTING, branch `perf/release-l`
+## November 17, 2026 — release L: upstream bug fixes, sleeping loops, refined skin (client DLL, server DLL, `themes/psrp-neon.css`) — TESTING, branch `perf/release-l`
 
 **Status: test build, not verified in game, not on `main`.** It is built on
 release K (`perf/release-k`). Until it passes an in-game check, `main` and
@@ -112,6 +112,38 @@ limit this; it was this repo's own audit finding.
   voice chat, player blips, clothing glow, the vehicle loops and the time and
   weather sync.
 
+**PSRP Neon skin, refined** (`themes/psrp-neon.css`). The owner asked for a skin
+that looks good without being messy with colours. It was busy because:
+- each block (subtitle, scroll bar, description, stats) had its own purple ring
+  and glow, under the banner's own purple frame;
+- the stats, scroll bar and colour panel were MenuAPI's black, and the sliders
+  GTA blue;
+- the selected row and subtitle had gradients, and the key hints had purple
+  keys and a purple border.
+
+Now:
+- **One dark glass for every block**, with a faint neutral edge: rows,
+  subtitle, description, scroll bar, stats, the colour and opacity panels (now
+  rounded too), and the key hints.
+- **Purple only for what is active:**
+  - the selected row, solid instead of a purple-to-blue gradient;
+  - the subtitle text;
+  - the description rule, which fades out;
+  - the filled part of sliders and stats.
+- **vMenu's 17 sliders** (Paint Fade, the face shape sliders and others) use
+  the skin's colours instead of GTA blue. They keep MenuAPI's default colours on
+  each slider, which no token reaches, so the skin overrides them.
+- **Selected-row icons:** the icons and checkboxes on the selected row are white,
+  like its text. MenuAPI drew them black, for GTA's white highlight.
+- **Key hints:** light keys on the dark glass.
+- **New test** `tests/psrp-skin`. Every MenuAPI setting the skin sets (31, up
+  from 19) and every part of the menu it styles must be a real one, so a typo
+  can't silently fall back to the GTA look. It checks that every rule stays
+  inside the menu and its key hints, and that every colour it uses is defined.
+  Each kind of mistake, made on purpose, fails it.
+- **Preview:** the skin was compared before and after in a browser, on
+  MenuAPI's own page, with the PSRP banner. It hasn't been seen in game yet.
+
 **Expected effect.** Not measured. With every menu closed, on foot, and every
 option off:
 - vMenu's own every-frame loops go from 2 to none. MenuAPI's toggle tick
@@ -152,7 +184,7 @@ option off:
 - **`tools/ilcompare` against release K:** the server changes only in
   `GetOutOfCar` and its new range constant. The client changes are the
   methods above, plus local functions the compiler renumbered.
-- **All 44 tests in AGENTS.md pass.**
+- **All 45 tests in AGENTS.md pass.**
 
 | File | SHA-256 |
 | --- | --- |
@@ -160,11 +192,11 @@ option off:
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` |
 | `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
 
-**Deploy (test):** on top of release K. Only the two DLLs change. They are in
-`deploy/release-l-test-build/`.
+**Deploy (test):** on top of release K. The two DLLs and `themes/psrp-neon.css`
+change. They are in `deploy/release-l-test-build/`.
 1. Check that the installed DLLs are release K's (`4d002d53…` and `03147fa7…`).
-2. Copy both DLLs, then run `restart vMenu` (or restart the server) and have
-   players reconnect.
+2. Copy both DLLs and `themes/psrp-neon.css`, then run `restart vMenu` (or
+   restart the server) and have players reconnect.
 
 **In-game checks:**
 - **Plates:** each License Plate Type name matches the plate.
@@ -186,10 +218,17 @@ option off:
   `/refreshperms`, PSRP_Clockin's blips and names, the minimap key. Each takes
   effect at once.
 - **Kick Passengers** works on a personal vehicle nearby.
+- **Skin:**
+  - The menu is dark glass with purple only on the selected row, the subtitle,
+    the description's top edge, and slider and stat fills.
+  - Sliders (Paint Fade, the face shape sliders) are purple, not blue.
+  - On the selected row, checkboxes and lock icons are white. This check
+    matters: the preview used stand-in checkbox images, not the game's.
+  - The paint colour panel and the key hints match.
 - **F8:** no new errors.
 
-**Roll back to release K:** copy back release K's two DLLs from
-`deploy/rollback-to-release-k/`.
+**Roll back to release K:** copy back release K's two DLLs and
+`themes/psrp-neon.css` from `deploy/rollback-to-release-k/`.
 
 ## November 17, 2026 — release K: department outfits, character wardrobe, data refresh, vehicle options, request guard (client DLL, server DLL, Lua, config, SQL) — TESTING, branch `perf/release-k`
 
