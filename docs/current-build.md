@@ -9,7 +9,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 | | |
 | --- | --- |
 | Latest change | November 18, 2026 — release N: the Player Guide, a first-time walkthrough of the menu (client DLL, page, guide text), on top of releases M, L, K, J, I and H. **Testing on branch `feature/release-n-player-guide`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `5a66bf81068c4f6fded77957a1e10f5cad1ca57728294a6130632929eb8846a1` |
+| `build/vMenu/vMenuClient.net.dll` | `d34b825ebdcdc5755edc8fa0b52b6fb1af778525c3d6ed18872ec4e821c4fc4d` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -26,6 +26,36 @@ installed on a server; hash the installed files before deploying.
 **Status: test build, not verified in game, not on `main`.** It is built on
 release M (`perf/release-m`). Only the client DLL and client-side files change;
 the server DLL and MenuAPI are release M's.
+
+**Fixed after the first in-game try (November 18).** The owner's first test
+froze the menu: F1 opened and closed it, but no other key did anything, and the
+welcome card never showed.
+- **The cause:** FiveM's client log showed `System.MethodAccessException: Error
+  verifying ... Regex:ValidateMatchTimeout is not accessible`. FiveM's Mono
+  refuses .NET's `Regex`, which the guide used to strip `~colour~` codes from row
+  names. The .NET 9 tests can't see that.
+  - The guide had already switched the menu's buttons off. The error stopped it
+    before it showed the card or woke its key loop, so nothing turned them back on.
+  - The error also escaped into the menu watcher, so that open was never
+    announced to the rest of vMenu.
+- **The fix:**
+  - The codes are stripped by hand.
+  - The card's message is built with Newtonsoft's `JObject`, which the guide's
+    file reader proves works in game, rather than serialising an anonymous type.
+- **Fail safe from now on:**
+  - The key loop is woken before a card is shown.
+  - Showing a card, offering the welcome and every frame of the key loop are
+    each guarded. Any error stops the guide for the session, hides the card,
+    gives the menu its buttons back, and writes `[vMenu] [Player Guide] stopped
+    for this session after an error: …` to F8.
+  - The menu watcher can no longer be broken by the guide.
+- **New guards:**
+  - `tests/client-guards` fails if anything compiled into the client uses
+    `Regex`.
+  - `tests/player-guide` checks the fail-safe wiring, and the stripping by hand
+    with codes anywhere, stray tildes and unclosed codes.
+  - 7 more deliberate breakages each fail a test, 28 in all.
+- **First build's client DLL:** `5a66bf81…`. Don't deploy it.
 
 **Why.** The owner asked for a guide new players can go through on their first
 F1, like the ones in PSRP_CAD and EasyAdmin, because players keep asking staff
@@ -93,7 +123,7 @@ how to get an outfit or a car. A clickable mockup was approved first.
 
 **Validation:**
 - **New tests:**
-  - `dotnet run --project tests/player-guide` (419 checks):
+  - `dotnet run --project tests/player-guide` (425 checks):
     - the packaged file reads, and broken copies are refused with a reason
       (misspelt setting, unknown menu, missing title or body, duplicate ids, a
       question on a missing step, version 0 or in quotes);
@@ -117,7 +147,7 @@ how to get an outfit or a car. A clickable mockup was approved first.
 - **Updated tests:**
   - `tests/whats-new`: the note waits while the card is up.
   - `tests/sleeping-loops`: the watcher offers the guide once per open.
-- **Each behaviour, broken on purpose, fails a test (21 cases):**
+- **Each behaviour, broken on purpose, fails a test (28 cases):**
   - the button hold, the keyboard wait and the key order;
   - Esc, jump and the hidden-menu guard;
   - seen only on finish or skip;
@@ -151,7 +181,7 @@ how to get an outfit or a car. A clickable mockup was approved first.
 
 | File | SHA-256 |
 | --- | --- |
-| `build/vMenu/vMenuClient.net.dll` | `5a66bf81068c4f6fded77957a1e10f5cad1ca57728294a6130632929eb8846a1` |
+| `build/vMenu/vMenuClient.net.dll` | `d34b825ebdcdc5755edc8fa0b52b6fb1af778525c3d6ed18872ec4e821c4fc4d` |
 | `build/vMenu/vMenuServer.net.dll` | `fd943356…` (unchanged from release L) |
 | `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
 

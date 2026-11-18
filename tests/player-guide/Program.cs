@@ -181,7 +181,12 @@ static class Program
 
         // ---- Rows ----
         Check(GuideInput.PlainText("~r~Delete Vehicle") == "Delete Vehicle", "colour codes are dropped");
-        Check(GuideInput.PlainText("~h~  Player Guide ") == "Player Guide", "padding is dropped");
+        Check(GuideInput.PlainText("~h~\u00A0\u00A0Player Guide\u00A0") == "Player Guide", "padding is dropped");
+        Check(GuideInput.PlainText("~r~Delete~s~ ~b~Vehicle~s~") == "Delete Vehicle", "codes anywhere in the text");
+        Check(GuideInput.PlainText("a ~ b ~ c") == "a ~ b ~ c", "a tilde that isn't a code stays");
+        Check(GuideInput.PlainText("~~x") == "~~x" && GuideInput.PlainText("50~") == "50~", "empty or unclosed codes stay");
+        Check(GuideInput.PlainText("~INPUT_FRONTEND_ACCEPT~ Next") == "Next", "upper case, digits and underscores in a code");
+        Check(GuideInput.PlainText(null) == "" && GuideInput.PlainText("") == "", "no text");
         Check(GuideInput.ViewOffset(0, 1, 10, 7) == 0, "short menu: no scroll");
         Check(GuideInput.ViewOffset(4, 6, 10, 20) == 0, "rows already on screen: no scroll");
         Check(GuideInput.ViewOffset(12, 14, 10, 20) == 5, "rows lower down: scrolled until the last is on screen");
@@ -222,6 +227,10 @@ static class Program
         kb.Start(buttonsDisabledNow: false);
         Check(!kb.ReadyToRelease(false, 50000) && kb.ReadyToRelease(false, 50000 + GuideButtonHold.ReleaseDelayMs),
             "a later guide doesn't remember the old keyboard");
+        kb.Start(buttonsDisabledNow: false);
+        kb.NoteKeyboard(true, 60000);
+        kb.Abandon();
+        Check(!kb.Holding && kb.ReadyToRelease(true, 60001), "after an error the hold is dropped at once");
 
         Console.WriteLine($"player-guide: {checks} checks passed");
         return 0;

@@ -292,9 +292,45 @@ namespace vMenuClient
             return GuideKey.None;
         }
 
-        /// <summary>A row's text as the menu shows it: no ~colour~ codes, no padding.</summary>
-        public static string PlainText(string text) =>
-            System.Text.RegularExpressions.Regex.Replace(text ?? "", "~[a-zA-Z0-9_]+~", "").Replace('\u00A0', ' ').Trim();
+        /// <summary>
+        /// A row's text as the menu shows it: no ~colour~ codes, no padding. Written out by hand:
+        /// FiveM's client runtime refuses System.Text.RegularExpressions (MethodAccessException).
+        /// </summary>
+        public static string PlainText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "";
+            }
+            var plain = new System.Text.StringBuilder(text.Length);
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (text[i] == '~')
+                {
+                    var close = text.IndexOf('~', i + 1);
+                    if (close > i + 1 && IsCodeName(text, i + 1, close))
+                    {
+                        i = close;
+                        continue;
+                    }
+                }
+                plain.Append(text[i] == '\u00A0' ? ' ' : text[i]);
+            }
+            return plain.ToString().Trim();
+        }
+
+        private static bool IsCodeName(string text, int from, int to)
+        {
+            for (var i = from; i < to; i++)
+            {
+                var c = text[i];
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         /// <summary>The scroll that keeps rows first..last on screen (first wins when they don't all fit).</summary>
         public static int ViewOffset(int first, int last, int maxOnScreen, int count)
@@ -372,6 +408,14 @@ namespace vMenuClient
             Holding = false;
             keyboardSeenAt = -1;
             return true;
+        }
+
+        /// <summary>Drops the hold at once, when the guide stops after an error.</summary>
+        public void Abandon()
+        {
+            Holding = false;
+            releasedSince = -1;
+            keyboardSeenAt = -1;
         }
     }
 

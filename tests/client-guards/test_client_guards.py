@@ -158,3 +158,16 @@ with tempfile.TemporaryDirectory(prefix='vmenu-client-guards-') as temp:
     (work / 'OverrideLatch.cs').write_text(latch, encoding='utf-8')
     subprocess.run(['dotnet', 'run', '--project', str(work / 'Tests.csproj'),
                     '--configuration', 'Release', '--verbosity', 'quiet'], check=True)
+
+
+# --- FiveM's client runtime rejects Regex ---------------------------------------------------------
+# Release N's first Player Guide build froze the menu in game: Regex.Replace threw
+# MethodAccessException ("Regex:ValidateMatchTimeout is not accessible") in FiveM's Mono, though it
+# runs fine in .NET tests. So nothing compiled into the client may use it.
+regex_use = re.compile(r'\bRegex\s*[.(]|\bnew\s+Regex\b|using\s+System\.Text\.RegularExpressions|RegularExpressions\.Regex')
+client_files = [p for p in sorted((root / 'vMenu').rglob('*.cs')) if 'obj' not in p.parts and 'bin' not in p.parts]
+client_files += [root / 'SharedClasses' / 'ConfigManager.cs', root / 'SharedClasses' / 'PermissionsManager.cs']
+for path in client_files:
+    code = re.sub(r'//[^\n]*', '', path.read_text(encoding='utf-8-sig'))
+    assert not regex_use.search(code), f"{path.relative_to(root)} uses Regex, which FiveM's client runtime rejects"
+print('PASS: nothing in the client uses Regex (FiveM rejects it)')

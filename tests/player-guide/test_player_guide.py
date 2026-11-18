@@ -112,7 +112,7 @@ check('GetResourceKvpInt(SeenKvp) >= content.Version' in guide_cs, 'offers the g
 seen = re.findall(r'(.{0,120})SetResourceKvpInt\(SeenKvp', guide_cs, re.S)
 check(len(seen) == 1 and 'CountsAsSeen(end)' in seen[0], 'marks it seen only when finished or skipped')
 check('new TickSleeper(InputTick' in guide_cs and 'inputSleeper.Sleep();' in guide_cs, 'the input loop sleeps while the guide is off')
-tick = method_body(guide_cs, 'private static async Task InputTick()')
+tick = method_body(guide_cs, 'private static void InputFrame()')
 check('hold.ReadyToRelease(' in tick and 'MenuController.DisableMenuButtons = hold.ButtonsBefore;' in tick,
       'the menu gets its buttons back only after the key that ended the guide is let go')
 check(tick.index('hold.ReadyToRelease(') < tick.index('MenuController.DisableMenuButtons = hold.ButtonsBefore;'), 'and not before')
@@ -126,7 +126,26 @@ check(tick.index('hold.NoteKeyboard(') < tick.index('if (flow.Mode == GuideMode.
 check(re.search(r'if \(GetGameTimer\(\) < acceptInputAt \|\| !IsScreenFadedIn\(\) \|\| IsPauseMenuActive\(\) \|\| IsPlayerSwitchInProgress\(\)\)', tick),
       'keys pressed while the menu is hidden (fade, switch, pause menu) do nothing')
 check('if (GetGameTimer() < acceptInputAt ||' in tick, 'a press right as a card opens is ignored')
-check('MenuController.DisableMenuButtons = true;' in method_body(guide_cs, 'private static void Begin(GuideView view)'), 'the menu buttons are off while a card is up')
+begin = method_body(guide_cs, 'private static bool Begin(GuideView view)')
+check('MenuController.DisableMenuButtons = true;' in begin, 'the menu buttons are off while a card is up')
+
+# ---- Fail safe: the first build froze the menu when showing a card threw (Regex on FiveM) ----
+check(begin.index('inputSleeper?.Wake();') < begin.index('return TryShow(view);'),
+      'the input loop is woken before a card is shown, so it can always hand the buttons back')
+try_show = method_body(guide_cs, 'private static bool TryShow(GuideView view)')
+check(re.search(r'try\s*\{\s*Show\(view\);\s*return true;\s*\}\s*catch \(Exception e\)\s*\{\s*Fail\(e\);', try_show), 'showing a card is guarded')
+check(len(re.findall(r'(?<![A-Za-z])Show\(view\);', guide_cs)) == 1, 'cards are only shown through TryShow')
+opened = method_body(guide_cs, 'internal static bool MenuOpened()')
+check(re.search(r'try\s*\{.*return Begin\(flow\.Welcome\(\)\);\s*\}\s*catch \(Exception e\)\s*\{\s*Fail\(e\);\s*return false;', opened, re.S),
+      "the menu watcher can't be broken by the guide")
+check('if (broken ||' in opened, 'after an error the guide stays off')
+fail = method_body(guide_cs, 'private static void Fail(Exception e)')
+check('broken = true;' in fail and 'flow?.MenuClosed();' in fail and '"visible\\":false' in fail and 'inputSleeper.Wake();' in fail and 'ReleaseButtonsNow();' in fail,
+      'an error stops the guide, hides the card and gets the buttons back')
+input_tick = method_body(guide_cs, 'private static async Task InputTick()')
+check(re.search(r'try\s*\{\s*InputFrame\(\);\s*\}\s*catch \(Exception e\)\s*\{[^{}]*?Fail\(e\);\s*ReleaseButtonsNow\(\);', input_tick),
+      'an error in the input loop hands the buttons back at once')
+check('if (broken || flow == null || flow.Mode != GuideMode.Off)' in guide_cs, 'Start the guide and the questions do nothing after an error')
 
 # ---- The page ----
 check(re.search(r'<div id="vmenu-guide" hidden></div>', page), 'the page has the card')

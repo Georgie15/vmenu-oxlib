@@ -8,6 +8,7 @@ using CitizenFX.Core;
 using MenuAPI;
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
@@ -57,6 +58,8 @@ namespace vMenuClient
         private static bool? shownForPad;
         private static readonly GuideButtonHold hold = new();
         private static int acceptInputAt;
+        /// <summary>Set after an error: the guide stays off for the rest of the session.</summary>
+        private static bool broken;
 
         public PlayerGuide()
         {
@@ -96,8 +99,12 @@ namespace vMenuClient
 
             guideMenu.OnItemSelect += (sender, item, index) =>
             {
-                if (flow == null || flow.Mode != GuideMode.Off)
+                if (broken || flow == null || flow.Mode != GuideMode.Off)
                 {
+                    if (broken)
+                    {
+                        Notify.Error("The Player Guide hit an error and is off until you reconnect.");
+                    }
                     return;
                 }
                 if (item == startItem)
@@ -172,28 +179,89 @@ namespace vMenuClient
         /// </summary>
         internal static bool MenuOpened()
         {
-            if (flow == null || flow.Mode != GuideMode.Off || hold.Holding)
+            if (broken || flow == null || flow.Mode != GuideMode.Off || hold.Holding)
             {
                 return false;
             }
-            if (GetResourceKvpInt(SeenKvp) >= content.Version)
+            try
             {
+                if (GetResourceKvpInt(SeenKvp) >= content.Version)
+                {
+                    return false;
+                }
+                return Begin(flow.Welcome());
+            }
+            catch (Exception e)
+            {
+                Fail(e);
                 return false;
             }
-            Begin(flow.Welcome());
-            return flow.Mode != GuideMode.Off;
         }
 
-        private static void Begin(GuideView view)
+        private static bool Begin(GuideView view)
         {
             if (view == null)
             {
-                return;
+                return false;
             }
             hold.Start(MenuController.DisableMenuButtons);
             MenuController.DisableMenuButtons = true;
-            Show(view);
+            // Woken before anything can go wrong: the input loop is what gives the menu its buttons back.
             inputSleeper?.Wake();
+            return TryShow(view);
+        }
+
+        private static bool TryShow(GuideView view)
+        {
+            try
+            {
+                Show(view);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Fail(e);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Something went wrong. The guide stops for the rest of the session and the menu gets its
+        /// buttons back, so a bug in the guide can never leave the menu unusable. The error goes to F8.
+        /// </summary>
+        private static void Fail(Exception e)
+        {
+            broken = true;
+            Debug.WriteLine($"[vMenu] [Player Guide] stopped for this session after an error: {e}");
+            flow?.MenuClosed();
+            shown = null;
+            shownLabels = new List<string>();
+            try
+            {
+                SendNuiMessage("{\"action\":\"vmenuGuide\",\"visible\":false}");
+            }
+            catch (Exception)
+            {
+                // The card stays hidden on the next message; the buttons matter more.
+            }
+            if (inputSleeper == null)
+            {
+                ReleaseButtonsNow();
+            }
+            else
+            {
+                // The input loop hands the buttons back once the key that was down is let go.
+                inputSleeper.Wake();
+            }
+        }
+
+        private static void ReleaseButtonsNow()
+        {
+            if (hold.Holding)
+            {
+                MenuController.DisableMenuButtons = hold.ButtonsBefore;
+                hold.Abandon();
+            }
         }
 
         private static void Show(GuideView view)
@@ -286,26 +354,45 @@ namespace vMenuClient
             var pad = Game.CurrentInputMode == InputMode.GamePad;
             shownForPad = pad;
             var card = shown.Card;
-            SendNuiMessage(JsonConvert.SerializeObject(new
+            // Built as JSON objects rather than an anonymous type: the guide's file reader already
+            // proves these work in FiveM's client runtime, which refuses some of .NET.
+            var message = new JObject
             {
-                action = "vmenuGuide",
-                visible = true,
-                kind = shown.Mode == GuideMode.Welcome ? "welcome" : shown.Mode == GuideMode.Tour ? "tour" : "question",
-                title = card.Title,
-                body = card.Body,
-                tip = card.Tip,
-                foot = card.Foot,
-                number = shown.Number,
-                count = shown.Count,
-                last = shown.IsLast,
-                pad,
-                highlight = shownLabels,
-            }));
+                ["action"] = "vmenuGuide",
+                ["visible"] = true,
+                ["kind"] = shown.Mode == GuideMode.Welcome ? "welcome" : shown.Mode == GuideMode.Tour ? "tour" : "question",
+                ["title"] = card.Title,
+                ["body"] = new JArray(card.Body.ToArray()),
+                ["tip"] = card.Tip,
+                ["foot"] = card.Foot,
+                ["number"] = shown.Number,
+                ["count"] = shown.Count,
+                ["last"] = shown.IsLast,
+                ["pad"] = pad,
+                ["highlight"] = new JArray(shownLabels.ToArray()),
+            };
+            SendNuiMessage(message.ToString(Formatting.None));
         }
         #endregion
 
         #region Input
         private static async Task InputTick()
+        {
+            try
+            {
+                InputFrame();
+            }
+            catch (Exception e)
+            {
+                // Never leave the menu without its buttons: stop the guide and hand them back now.
+                Fail(e);
+                ReleaseButtonsNow();
+                inputSleeper.Sleep();
+            }
+            await Task.FromResult(0);
+        }
+
+        private static void InputFrame()
         {
             if (flow == null || (flow.Mode == GuideMode.Off && !hold.Holding))
             {
@@ -385,14 +472,12 @@ namespace vMenuClient
             PlaySoundFrontend(-1, sound, "HUD_FRONTEND_DEFAULT_SOUNDSET", false);
             if (view != null)
             {
-                Show(view);
+                TryShow(view);
             }
             else
             {
                 End(end);
             }
-
-            await Task.FromResult(0);
         }
         #endregion
     }
