@@ -125,8 +125,8 @@ static class Program
             Check(!Read("vMenu", file).Contains("GetVehicleDoorsLockedForPlayer"), file + " no longer passes a ped handle as a player id");
         }
         var fc = Read("vMenu", "FunctionsController.cs");
-        Check(Regex.IsMatch(fc, @"if \(IsAllowed\(Permission\.PVLockDoors\)\)\s*\{\s*Tick \+= PersonalVehicleOptions;\s*Tick \+= PersonalVehicleAutoLockTick;"),
-            "auto-lock runs only with the lock permission");
+        Check(Regex.IsMatch(fc, @"if \(IsAllowed\(Permission\.PVLockDoors\)\)\s*\{\s*pvOptionsSleeper = AddSleepingLoop\(nameof\(PersonalVehicleOptions\), PersonalVehicleOptions, PersonalVehicleWanted\);\s*pvAutoLockSleeper = AddSleepingLoop\(nameof\(PersonalVehicleAutoLockTick\), PersonalVehicleAutoLockTick, PersonalVehicleWanted\);"),
+            "auto-lock runs only with the lock permission (and sleeps without a personal vehicle)");
         Check(Read("vMenu", "menus", "PersonalVehicle.cs").Contains("SetResourceKvpInt(\"vmenu_pv_autolock\", _checked ? 1 : 0);"), "the setting is remembered");
 
         foreach (var (permission, binding) in new[] { ("VOEngine", "VehEngine"), ("VODoors", "VehHood"), ("VODoors", "VehTrunk"), ("VOWindows", "VehWindows"), ("VOCycleSeats", "VehSeat") })

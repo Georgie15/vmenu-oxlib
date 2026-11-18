@@ -60,8 +60,8 @@ assert '!Game.IsControlEnabled(0, Control.MultiplayerInfo)' in minimap_key and '
 
 # --- fix 5 and 6 --------------------------------------------------------------------------------
 deaths = member(fc, r'^        private async Task DeathNotifications\(\).*?^        }$')
-assert deaths.rstrip().endswith('await (MainMenu.MiscSettingsMenu.DeathNotifications || AnyMenuOpen ? Delay(250) : Rest(SleepRestMs));\n        }') \
-    and 'Task.FromResult' not in deaths, 'death notifications check 4 times a second, and rest while off with every menu closed'
+assert re.search(r'if \(MainMenu\.MiscSettingsMenu\.DeathNotifications \|\| AnyMenuOpen\)\s*\{\s*await Delay\(250\);\s*\}\s*else\s*\{\s*deathNotificationsSleeper\.Sleep\(\);\s*\}\s*\}$', deaths) \
+    and 'Task.FromResult' not in deaths, 'death notifications check 4 times a second, and sleep while off with every menu closed'
 options = member(fc, r'^        private async Task PlayerOptions\(\).*?^        }$')
 assert 'if (MainMenu.PlayerOptionsMenu.PlayerInvisible && IsAllowed(Permission.POInvisible) && GetSettingsBool(Setting.vmenu_handle_invisibility))' in options, \
     'the convar is only read while invisibility is on'
@@ -104,6 +104,8 @@ static class Program
     static readonly OverrideLatch unlimitedAmmoLatch = new OverrideLatch();
     static void Frame()
     {
+        // WeaponOptions reads the ped once at its top (release M); the ammo block uses it.
+        var ped = PlayerPedId();
 ''' + ammo + r'''
     }
 

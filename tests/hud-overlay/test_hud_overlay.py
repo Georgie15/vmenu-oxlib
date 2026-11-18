@@ -37,13 +37,17 @@ for gone in ('DrawMiscSettingsText', 'ShowCoordinates', 'ShowLocation', 'DrawTim
     assert gone not in misc, f'MiscSettings no longer draws or runs every frame for {gone}'
 # With both speeds shown, MPH sits where the game's street name is: hidden every frame, as before.
 assert re.search(r'var bothSpeeds = MainMenu\.MiscSettingsMenu\.ShowSpeedoKmh && MainMenu\.MiscSettingsMenu\.ShowSpeedoMph;\s*'
-                 r'if \(bothSpeeds && IsPedInAnyVehicle\(PlayerPedId\(\), false\)\)\s*\{\s*HideHudComponentThisFrame\(\(int\)HudComponent\.StreetName\);', misc)
-assert '|| bothSpeeds;' in misc, 'and MiscSettings runs every frame while both speeds are on'
+                 r'var hideStreetName = bothSpeeds && IsPedInAnyVehicle\(PlayerPedId\(\), false\);\s*'
+                 r'if \(hideStreetName\)\s*\{\s*HideHudComponentThisFrame\(\(int\)HudComponent\.StreetName\);', misc)
+# Release M: every frame in a vehicle (the hide only lasts a frame), 10 times a second on foot to
+# notice getting in.
+assert re.search(r'if \(AnyMenuOpen \|\| misc\.HideRadar \|\| misc\.LockCameraX \|\| misc\.LockCameraY \|\| hideStreetName\)\s*\{\s*return;\s*\}\s*'
+                 r'if \(bothSpeeds\)\s*\{\s*await Rest\(StateRestMs\);', misc), 'MiscSettings runs every frame in a vehicle with both speeds on'
 assert '#vmenu-hud [hidden] {' in page and 'display: none !important;' in page, 'the grid and flex parts still hide'
 for gone in ('private void DrawMiscSettingsText', 'private void ShowLocation()', 'private void ShowSpeedKmh', 'private void ShowSpeedMph'):
     assert gone not in fc, f'{gone} is gone'
 setup = member(fc, r'^        public void SetupTickFunctions\(\).*?^        }$')
-assert 'Tick += HudOverlayTick;' in setup
+assert 'hudSleeper = AddSleepingLoop(nameof(HudOverlayTick), HudOverlayTick, HudWanted);' in setup, 'registered as a loop that sleeps while every option is off'
 assert '<div id="vmenu-hud" hidden>' in page and 'd.action !== "vmenuHud"' in page
 hud_markup = page.index('<div id="vmenu-hud" hidden>')
 storage_markup = page.index('<div id="vmenu-storage">')
@@ -71,7 +75,7 @@ namespace Hud
         public static HashSet<Permission> Denied = new HashSet<Permission>();
         public static float X = 1, Y = 2, Z = 3, Heading = 90, Speed = 10, SafeZone = 1f;
         public static List<string> Sent = new List<string>();
-        public static int Rests, Delays, LastRestMs;
+        public static int Rests, Delays, Sleeps;
     }
     public class Misc
     {
@@ -102,9 +106,10 @@ namespace Hud
     public class Ticker
     {
         bool AnyMenuOpen => W.MenuOpen;
-        Task Rest(int ms) { W.Rests++; W.LastRestMs = ms; return Task.CompletedTask; }
+        Task Rest(int ms) { W.Rests++; return Task.CompletedTask; }
+        class Sleeper { public void Sleep() => W.Sleeps++; }
+        readonly Sleeper hudSleeper = new Sleeper();
         const int IdleRestMs = 250;
-        const int SleepRestMs = 2000;
         float safeZoneSizeX = -0.0247f;
         string zoneDisplay = "Airport";
         string headingDisplay = "N";
@@ -122,7 +127,7 @@ namespace Hud
         {
             var t = new Ticker();
             t.Run(); t.Run();
-            Check(W.Sent.Count == 0 && W.Rests == 2 && W.LastRestMs == 2000, "all off: nothing sent, the loop rests until a menu opens (2 s fallback)");
+            Check(W.Sent.Count == 0 && W.Sleeps == 2 && W.Rests == 0, "all off: nothing sent, the loop sleeps (off the tick list until something wakes it)");
 
             W.Coords = true; t.Run();
             Check(W.Sent.Count == 1 && W.Sent[0].Contains("\"coords\":{\"x\":\"1.00\"") && W.Sent[0].Contains("\"visible\":true"), "coordinates on: sent with two decimals");
@@ -162,8 +167,8 @@ namespace Hud
             W.Time = false; var before = W.Sent.Count; t.Run(); t.Run();
             Check(W.Sent.Count == before + 1 && W.Sent[W.Sent.Count - 1] == "{\"action\":\"vmenuHud\",\"visible\":false}", "all off again: hidden once, then nothing");
 
-            W.MenuOpen = true; var rests = W.Rests; t.Run();
-            Check(W.Rests == rests, "all off with a menu open: no rest, so switching one on shows at once");
+            W.MenuOpen = true; var sleeps = W.Sleeps; t.Run();
+            Check(W.Sleeps == sleeps, "all off with a menu open: it stays on, so switching one on shows at once");
 
             Console.WriteLine(failures == 0 ? "PASS: the HUD loop sends only what changed and rests while off" : $"{failures} check(s) failed");
             return failures == 0 ? 0 : 1;

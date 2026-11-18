@@ -49,13 +49,14 @@ assert setup.rstrip().endswith('''if (vehicleHealthCheckEnabled || highbeamFlash
         }'''), 'the shared tick is registered when any of its checks is'
 assert re.search(r'Tick \+= VehicleOptions;\s*vehicleHealthCheckEnabled = true;\s*if \(IsAllowed\(Permission\.VOFlashHighbeamsOnHonk\)\)\s*\{\s*highbeamFlashCheckEnabled = true;', setup), \
     'health text and highbeams keep their permissions'
-assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*Tick \+= ManageCamera;\s*movementLockCheckEnabled = true;', setup)
+assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*cameraSleeper = AddSleepingLoop\(nameof\(ManageCamera\), ManageCamera, \(\) => camera != null\);\s*movementLockCheckEnabled = true;', setup)
 assert re.search(r'if \(GetSettingsBool\(Setting\.vmenu_enable_animals_spawn_menu\)\)\s*\{\s*animalCameraCheckEnabled = true;', setup)
 # MenuAPI 3 forced a GC.Collect() every 60 s unless EnableManualGCs was off. MenuAPI 4 has no manual GC.
 csproj = (root / 'vMenu' / 'vMenuClient.csproj').read_text(encoding='utf-8-sig')
 assert '<PackageReference Include="MenuAPI.FiveM" Version="4.1.3" />' in csproj, 'the client is built against MenuAPI 4.1.3'
 assert 'EnableManualGCs' not in main_menu, "MenuAPI 4 has no forced GC to turn off"
-assert re.search(r'Tick \+= MiscSettings;\s*Tick \+= RadarSettings;', setup), 'the radar settings loop is registered next to MiscSettings'
+assert re.search(r'miscSettingsSleeper = AddSleepingLoop\(nameof\(MiscSettings\), MiscSettings, MiscSettingsWanted\);\s*Tick \+= RadarSettings;', setup), \
+    'the radar settings loop is registered next to MiscSettings'
 assert '(uint)GetHashKey("gadget_parachute")' not in fc, 'the parachute hash is a constant, not hashed every frame'
 weapons = member(fc, r'^        private async Task WeaponOptions\(\).*?^        }$')
 assert 'Game.PlayerPed.Handle' not in weapons.split('var ped = PlayerPedId();')[1], 'weapon options reuse one ped lookup'
@@ -116,6 +117,14 @@ namespace Harness
 blips = region(fc, 'player blips tasks')
 every_frame_blips = blips.replace('private const int PlayerBlipsRefreshMs = 100;', 'private const int PlayerBlipsRefreshMs = 0;')
 assert every_frame_blips != blips
+# The reference refreshes every frame, so it has no wait after a refresh (release M waits 50 ms).
+refresh_wait = '''            if (MainMenu.MiscSettingsMenu != null && MainMenu.MiscSettingsMenu.ShowPlayerBlips)
+            {
+                await Delay(PlayerBlipsRotateMs);
+            }
+'''
+assert every_frame_blips.replace('\r\n', '\n').count(refresh_wait) == 1, 'release M: blips wait between turns while on'
+every_frame_blips = every_frame_blips.replace('\r\n', '\n').replace(refresh_wait, '')
 
 blip_test = r'''
 namespace Blips
@@ -344,9 +353,12 @@ namespace Blips
                 Check(a.Log.Count == 0 && b.Log.Count == 0, "no errors logged");
             }
             Check(gaps.Count > 10 && gaps.TrueForAll(g => g == 7), "refreshes every 100 ms (7 frames of 16 ms) while blips are on: " + string.Join(",", gaps));
+            // Release M: between refreshes they turn 20 times a second, not every frame (about 33 refreshes
+            // and 200 frames between them here).
+            Check(quietFrames > 20 && quietFrames < 60, $"blips turn 20 times a second between refreshes, not every frame: {quietFrames} turns in 260 frames");
             Check(a.Blips.Values.Count(x => x.Owner == "vmenu") == b.Blips.Values.Count(x => x.Owner == "vmenu") && a.Blips.Values.Count(x => x.Owner == "vmenu") > 0, "blips are back after turning them on again");
-            Console.WriteLine($"PASS: player blips match the every-frame version at all {compared} refreshes, rotate every frame in between "
-                + $"(game calls per frame: {(double)quietCalls / quietFrames:0.0} between refreshes vs {(double)everyFrameCalls / 260:0.0} every frame before)");
+            Console.WriteLine($"PASS: player blips match the every-frame version at all {compared} refreshes, turn 20 times a second in between "
+                + $"(game calls per frame: {(double)quietCalls / quietFrames:0.0} on the turns between refreshes, {quietFrames} turns in 260 frames, vs {(double)everyFrameCalls / 260:0.0} every frame before)");
         }
     }
 }

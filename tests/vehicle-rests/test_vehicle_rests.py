@@ -12,6 +12,9 @@ VehicleOptionsEveryFrame() (with the same permission), so turning any of them on
 every-frame treatment, and that the once-per-switch settings are covered by SwitchedVehicle. It
 mutation-tests itself: dropping any option from the helper must make the coverage check fail.
 
+Release M: vehicle god mode, freeze, keep clean, no helmet and infinite fuel set things the game
+keeps, so they ride on the 100 ms pass; the test checks they no longer force every frame.
+
 Requires Python; no FiveM runtime.
 """
 from pathlib import Path
@@ -72,14 +75,23 @@ def permission_for(option):
     return None
 
 
+# Release M: these set things the game keeps, or put right what already happened, so the pass 10
+# times a second in a vehicle is enough for them (vMenu Enhanced uses no loop, or a slower one, for
+# each). Only options that last a single frame, such as torque, keep the loop every frame.
+AT_100MS = {'VehicleGodMode', 'VehicleFrozen', 'VehicleNeverDirty', 'VehicleNoBikeHelemet', 'VehicleInfiniteFuel'}
+
+
 def coverage_errors(helper_source):
     covered = dict(re.findall(r'options\.(\w+) && IsAllowed\(Permission\.(\w+)\)', helper_source))
     errors = []
     if 'SwitchedVehicle' not in helper_source:
         errors.append('a waiting vehicle switch does not keep the loop every frame')
-    for option in sorted(options_used(every_frame_path) - VALUES):
+    for option in sorted(set(covered) & AT_100MS):
+        errors.append(f'{option} is fine on the 100 ms pass but still forces every frame')
+    for option in sorted(options_used(every_frame_path) - VALUES - AT_100MS):
         if option in GOD_SUB_OPTIONS:
-            if 'VehicleGodMode' not in covered:
+            # They only act with vehicle god mode on, so they follow its rate.
+            if 'VehicleGodMode' not in covered and 'VehicleGodMode' not in AT_100MS:
                 errors.append(f'{option} needs VehicleGodMode covered')
             continue
         if option not in covered:
@@ -93,8 +105,10 @@ def coverage_errors(helper_source):
 
 errors = coverage_errors(helper)
 assert not errors, errors
+assert AT_100MS <= options_used(every_frame_path), 'every option allowed on the 100 ms pass is still applied there'
 print(f'PASS: every per-frame vehicle option keeps VehicleOptions every frame '
-      f'({len(options_used(every_frame_path) - VALUES - GOD_SUB_OPTIONS)} options, same permissions)')
+      f'({len(options_used(every_frame_path) - VALUES - GOD_SUB_OPTIONS - AT_100MS)} options, same permissions); '
+      f'{len(AT_100MS)} that the game keeps are applied 10 times a second')
 
 # Once-per-switch settings are applied on the pass after a switch, which SwitchedVehicle covers.
 for once in ('VehiclePowerMultiplier', 'VehicleNoSiren', 'DisablePlaneTurbulence', 'DisableHelicopterTurbulence', 'AnchorBoat'):

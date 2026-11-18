@@ -1,4 +1,4 @@
-"""Release L: vMenu's loops sleep while they have nothing to do, as vMenu Enhanced's do.
+"""Releases L and M: vMenu's loops sleep while they have nothing to do, as vMenu Enhanced's do.
 
 After release J, two vMenu loops still ran every frame with every menu closed, and about 15 more woke
 4 to 10 times a second only to find their options still off. Release L:
@@ -8,10 +8,15 @@ After release J, two vMenu loops still ran every frame with every menu closed, a
   work right away, so the character creator's back button guard is set before MenuAPI reads input;
 - starts the death save from the game's damage event (CEventNetworkEntityDamage) instead of checking
   every frame, with a 100 ms fallback check (vMenu Enhanced's rate) for deaths no event reports;
-- gives loops whose only reasons to run are menu options a 2 s rest while those are all off and
-  every menu is closed. A menu opening ends it at once (IdleRest), as do new permissions, the
-  player blips and names integration events, a new personal vehicle, the minimap key and the pause
-  menu's expanded radar.
+- gave loops whose only reasons to run are menu options a 2 s rest while those are all off and
+  every menu is closed.
+
+Release M takes those 17 loops off the tick list instead (TickSleeper), as vMenu Enhanced's loops stop
+while their feature is off, so a sleeping loop costs nothing at all. Anything that ends the idle rests
+(IdleRest.WakeAll: a menu opening, new permissions, the player blips and names integration events, a
+new personal vehicle, the minimap key, the pause menu's expanded radar) raises IdleRest.Woken, which
+puts every sleeping loop back; and GeneralTasks, every 100 ms, wakes each one whose own "wanted" test
+(cheap reads of options and permissions) now says it has work.
 
 Compiled checks run the production watcher and death code against a fake game. Source checks cover
 the rests and the wake-ups. tests/idle-rests still compares the main loops frame by frame with
@@ -41,29 +46,54 @@ def method(source, name):
     return member(source, r'^        (?:private|internal|public)[^\n(]*\b' + name + r'\([^)]*\)\s*\n        \{.*?^        \}$')
 
 
-# --- source checks: which loops take the long rest, and what wakes them ------------------------
-SLEEPERS = ['PlayerOptions', 'DoPlayerAndVehicleChecks', 'WeatherOptions', 'HudOverlayTick', 'UpdateLocation',
-            'MiscSettings', 'MiscRecordingKeybinds', 'DeathNotifications', 'WeaponOptions', 'ManageCamera',
-            'ModelDrawDimensions', 'SlowMiscTick', 'PlayerOverheadNamesControl', 'SnowballPickupHelpMessageTask',
-            'PersonalVehicleAutoLockTick', 'AutoPVBlipOnExitTick', 'PersonalVehicleOptions']
-assert 'private const int SleepRestMs = 2000;' in fc
-for name in SLEEPERS:
+# --- source checks: which loops sleep, and what wakes them --------------------------------------
+# Each loop, the field holding its sleeper and the "wanted" test it is registered with.
+SLEEPERS = {
+    'PlayerOptions': ('playerOptionsSleeper', 'PlayerOptionsWanted'),
+    'DoPlayerAndVehicleChecks': ('protectionsSleeper', 'ProtectionsWanted'),
+    'WeatherOptions': ('weatherOptionsSleeper', '() => false'),
+    'HudOverlayTick': ('hudSleeper', 'HudWanted'),
+    'UpdateLocation': ('locationSleeper', '() => MainMenu.MiscSettingsMenu?.ShowLocation == true'),
+    'MiscSettings': ('miscSettingsSleeper', 'MiscSettingsWanted'),
+    'MiscRecordingKeybinds': ('recordingKeysSleeper', '() => MainMenu.MiscSettingsMenu?.KbRecordKeys == true'),
+    'DeathNotifications': ('deathNotificationsSleeper', '() => MainMenu.MiscSettingsMenu?.DeathNotifications == true'),
+    'WeaponOptions': ('weaponOptionsSleeper', 'WeaponOptionsWanted'),
+    'ManageCamera': ('cameraSleeper', '() => camera != null'),
+    'ModelDrawDimensions': ('outlinesDrawSleeper', 'OutlinesWanted'),
+    'SlowMiscTick': ('outlinesScanSleeper', 'OutlinesWanted'),
+    'PlayerOverheadNamesControl': ('namesSleeper', '() => MainMenu.MiscSettingsMenu?.MiscShowOverheadNames == true'),
+    'SnowballPickupHelpMessageTask': ('snowballSleeper', '() => EventManager.IsSnowEnabled'),
+    'PersonalVehicleAutoLockTick': ('pvAutoLockSleeper', 'PersonalVehicleWanted'),
+    'AutoPVBlipOnExitTick': ('pvBlipSleeper', 'PersonalVehicleWanted'),
+    'PersonalVehicleOptions': ('pvOptionsSleeper', 'PersonalVehicleWanted'),
+}
+assert 'SleepRestMs' not in fc, 'no long rests are left (release M sleeps instead)'
+setup = method(fc, 'SetupTickFunctions')
+for name, (field, wanted) in SLEEPERS.items():
+    assert f'{field} = AddSleepingLoop(nameof({name}), {name}, {wanted});' in setup, f'{name} is registered as a sleeping loop'
+    assert f'Tick += {name};' not in setup, f'{name} is registered once'
     body = method(fc, name)
-    assert 'Rest(SleepRestMs)' in body, f'{name} takes the long rest'
+    assert f'{field}.Sleep();' in body, f'{name} sleeps'
     # Never while a menu is open: options change there, and every loop must see them the next frame.
-    # A few have no option a menu could switch on while they rest: snow (server weather) and the
-    # personal vehicle, which SetCurrentPersonalVehicle wakes them for.
+    # Two have no option a menu could switch on while they sleep: snow (the server's weather) and the
+    # personal vehicle; GeneralTasks' 100 ms check wakes them when either appears.
     if name not in ('SnowballPickupHelpMessageTask', 'AutoPVBlipOnExitTick'):
-        assert 'AnyMenuOpen' in body, f'{name} takes it only with every menu closed'
-sleeping = {m.group(1) for m in re.finditer(r'^        private async Task (\w+)\(\)\s*\n        \{(?:(?!^        \}$).)*?Rest\(SleepRestMs\)', fc, re.M | re.S)}
-assert sleeping == set(SLEEPERS), f'only these loops take the long rest: {sorted(sleeping ^ set(SLEEPERS))}'
+        assert 'AnyMenuOpen' in body, f'{name} sleeps only with every menu closed'
+sleeping = {m.group(1) for m in re.finditer(r'^        private async Task (\w+)\(\)\s*\n        \{(?:(?!^        \}$).)*?Sleeper\.Sleep\(\)', fc, re.M | re.S)}
+assert sleeping == set(SLEEPERS), f'only these loops sleep: {sorted(sleeping ^ set(SLEEPERS))}'
 # These watch the game, not just options, so they keep their shorter rests.
 assert 'await Rest(IdleRestMs);' in method(fc, 'RadarSettings') and 'await Rest(IdleRestMs);' in method(fc, 'VoiceChat')
-assert 'await Delay(500);' in method(fc, 'PlayerBlipsControl') and 'Rest(SleepRestMs)' not in method(fc, 'PerFrameChecks')
+assert 'await Delay(500);' in method(fc, 'PlayerBlipsControl') and 'Sleep()' not in method(fc, 'PerFrameChecks')
 assert 'await Rest(StateRestMs);' in method(fc, 'GeneralTasks')
 
 # What wakes them.
-assert 'public static void MenuOpened() => WakeAll();' in idle and 'public static void WakeAll()' in idle
+assert 'public static void MenuOpened() => WakeAll();' in idle and 'public static event System.Action Woken;' in idle
+wake_all = method(idle, 'WakeAll')
+assert wake_all.index('Woken?.Invoke();') < wake_all.index('if (resting.Count == 0)'), 'Woken is raised even with no rest in progress'
+assert 'IdleRest.Woken += () => WakeSleepingLoops(true);' in method(fc, 'WireSleepingLoops')
+assert setup.index('WireSleepingLoops();') < setup.index('AddSleepingLoop('), 'wired before the first loop'
+general = method(fc, 'GeneralTasks')
+assert 'WakeSleepingLoops(false);' in general, 'GeneralTasks wakes the loops with work every 100 ms'
 perms = method(mm, 'SetPermissions')
 assert perms.index('vMenuShared.PermissionsManager.SetPermissions(permissionsList);') < perms.index('IdleRest.WakeAll();'), 'new permissions wake them'
 integrations = (root / 'vMenu' / 'Integrations.cs').read_text(encoding='utf-8-sig')
@@ -76,7 +106,9 @@ assert 'IdleRest.WakeAll();' in method(fc, 'OnMinimapReleased')
 # DoPlayerAndVehicleChecks lost its six spacing waits.
 checks = method(fc, 'DoPlayerAndVehicleChecks')
 assert checks.count('await Delay(100);') == 0 and 'await Delay(1000);' in checks
-print(f'PASS: {len(SLEEPERS)} option-only loops rest until a menu opens; permissions, integrations, a personal vehicle and the radar wake them')
+assert 'RegisterCommand("vmenu_ticks"' in method(fc, 'WireSleepingLoops'), 'vmenu_ticks lists which loops are asleep'
+print(f'PASS: {len(SLEEPERS)} option-only loops sleep off the tick list; a menu, permissions, integrations, a personal vehicle, '
+      'the radar and GeneralTasks\' 100 ms check wake them')
 
 # --- source checks: the watcher and the death save ---------------------------------------------
 assert 'menuWatcher = new TickSleeper(OnTick, t => Tick += t, t => Tick -= t);' in mm and 'MenuTicks.Changed += OnMenuTicksChanged;' in mm
@@ -100,11 +132,15 @@ death = '\n'.join(member(fc, p) for p in (
     r'^        private const int DeathCheckMs = 100;$', r'^        private bool deathInProgress;$'))
 death += '\n' + '\n'.join(method(fc, n) for n in ('OnGameEvent', 'HandlePlayerDeathSafely', 'RestorePlayerAfterBeingDead', 'HandlePlayerDeath'))
 sleeper_class = sleeper[sleeper.index('    internal sealed class TickSleeper'):sleeper.rindex('}')]
+registry = fc[fc.index('        private sealed class SleepingLoop'):fc.index('        // What each sleeping loop needs to run for with every menu closed.')]
+idle_rest = idle
 
 program = r'''
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using vMenuClient;
 
 namespace Sleep
 {
@@ -173,6 +209,44 @@ namespace Sleep
         public bool InProgress => deathInProgress;
     }
 
+}
+
+// FunctionsController's sleeping loops, with the real TickSleeper and IdleRest, on a fake tick list.
+// Its own namespace, so IdleRest is the real one (Sleep has a fake for the watcher).
+namespace SleepLoops
+{
+    using TickSleeper = Sleep.TickSleeper;
+    using vMenuClient;
+
+    public class Loops
+    {
+        public event Func<Task> Tick;
+        public int Registered => Tick?.GetInvocationList().Length ?? 0;
+        public readonly Dictionary<string, Action> Commands = new Dictionary<string, Action>();
+        void RegisterCommand(string name, Action<int, List<object>, string> handler, bool restricted) => Commands[name] = () => handler(0, new List<object>(), name);
+        public static readonly List<string> Printed = new List<string>();
+        static class Debug { public static void WriteLine(string s) => Printed.Add(s); }
+''' + registry + r'''
+        public bool Wanted;
+        public int Runs;
+        TickSleeper sleeper;
+        Task Loop() { Runs++; if (!Wanted) { sleeper.Sleep(); } return Task.CompletedTask; }
+        Task Other() => Task.CompletedTask;
+        public void Start()
+        {
+            WireSleepingLoops();
+            WireSleepingLoops();
+            sleeper = AddSleepingLoop("Loop", Loop, () => Wanted);
+            AddSleepingLoop("Other", Other, () => false);
+        }
+        public void Frame() { foreach (Func<Task> t in Tick?.GetInvocationList() ?? new Delegate[0]) { t(); } }
+        public void Check100ms() => WakeSleepingLoops(false);
+        internal TickSleeper First => sleeper;
+    }
+}
+
+namespace Sleep
+{
     public static class Program
     {
         static int failures;
@@ -268,7 +342,37 @@ namespace Sleep
             Check(fallback.Wait(2000) && !d.InProgress, "and finishes with the restore");
             W.Dead = false;
 
-            Console.WriteLine(failures == 0 ? "PASS: the watcher sleeps while menus are closed and the death save runs once per death" : $"{failures} check(s) failed");
+            // --- the sleeping loops registry ---
+            var loops = new SleepLoops.Loops();
+            loops.Start();
+            Check(loops.Registered == 2, "both loops start on the tick list");
+            loops.Frame();
+            Check(loops.Registered == 1 && loops.First.Asleep && loops.Runs == 1, "nothing to do: the loop takes itself off the tick list");
+            loops.Frame(); loops.Frame();
+            Check(loops.Runs == 1, "asleep: it never runs");
+            loops.Check100ms();
+            Check(loops.First.Asleep, "the 100 ms check leaves it asleep while it has nothing to do");
+            loops.Wanted = true;
+            loops.Check100ms();
+            Check(!loops.First.Asleep && loops.Registered == 2, "the 100 ms check puts it back once its test says it has work");
+            loops.Frame();
+            Check(loops.Runs == 2 && !loops.First.Asleep, "and it runs, staying on while it has work");
+            loops.Wanted = false; loops.Frame();
+            Check(loops.First.Asleep, "asleep again");
+            vMenuClient.IdleRest.WakeAll();
+            Check(!loops.First.Asleep && loops.Registered == 2, "IdleRest.WakeAll (a menu opening, permissions...) puts every sleeping loop back, with no rest in progress");
+            loops.Frame();
+            Check(loops.First.Asleep && loops.Runs == 4, "it runs once and sleeps again when still idle");
+            vMenuClient.IdleRest.WakeAll();
+            Check(loops.Registered == 2, "woken once, not twice (WireSleepingLoops wires once)");
+            loops.Frame();
+            SleepLoops.Loops.Printed.Clear();
+            loops.Commands["vmenu_ticks"]();
+            var printed = SleepLoops.Loops.Printed;
+            Check(printed.Count == 4 && printed[0].Contains("2 loops") && printed[0].Contains("1 asleep") && printed[1].Contains("Loop: asleep") && printed[2].Contains("Other: running"),
+                "vmenu_ticks lists each sleeping loop and whether it is asleep: " + string.Join(" | ", printed));
+
+            Console.WriteLine(failures == 0 ? "PASS: the watcher sleeps while menus are closed, the death save runs once per death, and sleeping loops wake by event or by their own test" : $"{failures} check(s) failed");
             return failures == 0 ? 0 : 1;
         }
     }
@@ -278,6 +382,7 @@ namespace Sleep
 with tempfile.TemporaryDirectory(prefix='vmenu-sleeping-loops-') as tmp:
     work = Path(tmp)
     (work / 'Program.cs').write_text(program, encoding='utf-8')
+    (work / 'IdleRest.cs').write_text(idle_rest, encoding='utf-8')
     (work / 'Tests.csproj').write_text('''<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><Nullable>disable</Nullable><NoWarn>CS1998;CS0162;CS0414;CS0649;CS0169;CS8321</NoWarn></PropertyGroup>
 </Project>

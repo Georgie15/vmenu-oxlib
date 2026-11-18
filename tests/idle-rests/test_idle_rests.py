@@ -17,6 +17,15 @@ and compares what each version does to the game every frame:
 Options are switched while the menu is open, as players do. It also checks that the new loops
 really rest while idle, and that every option and every key still gets every frame.
 
+Release M: with every option off, MiscSettings, MiscRecordingKeybinds, PlayerOptions and
+WeaponOptions take themselves off the tick list (TickSleeper) instead of resting, and come back
+when a menu opens (IdleRest.Woken) or when GeneralTasks' 100 ms check finds work (emulated here).
+God mode, no ragdoll, invisibility, never wanted, no reload (now the game's infinite clip flag),
+the parachutes and the expanded radar set things the game keeps, so the new loops re-apply them
+4 times a second: those are compared as game state, after a 300 ms settle when something outside
+vMenu (a respawn, a wanted level, a lost parachute) resets them. Super jump, unlimited ammo, hide
+radar, the camera locks and the recording keys still run every frame, and must match call for call.
+
 Requires Python, git (the old version is read from the build-2026-11-17-3 tag) and the .NET 9 SDK.
 """
 from pathlib import Path
@@ -100,7 +109,13 @@ namespace Rests
         readonly List<KeyValuePair<int, TaskCompletionSource<bool>>> delays = new List<KeyValuePair<int, TaskCompletionSource<bool>>>();
         readonly List<Func<Task>> ticks = new List<Func<Task>>();
         readonly List<Task> running = new List<Task>();
-        public void Add(Func<Task> tick) { ticks.Add(tick); running.Add(null); }
+        // Added and removed between frames, as FiveM does: a tick added while a frame runs starts on the
+        // next one (TickSleeper's Wake), and one removed while it runs finishes that run.
+        bool inFrame;
+        readonly List<Func<Task>> toAdd = new List<Func<Task>>(), toRemove = new List<Func<Task>>();
+        public void Add(Func<Task> tick) { if (inFrame) { toAdd.Add(tick); } else { ticks.Add(tick); running.Add(null); } }
+        public void Remove(Func<Task> tick) { if (inFrame) { toRemove.Add(tick); } else { RemoveNow(tick); } }
+        void RemoveNow(Func<Task> tick) { var i = ticks.IndexOf(tick); if (i >= 0) { ticks.RemoveAt(i); running.RemoveAt(i); } }
         public Task Delay(int ms)
         {
             var tcs = new TaskCompletionSource<bool>();
@@ -110,6 +125,7 @@ namespace Rests
         public void Frame(int now)
         {
             Now = now;
+            inFrame = true;
             var waiting = running.ConvertAll(t => t != null && !t.IsCompleted);
             var due = delays.FindAll(d => d.Key <= now);
             delays.RemoveAll(d => d.Key <= now);
@@ -119,6 +135,11 @@ namespace Rests
                 if (running[i] != null && running[i].IsFaulted) { throw running[i].Exception; }
                 if (running[i] == null || (running[i].IsCompleted && !waiting[i])) { running[i] = ticks[i](); }
             }
+            inFrame = false;
+            foreach (var tick in toRemove) { RemoveNow(tick); }
+            toRemove.Clear();
+            foreach (var tick in toAdd) { ticks.Add(tick); running.Add(null); }
+            toAdd.Clear();
         }
     }
 
@@ -217,6 +238,14 @@ namespace Rests
         public int Ped = 100, Weapon = unchecked((int)WeaponHash.Unarmed), Wanted, MaxWanted = 5, NextNotification = 1;
         public readonly HashSet<int> Talking = new HashSet<int>();
         public object ActiveOrg;
+        // What the game keeps per ped, for comparing the options re-applied 4 times a second.
+        public readonly Dictionary<int, bool> Invincible = new Dictionary<int, bool>(), Visible = new Dictionary<int, bool>(),
+            Ragdoll = new Dictionary<int, bool>(), InfiniteClip = new Dictionary<int, bool>();
+        public bool ClipToppedThisFrame;   // the old no reload refilled the clip every frame
+        public bool Is(Dictionary<int, bool> flags, bool otherwise) => flags.TryGetValue(Ped, out var on) ? on : otherwise;
+        public bool NoReloadOn => Name == "old" ? ClipToppedThisFrame : Is(InfiniteClip, false);
+        public string Kept => $"invincible {Is(Invincible, false)}, visible {Is(Visible, true)}, ragdoll {Is(Ragdoll, true)}, wanted {Wanted}/{MaxWanted}, "
+            + $"no reload {NoReloadOn}, chute {HasChute}, reserve {Reserve}, map {Bigmap}, autopilot {DriveToWp}";
     }
 
     public static class Natives
@@ -284,14 +313,15 @@ namespace Rests
         public static void SetNotificationTextEntry(string s) => Fx("SetNotificationTextEntry", s);
         public static int DrawNotificationWithButton(int t, string button, string text) { Fx("DrawNotificationWithButton", button, text); return W.NextNotification++; }
         public static void RemoveNotification(int id) => Fx("RemoveNotification", id);
-        public static void SetEntityInvincible(int e, bool on) => Fx("SetEntityInvincible", e, on);
-        public static void SetEntityVisible(int e, bool on, bool b) => Fx("SetEntityVisible", e, on);
+        public static void SetEntityInvincible(int e, bool on) { Fx("SetEntityInvincible", e, on); W.Invincible[e] = on; }
+        public static void SetEntityVisible(int e, bool on, bool b) { Fx("SetEntityVisible", e, on); W.Visible[e] = on; }
         public static void SetSuperJumpThisFrame(int player) => Fx("SetSuperJumpThisFrame", player);
-        public static void SetPedCanRagdoll(int ped, bool on) => Fx("SetPedCanRagdoll", ped, on);
+        public static void SetPedCanRagdoll(int ped, bool on) { Fx("SetPedCanRagdoll", ped, on); W.Ragdoll[ped] = on; }
         public static void ClearPlayerWantedLevel(int player) { Fx("ClearPlayerWantedLevel"); W.Wanted = 0; }
         public static void SetMaxWantedLevel(int level) { Fx("SetMaxWantedLevel", level); W.MaxWanted = level; }
         public static void ClearPedTasks(int ped) => Fx("ClearPedTasks", ped);
-        public static void SetAmmoInClip(int ped, uint hash, int ammo) => Fx("SetAmmoInClip", hash, ammo);
+        public static void SetAmmoInClip(int ped, uint hash, int ammo) { Fx("SetAmmoInClip", hash, ammo); W.ClipToppedThisFrame = true; }
+        public static void SetPedInfiniteAmmoClip(int ped, bool on) { Fx("SetPedInfiniteAmmoClip", ped, on); W.InfiniteClip[ped] = on; }
         public static void SetPedInfiniteAmmo(int ped, bool on, uint hash) => Fx("SetPedInfiniteAmmo", ped, on, hash);
         public static void GiveWeaponToPed(int ped, uint hash, int ammo, bool a, bool b) { Fx("GiveWeaponToPed", hash, ammo); if (hash == (uint)WeaponHash.Parachute) { W.HasChute = true; } }
         public static void SetPlayerHasReserveParachute(int player) { Fx("SetPlayerHasReserveParachute"); W.Reserve = true; }
@@ -307,7 +337,7 @@ namespace Rests
 
 ''' + klass('Old', old_fc, []) + klass('New', new_fc, ['RadarSettings']).replace(
     'IEnumerable<FakePlayer> Players => W.Players;',
-    'IEnumerable<FakePlayer> Players => W.Players;\n        const int IdleRestMs = 250;\n        const int StateRestMs = 100;\n        const int SleepRestMs = 2000;\n        static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();\n        static Task Rest(int ms) => vMenuClient.IdleRest.Until(Delay(ms));') + r'''
+    'IEnumerable<FakePlayer> Players => W.Players;\n        const int IdleRestMs = 250;\n        const int StateRestMs = 100;\n        internal TickSleeper miscSettingsSleeper, recordingKeysSleeper, playerOptionsSleeper, weaponOptionsSleeper;\n        public bool WantsMisc() => MiscSettingsWanted();\n        public static bool WantsPlayer() => PlayerOptionsWanted();\n        public static bool WantsWeapons() => WeaponOptionsWanted();\n' + '\n'.join(member(new_fc, n) for n in ('PlayerOptionsWanted', 'WeaponOptionsWanted', 'MiscSettingsWanted')) + '\n        static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();\n        static Task Rest(int ms) => vMenuClient.IdleRest.Until(Delay(ms));') + r'''
 
     public static class Test
     {
@@ -330,17 +360,37 @@ namespace Rests
             a.Runtime.Add(Counted(a, "PlayerOptions", () => oldTicks.CallPlayerOptions()));
             a.Runtime.Add(Counted(a, "WeaponOptions", () => oldTicks.CallWeaponOptions()));
             a.Runtime.Add(Counted(a, "VoiceChat", () => oldTicks.CallVoiceChat()));
-            b.Runtime.Add(Counted(b, "MiscSettings", () => newTicks.CallMiscSettings()));
+            // Release M: four of them sleep while idle (see Sleeping loops in FunctionsController).
+            var sleepers = new List<KeyValuePair<TickSleeper, Func<bool>>>();
+            TickSleeper Sleeping(string name, Func<Task> loop, Func<bool> wanted)
+            {
+                var tick = Counted(b, name, loop);
+                var sleeper = new TickSleeper(tick, t => b.Runtime.Add(t), t => b.Runtime.Remove(t));
+                sleepers.Add(new KeyValuePair<TickSleeper, Func<bool>>(sleeper, wanted));
+                b.Runtime.Add(tick);
+                return sleeper;
+            }
+            newTicks.miscSettingsSleeper = Sleeping("MiscSettings", () => newTicks.CallMiscSettings(), () => { W = b; return newTicks.WantsMisc(); });
             b.Runtime.Add(Counted(b, "RadarSettings", () => newTicks.CallRadarSettings()));
-            b.Runtime.Add(Counted(b, "MiscRecordingKeybinds", () => newTicks.CallMiscRecordingKeybinds()));
-            b.Runtime.Add(Counted(b, "PlayerOptions", () => newTicks.CallPlayerOptions()));
-            b.Runtime.Add(Counted(b, "WeaponOptions", () => newTicks.CallWeaponOptions()));
+            newTicks.recordingKeysSleeper = Sleeping("MiscRecordingKeybinds", () => newTicks.CallMiscRecordingKeybinds(), () => { W = b; return b.Settings.KbRecordKeys; });
+            newTicks.playerOptionsSleeper = Sleeping("PlayerOptions", () => newTicks.CallPlayerOptions(), () => { W = b; return New.WantsPlayer(); });
+            newTicks.weaponOptionsSleeper = Sleeping("WeaponOptions", () => newTicks.CallWeaponOptions(), () => { W = b; return New.WantsWeapons(); });
             b.Runtime.Add(Counted(b, "VoiceChat", () => newTicks.CallVoiceChat()));
+            // A menu opening, or RadarSettings seeing the expanded radar, wakes every sleeping loop.
+            vMenuClient.IdleRest.Woken += () => { foreach (var s in sleepers) { if (s.Key.Asleep) { s.Key.Wake(); } } };
 
             var random = new Random(20261117);
             var frame = 0;
             var settleUntil = 0;       // radar, expanded radar and voice re-checks may lag until then
-            int compared = 0, guarded = 0, maxResting = 0;
+            var keptSettleUntil = 0;   // the options re-applied 4 times a second may lag until then
+            string lastInputs = null;
+            int compared = 0, guarded = 0, maxResting = 0, keptCompared = 0;
+            // What the new loops re-apply 4 times a second instead of every frame (release M): compared
+            // as the state the game keeps, not call by call. Auto-pilot's end notices ride on PlayerOptions.
+            string[] kept = { "SetEntityInvincible(", "SetEntityVisible(", "SetPedCanRagdoll(", "ClearPlayerWantedLevel(", "SetMaxWantedLevel(",
+                "SetAmmoInClip(", "SetPedInfiniteAmmoClip(", "GiveWeaponToPed(", "SetPlayerHasReserveParachute(", "SetPlayerCanLeaveParachuteSmokeTrail(",
+                "SetBigmapActive(", "ClearPedTasks(", "Notify." };
+            bool Kept(string e) => kept.Any(e.StartsWith);
 
             void Both(Action<World> change) { change(a); change(b); }
             void Step(Action<World> inputs = null)
@@ -350,12 +400,32 @@ namespace Rests
                 {
                     w.JustReleased.Clear(); w.JustPressed.Clear();
                     inputs?.Invoke(w);
+                    // Something outside vMenu reset what the game keeps (a respawn, a wanted level, a
+                    // lost parachute, getting into a helicopter, the waypoint or duty): the new loops
+                    // put it back within 250 ms.
+                    if (w == a)
+                    {
+                        var state = $"{w.Ped},{w.Wanted},{w.HasChute},{w.Reserve},{w.InHeli},{w.Waypoint},{w.ActiveOrg}";
+                        if (lastInputs != null && state != lastInputs) { keptSettleUntil = now + 300; }
+                    }
                     w.Effects.Clear();
+                    w.ClipToppedThisFrame = false;
                     W = w;
                     w.Runtime.Frame(now);
                 }
-                var ea = a.Effects.Where(e => !Guard(a, e)).OrderBy(e => e).ToList();
-                var eb = b.Effects.Where(e => !Guard(b, e)).OrderBy(e => e).ToList();
+                lastInputs = $"{a.Ped},{a.Wanted},{a.HasChute},{a.Reserve},{a.InHeli},{a.Waypoint},{a.ActiveOrg}";
+                // GeneralTasks, every 100 ms: sleeping loops with work now are woken.
+                if (frame % 6 == 0)
+                {
+                    foreach (var s in sleepers) { if (s.Key.Asleep && s.Value()) { s.Key.Wake(); } }
+                }
+                if (now >= keptSettleUntil)
+                {
+                    Check(a.Kept == b.Kept, $"frame {frame}: what the game keeps\n  old: {a.Kept}\n  new: {b.Kept}");
+                    keptCompared++;
+                }
+                var ea = a.Effects.Where(e => !Guard(a, e) && !Kept(e)).OrderBy(e => e).ToList();
+                var eb = b.Effects.Where(e => !Guard(b, e) && !Kept(e)).OrderBy(e => e).ToList();
                 if (now < settleUntil)
                 {
                     ea.RemoveAll(e => e.StartsWith("SetBigmapActive("));
@@ -379,7 +449,13 @@ namespace Rests
             Steps(20);
             var before = new Dictionary<string, int>(b.Runs);
             Steps(125);
-            foreach (var name in new[] { "MiscSettings", "MiscRecordingKeybinds", "PlayerOptions", "WeaponOptions", "VoiceChat", "RadarSettings" })
+            foreach (var name in new[] { "MiscSettings", "MiscRecordingKeybinds", "PlayerOptions", "WeaponOptions" })
+            {
+                var runs = b.Runs[name] - before[name];
+                Check(runs == 0, $"idle: {name} ran {runs} times in 125 frames (2 s); asleep, it should not run at all");
+            }
+            Check(sleepers.All(s => s.Key.Asleep), "idle: the four option loops are off the tick list");
+            foreach (var name in new[] { "VoiceChat", "RadarSettings" })
             {
                 var runs = b.Runs[name] - before[name];
                 Check(runs <= 10, $"idle: {name} ran {runs} times in 125 frames (2 s); it should rest 250 ms at a time");
@@ -407,6 +483,13 @@ namespace Rests
                 if (option == "ShowCurrentSpeaker" || option == "ShowVoiceStatus")
                 {
                     // Only act with voice chat on; they ride on it.
+                }
+                else if (new[] { "PlayerGodMode", "PlayerNoRagdoll", "PlayerInvisible", "PlayerNeverWanted", "NoReload", "AutoEquipChute", "UnlimitedParachutes" }.Contains(option))
+                {
+                    // Release M: set things the game keeps, re-applied 4 times a second (640 ms here).
+                    var newRuns = b.Runs[loop] - runsBefore[loop];
+                    var oldRuns = a.Runs[loop] - oldRunsBefore[loop];
+                    Check(newRuns >= 2 && newRuns <= 4 && oldRuns >= 20, $"{option} on: {loop} runs 4 times a second ({newRuns} runs in 40 frames; the old one {oldRuns})");
                 }
                 else
                 {
@@ -484,7 +567,9 @@ namespace Rests
             }
 
             Check(maxResting <= 6, $"IdleRest lists at most one rest per resting loop (6 loops), never more: peak {maxResting}");
-            Console.WriteLine($"Compared {compared} frames ({guarded} inside a 600 ms settle window after another resource or the pause menu changed the radar); at most {maxResting} rests in progress at once.");
+            Check(keptCompared > compared / 2, $"what the game keeps was compared on most frames ({keptCompared} of {compared})");
+            Console.WriteLine($"Compared {compared} frames ({guarded} inside a 600 ms settle window after another resource or the pause menu changed the radar); "
+                + $"what the game keeps compared on {keptCompared}; at most {maxResting} rests in progress at once.");
             if (failures > 0) { throw new Exception($"{failures} check(s) failed"); }
             Console.WriteLine("PASS: idle rests (every frame matches build-2026-11-17-3's per-frame loops; idle loops rest)");
         }

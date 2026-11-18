@@ -78,6 +78,7 @@ namespace vMenuClient
         private readonly OverrideLatch heliTurbulenceLatch = new();
         // Target is the weapon hash in hand, not an entity.
         private readonly OverrideLatch unlimitedAmmoLatch = new();
+        private readonly OverrideLatch noReloadLatch = new();
         // The boat vMenu anchored, so entering other boats never releases someone else's anchor.
         private int anchoredBoat = 0;
         private Menu[] vehicleOnlyMenus;
@@ -94,17 +95,134 @@ namespace vMenuClient
         private const int IdleRestMs = 250;
         // Shorter, for what follows the player getting into a vehicle or dying.
         private const int StateRestMs = 100;
-        // Longer, for a loop with nothing to watch but its menu options, all of them off, and every
-        // menu closed: those options can't change until a menu opens, which ends the rest at once,
-        // as do new permissions and the few outside switches (the player blips and names integration
-        // events, the minimap key). The 2 s is a fallback, not the way it wakes.
-        private const int SleepRestMs = 2000;
 
         private static bool AnyMenuOpen => MenuController.IsAnyMenuOpen();
 
         // A rest ends early when a menu opens (see IdleRest), so a resting loop is back to every
         // frame on the frame after the menu appears.
         private static Task Rest(int ms) => IdleRest.Until(Delay(ms));
+
+        #region Sleeping loops
+        // A loop with nothing to watch but its menu options, all of them off, and every menu closed
+        // takes itself off FiveM's tick list (TickSleeper), as vMenu Enhanced's loops stop while their
+        // feature is off. It then costs nothing at all: no wait for the C# runtime to keep and check
+        // every frame. It is put back on by
+        //  - anything that ends the idle rests (IdleRest.WakeAll): a menu opening, new permissions, the
+        //    player blips and names integration events, a new personal vehicle, the minimap key and the
+        //    pause menu's expanded radar; every sleeping loop runs once and sleeps again if idle;
+        //  - GeneralTasks, every 100 ms, which asks each sleeping loop's own "wanted" test (cheap reads
+        //    of options and permissions) and wakes the ones that now have work, for anything that
+        //    changed without one of those events.
+        private sealed class SleepingLoop
+        {
+            public string Name;
+            public TickSleeper Sleeper;
+            public Func<bool> Wanted;
+        }
+
+        private readonly List<SleepingLoop> sleepingLoops = new();
+        private bool sleepingLoopsWired;
+
+        private TickSleeper AddSleepingLoop(string name, Func<Task> loop, Func<bool> wanted)
+        {
+            var sleeper = new TickSleeper(loop, t => Tick += t, t => Tick -= t);
+            sleepingLoops.Add(new SleepingLoop { Name = name, Sleeper = sleeper, Wanted = wanted });
+            Tick += loop;
+            return sleeper;
+        }
+
+        /// <summary>
+        /// Puts back each sleeping loop that has work now, or every one when <paramref name="all"/>.
+        /// </summary>
+        private void WakeSleepingLoops(bool all)
+        {
+            foreach (var loop in sleepingLoops)
+            {
+                if (loop.Sleeper.Asleep && (all || loop.Wanted()))
+                {
+                    loop.Sleeper.Wake();
+                }
+            }
+        }
+
+        private void WireSleepingLoops()
+        {
+            if (sleepingLoopsWired)
+            {
+                return;
+            }
+            sleepingLoopsWired = true;
+            IdleRest.Woken += () => WakeSleepingLoops(true);
+            // vmenu_ticks: which of these loops are running and which are asleep (F8).
+            RegisterCommand("vmenu_ticks", new Action<int, List<object>, string>((source, args, raw) =>
+            {
+                var asleep = sleepingLoops.Count(loop => loop.Sleeper.Asleep);
+                Debug.WriteLine($"[vMenu] {sleepingLoops.Count} loops that sleep while idle, {asleep} asleep now:");
+                foreach (var loop in sleepingLoops)
+                {
+                    Debug.WriteLine($"[vMenu]   {loop.Name}: {(loop.Sleeper.Asleep ? "asleep" : "running")}");
+                }
+                Debug.WriteLine("[vMenu] Always running (they watch the game): GeneralTasks, RadarSettings, the death check, "
+                    + "PlayerClothingAnimationsController, and while allowed VehicleOptions, PerFrameChecks, PlayerBlipsControl, VoiceChat, TimeOptions.");
+            }), false);
+        }
+
+        // What each sleeping loop needs to run for with every menu closed.
+        private static bool PlayerOptionsWanted()
+        {
+            var options = MainMenu.PlayerOptionsMenu;
+            return options != null && ((options.PlayerGodMode && IsAllowed(Permission.POGod))
+                || (options.PlayerNoRagdoll && IsAllowed(Permission.PONoRagdoll))
+                || options.PlayerInvisible
+                || options.PlayerSuperJump
+                // Never Wanted defaults to on, also for players without the permission, who can't
+                // see the option. Without it there is nothing to do.
+                || (options.PlayerNeverWanted && IsAllowed(Permission.PONeverWanted))
+                || DriveToWpTaskActive
+                || DriveWanderTaskActive);
+        }
+
+        private static bool ProtectionsWanted()
+        {
+            var player = MainMenu.PlayerOptionsMenu;
+            var vehicle = MainMenu.VehicleOptionsMenu;
+            return (player != null && ((IsAllowed(Permission.POGod) && player.PlayerGodMode)
+                    || (IsAllowed(Permission.POIgnored) && player.PlayerIsIgnored)
+                    || (IsAllowed(Permission.POStayInVehicle) && player.PlayerStayInVehicle)
+                    || (IsAllowed(Permission.PONoRagdoll) && player.PlayerNoRagdoll)))
+                || (vehicle != null && ((IsAllowed(Permission.VOGod) && vehicle.VehicleGodMode)
+                    || (IsAllowed(Permission.VOBikeSeatbelt) && vehicle.VehicleBikeSeatbelt)));
+        }
+
+        private static bool HudWanted()
+        {
+            var misc = MainMenu.MiscSettingsMenu;
+            return misc != null && ((misc.ShowCoordinates && IsAllowed(Permission.MSShowCoordinates))
+                || (misc.ShowLocation && IsAllowed(Permission.MSShowLocation))
+                || misc.DrawTimeOnScreen || misc.ShowSpeedoKmh || misc.ShowSpeedoMph);
+        }
+
+        private bool MiscSettingsWanted()
+        {
+            var misc = MainMenu.MiscSettingsMenu;
+            return misc != null && (misc.HideRadar || misc.LockCameraX || misc.LockCameraY
+                || (misc.ShowSpeedoKmh && misc.ShowSpeedoMph) || expandedRadarProfile || vMenuOpenedBigmap);
+        }
+
+        private static bool WeaponOptionsWanted()
+        {
+            var weapons = MainMenu.WeaponOptionsMenu;
+            return weapons != null && (weapons.NoReload || weapons.UnlimitedAmmo || weapons.AutoEquipChute || weapons.UnlimitedParachutes);
+        }
+
+        private static bool PersonalVehicleWanted() =>
+            MainMenu.PermissionsSetupComplete && MainMenu.PersonalVehicleMenu?.CurrentPersonalVehicle != null;
+
+        private TickSleeper playerOptionsSleeper, protectionsSleeper, weatherOptionsSleeper, hudSleeper, locationSleeper,
+            miscSettingsSleeper, recordingKeysSleeper, deathNotificationsSleeper, weaponOptionsSleeper, cameraSleeper,
+            outlinesDrawSleeper, outlinesScanSleeper, namesSleeper, snowballSleeper, pvAutoLockSleeper, pvBlipSleeper,
+            pvOptionsSleeper;
+        #endregion
 
         /// <summary>
         /// Applies a vMenu override through its latch: enforced on <paramref name="target"/> while
@@ -134,17 +252,18 @@ namespace vMenuClient
             // The visor, snowball, point, minimap, drift and teleport-to-waypoint keys are FiveM key
             // bindings (see Key bindings below), so nothing polls them every frame.
             RegisterKeyBindings();
-            Tick += HudOverlayTick;
+            WireSleepingLoops();
+            hudSleeper = AddSleepingLoop(nameof(HudOverlayTick), HudOverlayTick, HudWanted);
             Tick += PlayerClothingAnimationsController;
-            Tick += MiscRecordingKeybinds;
-            Tick += MiscSettings;
+            recordingKeysSleeper = AddSleepingLoop(nameof(MiscRecordingKeybinds), MiscRecordingKeybinds, () => MainMenu.MiscSettingsMenu?.KbRecordKeys == true);
+            miscSettingsSleeper = AddSleepingLoop(nameof(MiscSettings), MiscSettings, MiscSettingsWanted);
             Tick += RadarSettings;
             Tick += GeneralTasks;
 
             // Configuration and permissions based
             if (IsAllowed(Permission.WOMenu) && GetSettingsBool(Setting.vmenu_enable_weather_sync))
             {
-                Tick += WeatherOptions;
+                weatherOptionsSleeper = AddSleepingLoop(nameof(WeatherOptions), WeatherOptions, () => false);
             }
             if (IsAllowed(Permission.TOMenu) && GetSettingsBool(Setting.vmenu_enable_time_sync))
             {
@@ -159,14 +278,14 @@ namespace vMenuClient
             }
             if (!GetSettingsBool(Setting.vmenu_disable_entity_outlines_tool))
             {
-                Tick += SlowMiscTick;
-                Tick += ModelDrawDimensions;
+                outlinesScanSleeper = AddSleepingLoop(nameof(SlowMiscTick), SlowMiscTick, OutlinesWanted);
+                outlinesDrawSleeper = AddSleepingLoop(nameof(ModelDrawDimensions), ModelDrawDimensions, OutlinesWanted);
             }
 
             // Permissions based
             if (IsAllowed(Permission.POMenu) || IsAllowed(Permission.VOMenu))
             {
-                Tick += DoPlayerAndVehicleChecks;
+                protectionsSleeper = AddSleepingLoop(nameof(DoPlayerAndVehicleChecks), DoPlayerAndVehicleChecks, ProtectionsWanted);
             }
             if (IsAllowed(Permission.VOMenu))
             {
@@ -183,19 +302,19 @@ namespace vMenuClient
             }
             if (IsAllowed(Permission.WPMenu))
             {
-                Tick += WeaponOptions;
+                weaponOptionsSleeper = AddSleepingLoop(nameof(WeaponOptions), WeaponOptions, WeaponOptionsWanted);
             }
             if (IsAllowed(Permission.MSDeathNotifs))
             {
-                Tick += DeathNotifications;
+                deathNotificationsSleeper = AddSleepingLoop(nameof(DeathNotifications), DeathNotifications, () => MainMenu.MiscSettingsMenu?.DeathNotifications == true);
             }
             if (IsAllowed(Permission.MSShowLocation))
             {
-                Tick += UpdateLocation;
+                locationSleeper = AddSleepingLoop(nameof(UpdateLocation), UpdateLocation, () => MainMenu.MiscSettingsMenu?.ShowLocation == true);
             }
             if (IsAllowed(Permission.PAMenu))
             {
-                Tick += ManageCamera;
+                cameraSleeper = AddSleepingLoop(nameof(ManageCamera), ManageCamera, () => camera != null);
                 movementLockCheckEnabled = true;
             }
             if (IsAllowed(Permission.MSPlayerBlips))
@@ -204,24 +323,24 @@ namespace vMenuClient
             }
             if (IsAllowed(Permission.MSOverheadNames))
             {
-                Tick += PlayerOverheadNamesControl;
+                namesSleeper = AddSleepingLoop(nameof(PlayerOverheadNamesControl), PlayerOverheadNamesControl, () => MainMenu.MiscSettingsMenu?.MiscShowOverheadNames == true);
             }
             if (IsAllowed(Permission.POMenu))
             {
-                Tick += PlayerOptions;
+                playerOptionsSleeper = AddSleepingLoop(nameof(PlayerOptions), PlayerOptions, PlayerOptionsWanted);
             }
             if (IsAllowed(Permission.WPSnowball))
             {
-                Tick += SnowballPickupHelpMessageTask;
+                snowballSleeper = AddSleepingLoop(nameof(SnowballPickupHelpMessageTask), SnowballPickupHelpMessageTask, () => EventManager.IsSnowEnabled);
             }
             if (IsAllowed(Permission.PVMenu))
             {
-                Tick += AutoPVBlipOnExitTick;
+                pvBlipSleeper = AddSleepingLoop(nameof(AutoPVBlipOnExitTick), AutoPVBlipOnExitTick, PersonalVehicleWanted);
             }
             if (IsAllowed(Permission.PVLockDoors))
             {
-                Tick += PersonalVehicleOptions;
-                Tick += PersonalVehicleAutoLockTick;
+                pvOptionsSleeper = AddSleepingLoop(nameof(PersonalVehicleOptions), PersonalVehicleOptions, PersonalVehicleWanted);
+                pvAutoLockSleeper = AddSleepingLoop(nameof(PersonalVehicleAutoLockTick), PersonalVehicleAutoLockTick, PersonalVehicleWanted);
             }
             if (GetSettingsBool(Setting.vmenu_enable_animals_spawn_menu))
             {
@@ -244,6 +363,8 @@ namespace vMenuClient
             // The menu watcher sleeps while every menu is closed; if MenuAPI's open event was ever
             // missed, this wakes it within 100 ms.
             MainMenu.EnsureMenuWatcherAwake();
+            // Sleeping loops that have work now (see Sleeping loops), within 100 ms.
+            WakeSleepingLoops(false);
 
             // Check if the player has switched to a new vehicle.
             // PlayerPedId() is one game call; Game.PlayerPed is two (PlayerId, then GetPlayerPed).
@@ -366,21 +487,21 @@ namespace vMenuClient
                 DriveToWpTaskActive = false;
             }
 
-            // Every frame while an option here is enforced or watched every frame; otherwise the
-            // god mode and no ragdoll latches only have something to restore, which can wait.
-            var everyFrame = AnyMenuOpen
-                || (MainMenu.PlayerOptionsMenu.PlayerGodMode && godmodeAllowed)
-                || (MainMenu.PlayerOptionsMenu.PlayerNoRagdoll && noRagdollAllowed)
-                || MainMenu.PlayerOptionsMenu.PlayerInvisible
-                || MainMenu.PlayerOptionsMenu.PlayerSuperJump
-                // Never Wanted defaults to on, also for players without the permission, who
-                // can't see the option. Without it the check above does nothing.
-                || (MainMenu.PlayerOptionsMenu.PlayerNeverWanted && IsAllowed(Permission.PONeverWanted))
-                || DriveToWpTaskActive
-                || DriveWanderTaskActive;
-            if (!everyFrame)
+            // Super jump only works when asked for every frame. God mode, no ragdoll, invisibility and
+            // never wanted set things the game keeps, so 4 times a second puts them back after anything
+            // else changed them (a respawn, another script), as vMenu Enhanced re-applies god mode once
+            // a second. With none of them on, this sleeps (Sleeping loops).
+            if (AnyMenuOpen || (MainMenu.PlayerOptionsMenu.PlayerSuperJump && IsAllowed(Permission.POSuperjump)))
             {
-                await Rest(SleepRestMs);
+                return;
+            }
+            if (PlayerOptionsWanted())
+            {
+                await Rest(IdleRestMs);
+            }
+            else
+            {
+                playerOptionsSleeper.Sleep();
             }
         }
         #endregion
@@ -413,9 +534,9 @@ namespace vMenuClient
                 ped => new Ped(ped).CanBeKnockedOffBike = false, ped => new Ped(ped).CanBeKnockedOffBike = true);
             // Applied again every second while one is on, in case the ped changed (respawn, new
             // model). With all of them off the latches were let go above and nothing is left to do.
-            if (!AnyMenuOpen && !cantBeKnockedOff && !cantBeDraggedOut && !cantBeShotInVehicle)
+            if (!AnyMenuOpen && !ProtectionsWanted())
             {
-                await Rest(SleepRestMs);
+                protectionsSleeper.Sleep();
             }
             else
             {
@@ -687,14 +808,12 @@ namespace vMenuClient
         /// </summary>
         private bool VehicleOptionsEveryFrame()
         {
+            // The torque multiplier only lasts a frame. Vehicle god mode, freeze, keep clean, no helmet
+            // and infinite fuel set things the game keeps, or put right what happened, so the pass 10
+            // times a second is enough for them (vMenu Enhanced uses no loop or a slower one for each).
             var options = MainMenu.VehicleOptionsMenu;
             return SwitchedVehicle
-                || (options.VehicleGodMode && IsAllowed(Permission.VOGod))
-                || (options.VehicleFrozen && IsAllowed(Permission.VOFreeze))
-                || (options.VehicleNeverDirty && IsAllowed(Permission.VOKeepClean))
-                || (options.VehicleTorqueMultiplier && IsAllowed(Permission.VOTorqueMultiplier))
-                || (options.VehicleNoBikeHelemet && IsAllowed(Permission.VONoHelmet))
-                || (options.VehicleInfiniteFuel && IsAllowed(Permission.VOInfiniteFuel));
+                || (options.VehicleTorqueMultiplier && IsAllowed(Permission.VOTorqueMultiplier));
         }
 
         /// <summary>
@@ -764,9 +883,14 @@ namespace vMenuClient
         #region Weather Options
         private async Task WeatherOptions()
         {
-            // Only does something while the weather menu is open, so with every menu closed it rests
-            // until one opens.
-            await (AnyMenuOpen ? Delay(100) : Rest(SleepRestMs));
+            // Only does something while the weather menu is open: with every menu closed it sleeps until
+            // one opens.
+            if (!AnyMenuOpen)
+            {
+                weatherOptionsSleeper.Sleep();
+                return;
+            }
+            await Delay(100);
             var weatherMenu = MainMenu.WeatherOptionsMenu.GetMenu();
             if (weatherMenu != null && weatherMenu.Visible)
             {
@@ -832,7 +956,7 @@ namespace vMenuClient
                 // Checked every frame while a menu is open, so switching one on shows it at once.
                 if (!AnyMenuOpen)
                 {
-                    await Rest(SleepRestMs);
+                    hudSleeper.Sleep();
                 }
                 return;
             }
@@ -969,7 +1093,14 @@ namespace vMenuClient
             }
             else
             {
-                await (AnyMenuOpen ? Delay(1000) : Rest(SleepRestMs));
+                if (AnyMenuOpen)
+                {
+                    await Delay(1000);
+                }
+                else
+                {
+                    locationSleeper.Sleep();
+                }
             }
         }
         #endregion
@@ -1021,7 +1152,8 @@ namespace vMenuClient
             // Coordinates, location, time and speed are on the web page now (HudOverlayTick). With both
             // speeds shown, MPH sits where the game's street name is, so that is hidden every frame, as before.
             var bothSpeeds = MainMenu.MiscSettingsMenu.ShowSpeedoKmh && MainMenu.MiscSettingsMenu.ShowSpeedoMph;
-            if (bothSpeeds && IsPedInAnyVehicle(PlayerPedId(), false))
+            var hideStreetName = bothSpeeds && IsPedInAnyVehicle(PlayerPedId(), false);
+            if (hideStreetName)
             {
                 HideHudComponentThisFrame((int)HudComponent.StreetName);
             }
@@ -1069,17 +1201,28 @@ namespace vMenuClient
                 }
             }
 
-            // Each option above draws or enforces a setting every frame while it is on. With all of
-            // them off nothing here does anything, so it rests. The keys are key bindings now and
-            // need no polling.
+            // Hide radar, the camera locks and the street name hide (in a vehicle, with both speeds)
+            // only last a frame, so they keep this every frame; hide radar also has to win against HUD
+            // scripts that show the radar every frame. The expanded radar is a setting the game keeps,
+            // held 4 times a second as vMenu Enhanced does. With both speeds on foot it checks 10 times
+            // a second for getting in. With none of these it sleeps (Sleeping loops); RadarSettings and
+            // the minimap key wake it when they turn on the expanded radar. The keys are key bindings.
             var misc = MainMenu.MiscSettingsMenu;
-            var everyFrame = AnyMenuOpen
-                || misc.HideRadar || misc.LockCameraX || misc.LockCameraY
-                || expandedRadarProfile || vMenuOpenedBigmap || bothSpeeds;
-            if (!everyFrame)
+            if (AnyMenuOpen || misc.HideRadar || misc.LockCameraX || misc.LockCameraY || hideStreetName)
             {
-                // RadarSettings and the minimap key wake it when they turn on the expanded radar.
-                await Rest(SleepRestMs);
+                return;
+            }
+            if (bothSpeeds)
+            {
+                await Rest(StateRestMs);
+            }
+            else if (expandedRadarProfile || vMenuOpenedBigmap)
+            {
+                await Rest(IdleRestMs);
+            }
+            else
+            {
+                miscSettingsSleeper.Sleep();
             }
         }
 
@@ -1098,7 +1241,7 @@ namespace vMenuClient
                 // is open, so switching them on works at once.
                 if (!AnyMenuOpen)
                 {
-                    await Rest(SleepRestMs);
+                    recordingKeysSleeper.Sleep();
                 }
                 return;
             }
@@ -1341,7 +1484,14 @@ namespace vMenuClient
             }
             // Players stay dead for seconds, so 4 checks a second is enough. This ran every frame.
             // Switched off, it rests until a menu opens.
-            await (MainMenu.MiscSettingsMenu.DeathNotifications || AnyMenuOpen ? Delay(250) : Rest(SleepRestMs));
+            if (MainMenu.MiscSettingsMenu.DeathNotifications || AnyMenuOpen)
+            {
+                await Delay(250);
+            }
+            else
+            {
+                deathNotificationsSleeper.Sleep();
+            }
         }
         #endregion
         #endregion
@@ -1463,17 +1613,16 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task WeaponOptions()
         {
-            // If no reload is enabled.
-            if (MainMenu.WeaponOptionsMenu.NoReload && Game.PlayerPed.Weapons.Current.Hash != WeaponHash.Minigun && IsAllowed(Permission.WPNoReload))
-            {
-                // Disable reloading.
-                SetAmmoInClip(Game.PlayerPed.Handle, (uint)Game.PlayerPed.Weapons.Current.Hash, 5);
-            }
+            var ped = PlayerPedId();
+
+            // No reload: the game's infinite clip flag, which it keeps, as vMenu Enhanced uses (this
+            // refilled the clip in hand every frame). Cleared once when switched off or the ped changes.
+            ApplyOverride(noReloadLatch, MainMenu.WeaponOptionsMenu.NoReload && IsAllowed(Permission.WPNoReload), ped,
+                p => SetPedInfiniteAmmoClip(p, true), p => SetPedInfiniteAmmoClip(p, false));
 
             // Unlimited ammo: kept on the weapon in hand while the option is on, and switched off once
             // for the last weapon when the option goes off or you change weapon. It used to write
             // "off" every frame, undoing any other script's infinite ammo.
-            var ped = PlayerPedId();
             var weapon = GetSelectedPedWeapon(ped);
             var unlimitedAmmo = MainMenu.WeaponOptionsMenu.UnlimitedAmmo && IsAllowed(Permission.WPUnlimitedAmmo);
             var applyAmmo = unlimitedAmmoLatch.Update(unlimitedAmmo, weapon == unchecked((int)WeaponHash.Unarmed) ? 0 : weapon, out var previousWeapon);
@@ -1510,16 +1659,20 @@ namespace vMenuClient
                 }
             }
 
-            // With every weapon option off there is nothing to apply; the unlimited ammo latch only
-            // has a weapon to switch back, which happened above.
-            var everyFrame = AnyMenuOpen
-                || MainMenu.WeaponOptionsMenu.NoReload
-                || MainMenu.WeaponOptionsMenu.UnlimitedAmmo
-                || MainMenu.WeaponOptionsMenu.AutoEquipChute
-                || MainMenu.WeaponOptionsMenu.UnlimitedParachutes;
-            if (!everyFrame)
+            // Unlimited ammo follows the weapon in hand, so it is checked every frame, as in vMenu
+            // Enhanced. No reload and the parachutes set things the game keeps: 4 times a second.
+            // With all of them off it sleeps (Sleeping loops); the latches were let go above.
+            if (AnyMenuOpen || unlimitedAmmo)
             {
-                await Rest(SleepRestMs);
+                return;
+            }
+            if (WeaponOptionsWanted())
+            {
+                await Rest(IdleRestMs);
+            }
+            else
+            {
+                weaponOptionsSleeper.Sleep();
             }
         }
         #endregion
@@ -1809,7 +1962,7 @@ namespace vMenuClient
             // in it, so with every menu closed this rests.
             if (!AnyMenuOpen && camera == null)
             {
-                await Rest(SleepRestMs);
+                cameraSleeper.Sleep();
             }
         }
 
@@ -2422,6 +2575,9 @@ namespace vMenuClient
         // as fast as a blip's sprite, colour or display could usefully change. Rotation follows a
         // turning player, so it is still set every frame, for the blips the last refresh rotated.
         private const int PlayerBlipsRefreshMs = 100;
+        // Between refreshes the blips only turn with their players: 20 times a second is smooth on the
+        // map, where this ran every frame while blips were on.
+        private const int PlayerBlipsRotateMs = 50;
         private int playerBlipsRefreshedAt;
         private readonly List<KeyValuePair<int, int>> rotatingPlayerBlips = new(); // blip, ped
 
@@ -2504,10 +2660,17 @@ namespace vMenuClient
             {
                 await Delay(500);
             }
-            else if (GetGameTimer() - playerBlipsRefreshedAt < PlayerBlipsRefreshMs)
+            else
             {
-                RotatePlayerBlips();
-                return;
+                // Until the next refresh the blips only turn with their players, 20 times a second,
+                // within this run so the refresh lands on time.
+                var sinceRefresh = GetGameTimer() - playerBlipsRefreshedAt;
+                while (sinceRefresh < PlayerBlipsRefreshMs)
+                {
+                    RotatePlayerBlips();
+                    await Delay(Math.Min(PlayerBlipsRotateMs, PlayerBlipsRefreshMs - sinceRefresh));
+                    sinceRefresh = GetGameTimer() - playerBlipsRefreshedAt;
+                }
             }
             playerBlipsRefreshedAt = GetGameTimer();
             rotatingPlayerBlips.Clear();
@@ -2688,6 +2851,10 @@ namespace vMenuClient
                     await Delay(0);
                 }
             }
+            if (MainMenu.MiscSettingsMenu != null && MainMenu.MiscSettingsMenu.ShowPlayerBlips)
+            {
+                await Delay(PlayerBlipsRotateMs);
+            }
         }
 
         #endregion
@@ -2705,10 +2872,7 @@ namespace vMenuClient
         /// <returns></returns>
         private async Task PlayerOverheadNamesControl()
         {
-            // Switched off, the pass after that clears the tags; from then on it rests until a menu
-            // opens or vMenu:Integrations:SetPlayerNames switches names on.
-            var namesOff = MainMenu.MiscSettingsMenu != null && !MainMenu.MiscSettingsMenu.MiscShowOverheadNames;
-            await (namesOff && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(500));
+            await Delay(500);
 
             if (MainMenu.MiscSettingsMenu != null)
             {
@@ -2746,6 +2910,12 @@ namespace vMenuClient
                     }
                     gamerTags.EndUpdate(RemoveMpGamerTag);
                 }
+            }
+            // Switched off, the tags were cleared above; it sleeps until a menu opens or
+            // vMenu:Integrations:SetPlayerNames switches names on (Sleeping loops).
+            if (MainMenu.MiscSettingsMenu != null && !MainMenu.MiscSettingsMenu.MiscShowOverheadNames && !AnyMenuOpen)
+            {
+                namesSleeper.Sleep();
             }
         }
         #endregion
@@ -3090,8 +3260,15 @@ namespace vMenuClient
                     showSnowballInfo = true;
                 }
             }
-            // Without snow this rests; the help shows within 2 s of snow starting.
-            await (EventManager.IsSnowEnabled ? Delay(100) : Rest(SleepRestMs));
+            // Without snow this sleeps; GeneralTasks wakes it within 0.1 s of snow starting.
+            if (EventManager.IsSnowEnabled)
+            {
+                await Delay(100);
+            }
+            else
+            {
+                snowballSleeper.Sleep();
+            }
         }
         #endregion
 
@@ -3108,7 +3285,7 @@ namespace vMenuClient
             {
                 if (!AnyMenuOpen)
                 {
-                    await Rest(SleepRestMs);
+                    outlinesDrawSleeper.Sleep();
                 }
                 return;
             }
@@ -3348,7 +3525,7 @@ namespace vMenuClient
             {
                 if (!AnyMenuOpen)
                 {
-                    await Rest(SleepRestMs);
+                    outlinesScanSleeper.Sleep();
                 }
                 return;
             }
@@ -3396,8 +3573,13 @@ namespace vMenuClient
         private async Task PersonalVehicleAutoLockTick()
         {
             var personalVehicleMenu = MainMenu.PersonalVehicleMenu;
-            // No personal vehicle: rests until one is set (SetCurrentPersonalVehicle wakes it).
-            await (personalVehicleMenu?.CurrentPersonalVehicle == null && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(500));
+            // No personal vehicle: sleeps until one is set (SetCurrentPersonalVehicle wakes it).
+            if (personalVehicleMenu?.CurrentPersonalVehicle == null && !AnyMenuOpen)
+            {
+                pvAutoLockSleeper.Sleep();
+                return;
+            }
+            await Delay(500);
             var veh = personalVehicleMenu?.CurrentPersonalVehicle;
             if (!MainMenu.PermissionsSetupComplete || veh == null || !veh.Exists() || veh.IsDead)
             {
@@ -3419,7 +3601,7 @@ namespace vMenuClient
             if (!MainMenu.PermissionsSetupComplete || MainMenu.PersonalVehicleMenu == null)
             {
                 // New permissions wake it.
-                await Rest(SleepRestMs);
+                pvBlipSleeper.Sleep();
                 return;
             }
 
@@ -3429,7 +3611,7 @@ namespace vMenuClient
             if (personalVehicle == null)
             {
                 // SetCurrentPersonalVehicle wakes it.
-                await Rest(SleepRestMs);
+                pvBlipSleeper.Sleep();
                 return;
             }
 
@@ -3496,7 +3678,14 @@ namespace vMenuClient
                 personalVehicleMenu?.ResetHornLockTap();
                 // Near it again is a distance only this check sees; no personal vehicle at all waits
                 // for SetCurrentPersonalVehicle, which wakes it.
-                await (veh == null && !AnyMenuOpen ? Rest(SleepRestMs) : Delay(100));
+                if (veh == null && !AnyMenuOpen)
+                {
+                    pvOptionsSleeper.Sleep();
+                }
+                else
+                {
+                    await Delay(100);
+                }
                 return;
             }
 

@@ -36,11 +36,16 @@ namespace vMenuClient
 
         public static void MenuOpened() => WakeAll();
 
+        // Raised by every WakeAll, also with no rest in progress: FunctionsController puts its sleeping
+        // loops back on the tick list (see Sleeping loops there).
+        public static event System.Action Woken;
+
         // Ends every rest in progress: a menu opened, or something outside the menu changed what a
         // resting loop watches (permissions arrived, an integration event, a key binding). The
         // loops check again at once and rest again if there is still nothing to do.
         public static void WakeAll()
         {
+            Woken?.Invoke();
             TaskCompletionSource<bool>[] woken;
             lock (gate)
             {
