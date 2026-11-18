@@ -175,26 +175,36 @@ style = page[:page.index('</style>')]
 for selector in re.findall(r'^\s*([^\n{]*#menuapi[^\n{]*)\{', style, re.M):
     check('vmenu-guide' in selector, f'a #menuapi rule outside the guide: {selector.strip()}')
 
-# The card's text matches the menu's (themes/psrp-neon.css): GTA grey, a faint dark hairline that
-# trims GTA's font to the game's weight, and bold drawn as an own-colour outline, because the font
-# has no bold and the browser's fake one smears (and shows the hairline inside it as a grey ring).
+# The card's text matches the menu's (themes/psrp-neon.css): GTA grey, trimmed to the game's weight
+# with crisp edges by the vmenu-text filter, and bold drawn as an own-colour outline, because the
+# font has no bold and the browser's fake one smears. The filter only changes transparency, so it
+# goes on elements holding text alone: the key labels and the tip text get their own spans for it.
 guide_rules = {}
 for sel, body in re.findall(r'([^{}]+)\{([^{}]*)\}', re.sub(r'/\*.*?\*/', '', style, flags=re.S)):
     sel = ' '.join(sel.split())
     if sel.startswith('#vmenu-guide'):
         guide_rules[sel] = guide_rules.get(sel, '') + body
 card_rule = guide_rules.get('#vmenu-guide', '')
-check('color: rgb(225 225 225);' in card_rule and '-webkit-text-stroke: 0.45px rgb(0 0 0 / 55%);' in card_rule,
-      'the card\'s text is GTA grey with the same hairline as the menu')
+check('color: rgb(225 225 225);' in card_rule and '-webkit-text-stroke' not in card_rule,
+      'the card\'s text is GTA grey, with no dark hairline (it widened the edges)')
+CARD_TEXT = ('#vmenu-guide h3, #vmenu-guide p:not(.g-foot), #vmenu-guide .g-head > span:first-child, '
+             '#vmenu-guide .g-tag, #vmenu-guide .g-text, #vmenu-guide .g-label')
+check('filter: url(#vmenu-text);' in guide_rules.get(CARD_TEXT, ''), 'the card\'s text-only elements take the vmenu-text filter')
+for sel, body in guide_rules.items():
+    if 'filter:' in body:
+        check(sel == CARD_TEXT, f'{sel} takes a filter, but only text-only elements may')
+check('el("span", "g-label", text)' in script, 'key labels have their own span (the main key has a solid background)')
+check('el("span", "g-text", rich(d.tip))' in script, 'the tip text has its own span (the tip box has a see-through background)')
+check(re.search(r'<filter id="vmenu-text"[^>]*>\s*<feComponentTransfer>\s*<feFuncA type="gamma" amplitude="1" exponent="2.5" offset="0" />', page),
+      'the page defines the vmenu-text filter')
 for sel in ('#vmenu-guide .g-head', '#vmenu-guide h3', '#vmenu-guide b', '#vmenu-guide .g-tag'):
-    check('-webkit-text-stroke: 0.3px currentColor;' in guide_rules.get(sel, ''), f'{sel} is bold by an own-colour outline')
+    check('-webkit-text-stroke: 0.4px currentColor;' in guide_rules.get(sel, ''), f'{sel} is bold by an own-colour outline')
 for sel in ('#vmenu-guide h3', '#vmenu-guide b'):
     check('font-weight: normal;' in guide_rules.get(sel, ''), f'{sel} is bold by default, so it turns the browser\'s fake bold off')
 for sel, body in guide_rules.items():
     if re.search(r'font-weight:\s*(bold|[6-9]00)', body):
         check(sel == '#vmenu-guide kbd', f'{sel} asks GTA\'s font for a bold it doesn\'t have (only the Arial key caps may be bold)')
-check(re.search(r'-webkit-text-stroke: 0;', guide_rules.get('#vmenu-guide .g-head span + span, #vmenu-guide .g-foot, #vmenu-guide kbd', '')),
-      'muted text and the key caps keep their full weight')
+check('-webkit-text-stroke: 0;' in guide_rules.get('#vmenu-guide .g-head span + span', ''), 'the muted step counter isn\'t bold')
 
 # ---- Manifest and What's New ----
 check("'config/player-guide.json'" in manifest, 'the manifest ships config/player-guide.json')

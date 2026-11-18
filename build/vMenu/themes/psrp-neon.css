@@ -71,21 +71,36 @@
 
 /* Text. The browser draws GTA's font about a quarter heavier than the game did (5.1px strokes at
    1440p against the old GTA-drawn menu's 4.0px), so the letters crowd together and read as soft.
-   A faint dark hairline over each letter's edge trims it back to 4.0px. Greyed-out rows keep their
-   full weight so they stay readable; the banner title and the key caps are left as they are. */
-#menuapi,
-#menuapi-buttons { -webkit-text-stroke: 0.45px rgb(0 0 0 / 55%); }
-#menuapi .menuapi-row--disabled,
-#menuapi .menuapi-header__title,
-#menuapi-buttons .menuapi-key { -webkit-text-stroke: 0; }
+   The vmenu-text filter (an SVG filter in storage.html) raises each letter's coverage to the power
+   2.5: the faint outer pixels fade, which trims the letters back to 4.0px and steepens their edges
+   (1.1px from background to text, against the old menu's 1.3px). A dark hairline did the trimming
+   before, but it widened the edges to 1.8px and looked out of focus.
+   The filter changes only transparency, so it goes on text alone: anything see-through in the same
+   element would fade too, and text over a solid background in the same element wouldn't thin.
+   Greyed-out rows keep their full weight so they stay readable; the banner title and the key caps
+   are left as they are. */
+#menuapi .menuapi-row__text,
+#menuapi .menuapi-row__label,
+#menuapi .menuapi-row--separator > span,
+#menuapi .menuapi-subtitle > span,
+#menuapi .menuapi-desc > span,
+#menuapi .menuapi-overflow > span,
+#menuapi .menuapi-stat__label,
+#menuapi .gcl__label,
+#menuapi .gcl__min,
+#menuapi .gcl__max,
+#menuapi .gcl__name,
+#menuapi-buttons .menuapi-buttons__text { filter: url(#vmenu-text); }
+#menuapi .menuapi-row--disabled .menuapi-row__text,
+#menuapi .menuapi-row--disabled .menuapi-row__label { filter: none; }
 
 /* Bold (GTA's ~h~, which MenuAPI draws as an inline font-weight). GTA's font has no bold, so the
-   browser fakes one by smearing each letter, about half again as heavy, and the hairline above
-   would show inside the smear as a grey outline. Bold is drawn as the regular letters with a thin
-   outline in their own colour instead: clearly heavier, with the gaps between letters kept. */
+   browser fakes one by smearing each letter, about half again as heavy. Bold is drawn as the
+   regular letters with an outline in their own colour instead, which the filter above then
+   sharpens like the rest: clearly heavier, with the gaps between letters kept. */
 #menuapi span[style*="font-weight"] {
   font-weight: normal !important;
-  -webkit-text-stroke: 0.3px currentColor;
+  -webkit-text-stroke: 0.4px currentColor;
 }
 
 /* The key hints in the bottom right: the same glass, light keys. */

@@ -327,11 +327,6 @@
     font-family: "GTA Chalet", "Helvetica Neue", Arial, sans-serif;
     line-height: 1.4;
     color: rgb(225 225 225);
-    /* The same text treatment as the menu (themes/psrp-neon.css, "Text"): a faint dark hairline
-       trims GTA's font back to the game's weight, and bold is the regular letters with a thin
-       outline in their own colour, because the font has no bold and the browser's fake one smears.
-       Muted text and the Arial key caps are left at full weight. */
-    -webkit-text-stroke: 0.45px rgb(0 0 0 / 55%);
     background: rgb(24 19 37 / 94%);
     border-radius: 10px;
     box-shadow: 0 0 0 1px rgb(255 255 255 / 7%), 0 12px 32px rgb(0 0 0 / 45%);
@@ -352,7 +347,7 @@
     justify-content: space-between;
     padding: 14px 20px 11px;
     font-size: 16px;
-    -webkit-text-stroke: 0.3px currentColor;
+    -webkit-text-stroke: 0.4px currentColor;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: rgb(178 150 255);
@@ -384,7 +379,7 @@
     margin: 0;
     font-size: 26px;
     font-weight: normal;
-    -webkit-text-stroke: 0.3px currentColor;
+    -webkit-text-stroke: 0.4px currentColor;
     line-height: 1.2;
     color: rgb(255 255 255);
   }
@@ -396,7 +391,7 @@
 
   #vmenu-guide b {
     font-weight: normal;
-    -webkit-text-stroke: 0.3px currentColor;
+    -webkit-text-stroke: 0.4px currentColor;
     color: rgb(255 255 255);
   }
 
@@ -420,7 +415,7 @@
   #vmenu-guide .g-tag {
     margin-right: 6px;
     font-size: 15px;
-    -webkit-text-stroke: 0.3px currentColor;
+    -webkit-text-stroke: 0.4px currentColor;
     letter-spacing: 0.12em;
     color: rgb(178 150 255);
   }
@@ -430,9 +425,21 @@
     color: rgb(132 126 152);
   }
 
-  #vmenu-guide .g-head span + span,
-  #vmenu-guide .g-foot,
-  #vmenu-guide kbd {
+  /* The same text treatment as the menu (themes/psrp-neon.css, "Text"): the vmenu-text filter
+     trims GTA's font back to the game's weight with crisp edges, and bold is the regular letters
+     with an outline in their own colour, because the font has no bold and the browser's fake one
+     smears. The filter only changes transparency, so it goes on elements holding text alone (the
+     key labels and the tip text have their own spans for this). Muted text keeps its full weight. */
+  #vmenu-guide h3,
+  #vmenu-guide p:not(.g-foot),
+  #vmenu-guide .g-head > span:first-child,
+  #vmenu-guide .g-tag,
+  #vmenu-guide .g-text,
+  #vmenu-guide .g-label {
+    filter: url(#vmenu-text);
+  }
+
+  #vmenu-guide .g-head span + span {
     -webkit-text-stroke: 0;
   }
 
@@ -488,6 +495,16 @@
   <div id="menuapi"></div>
 
   <div id="vmenu-guide" hidden></div>
+
+  <!-- The vmenu-text filter, for the menu's and the card's text (themes/psrp-neon.css, "Text"):
+       each pixel's coverage to the power 2.5, so GTA's font is drawn at the game's weight. -->
+  <svg id="vmenu-filters" width="0" height="0" aria-hidden="true" focusable="false" style="position: absolute">
+    <filter id="vmenu-text" x="-20%" y="-50%" width="140%" height="200%" color-interpolation-filters="sRGB">
+      <feComponentTransfer>
+        <feFuncA type="gamma" amplitude="1" exponent="2.5" offset="0" />
+      </feComponentTransfer>
+    </filter>
+  </svg>
 
   <div id="vmenu-hud" hidden>
     <div id="vmenu-hud-coords" hidden></div>
@@ -681,7 +698,7 @@
       }
 
       function key(cap, text, main) {
-        return el("span", main ? "g-key g-key--main" : "g-key", el("kbd", null, cap), text);
+        return el("span", main ? "g-key g-key--main" : "g-key", el("kbd", null, cap), el("span", "g-label", text));
       }
 
       function rowName(row) {
@@ -754,7 +771,7 @@
 
         const body = el("div", "g-body", el("h3", null, d.title || ""));
         for (const line of d.body || []) body.append(el("p", null, rich(line)));
-        if (d.tip) body.append(el("div", "g-tip", el("span", "g-tag", "TIP"), rich(d.tip)));
+        if (d.tip) body.append(el("div", "g-tip", el("span", "g-tag", "TIP"), el("span", "g-text", rich(d.tip))));
         if (d.foot) body.append(el("p", "g-foot", rich(d.foot)));
         parts.push(body, el("div", "g-keys", ...keys));
 

@@ -43,9 +43,10 @@ defined = set(re.findall(r'(--psrp-[a-z0-9-]+)\s*:', code))
 used = set(re.findall(r'var\((--psrp-[a-z0-9-]+)', code))
 assert used <= defined, f'undefined colours: {sorted(used - defined)}'
 
-# Classes: every one targeted exists in MenuAPI's stylesheet.
-classes = set(re.findall(r'\.(menuapi-[a-z0-9_-]+)', ' '.join(s for s, _ in rules)))
-missing = sorted(c for c in classes if '.' + c not in menuapi_css)
+# Classes: every one targeted is one MenuAPI styles or puts on its markup.
+markup_js = (root / 'build' / 'vMenu' / 'menuapi' / 'menuapi.min.js').read_text(encoding='utf-8-sig')
+classes = set(re.findall(r'\.((?:menuapi|gcl)-?[a-z0-9_-]+)', ' '.join(s for s, _ in rules)))
+missing = sorted(c for c in classes if '.' + c not in menuapi_css and f'"{c}"' not in markup_js)
 assert not missing, f'classes MenuAPI doesn\'t have: {missing}'
 
 # The two things tokens can't reach: vMenu's sliders (colours set on each slider) and the selected
@@ -54,29 +55,42 @@ assert re.search(r'#menuapi \.menuapi-slider \{[^}]*background-color:[^;]*!impor
 assert re.search(r'#menuapi \.menuapi-row--selected \.menuapi-icon \{[^}]*--tint:[^;]*!important', code)
 assert re.search(r'#menuapi \.menuapi-row--selected \.menuapi-icon--checkbox \{[^}]*filter: invert\(1\)', code)
 
-# Text weight. The browser draws GTA's font about a quarter heavier than the game did, so a faint
-# dark hairline trims every letter back to the game's weight; greyed-out rows, the banner title and
-# the key caps keep their full weight. The text is GTA's own menu grey.
+# Text weight. The browser draws GTA's font about a quarter heavier than the game did. The
+# vmenu-text filter (defined in storage.html) raises each letter's coverage to the power 2.5, which
+# trims the letters back to the game's weight with crisp edges. It changes only transparency, so it
+# may only go on elements that hold text alone: on anything with a see-through background that
+# background would fade, and text over a solid background in the same element wouldn't thin.
 def rule(selector_pattern):
     found = [body for sel, body in rules if re.fullmatch(selector_pattern, ' '.join(sel.split()))]
     assert len(found) == 1, f'expected one rule for {selector_pattern}, found {len(found)}'
     return found[0]
 
 
-edge = rule(r'#menuapi, #menuapi-buttons')
-assert re.search(r'-webkit-text-stroke:\s*0\.45px rgb\(0 0 0 / 55%\)', edge), 'the text hairline is missing or changed'
-reset = rule(r'#menuapi \.menuapi-row--disabled, #menuapi \.menuapi-header__title, #menuapi-buttons \.menuapi-key')
-assert re.search(r'-webkit-text-stroke:\s*0;', reset), 'greyed-out rows, the title and key caps must keep full weight'
+TEXT_ONLY = {
+    '#menuapi .menuapi-row__text', '#menuapi .menuapi-row__label', '#menuapi .menuapi-row--separator > span',
+    '#menuapi .menuapi-subtitle > span', '#menuapi .menuapi-desc > span', '#menuapi .menuapi-overflow > span',
+    '#menuapi .menuapi-stat__label', '#menuapi .gcl__label', '#menuapi .gcl__min', '#menuapi .gcl__max',
+    '#menuapi .gcl__name', '#menuapi-buttons .menuapi-buttons__text',
+}
+filtered = [(sel, body) for sel, body in rules if re.search(r'filter:\s*url\(#vmenu-text\)', body)]
+assert len(filtered) == 1, 'the text filter is set in one rule'
+targets = {' '.join(s.split()) for s in filtered[0][0].split(',')}
+assert targets == TEXT_ONLY, f'the text filter must cover exactly the text-only elements; extra {sorted(targets - TEXT_ONLY)}, missing {sorted(TEXT_ONLY - targets)}'
+off = rule(r'#menuapi \.menuapi-row--disabled \.menuapi-row__text, #menuapi \.menuapi-row--disabled \.menuapi-row__label')
+assert re.search(r'filter:\s*none', off), 'greyed-out rows keep their full weight'
+assert re.search(r'<filter id="vmenu-text"[^>]*color-interpolation-filters="sRGB"', storage), 'storage.html defines the vmenu-text filter'
+assert '<feFuncA type="gamma" amplitude="1" exponent="2.5" offset="0" />' in storage, 'the filter is coverage to the power 2.5'
+assert not re.search(r'-webkit-text-stroke[^;]*rgb\(', code), 'no dark hairline: it widened the edges and looked out of focus'
 assert re.search(r'--psrp-text:\s*rgb\(225 225 225\)', code), 'menu text is GTA grey'
 
 # Bold. MenuAPI draws GTA's ~h~ as an inline font-weight on a span; GTA's font has no bold, so the
-# browser would fake one (half again as heavy) and the hairline above would show inside it as a
-# grey outline. Bold is the regular letters with a thin outline in their own colour instead.
+# browser would fake one (half again as heavy), which smears. Bold is the regular letters with an
+# outline in their own colour instead, which the filter then sharpens like the rest.
 menuapi_js = (root / 'build' / 'vMenu' / 'menuapi' / 'menuapi.min.js').read_text(encoding='utf-8-sig')
 assert 'style.fontWeight="bold"' in menuapi_js, 'MenuAPI no longer marks ~h~ bold with an inline font-weight; update the bold rule'
 bold = rule(r'#menuapi span\[style\*="font-weight"\]')
 assert re.search(r'font-weight:\s*normal\s*!important', bold), 'bold must not use the browser\'s fake bold'
-assert re.search(r'-webkit-text-stroke:\s*0\.3px currentColor', bold), 'bold is drawn with an own-colour outline'
+assert re.search(r'-webkit-text-stroke:\s*0\.4px currentColor', bold), 'bold is drawn with an own-colour outline'
 assert not re.search(r'font-weight:\s*(bold|[6-9]00)', code), 'nothing in the skin may ask GTA\'s font for a bold it doesn\'t have'
 
 # storage.html loads it after MenuAPI's own stylesheets, so it wins.

@@ -83,28 +83,47 @@ since MenuAPI 4 (release I).
   has 4.0 px strokes at 1440p; the new menu has 5.1 px at the same size and width,
   so the letters crowd together. GTA's font also has no bold, so bold is the
   browser's fake one, about half again as heavy (7.6 px), which smears.
+- **First try, a dark hairline** (commit `bc4eba0`): a
+  `-webkit-text-stroke: 0.45px rgb(0 0 0 / 55%)` over each letter's edge. It got
+  the weight right (3.93 px in the owner's next screenshot) but still looked out
+  of focus: the hairline brings its own soft border, so the edge from background
+  to text widened from 1.30 px to 1.78 px. A solid hairline in the surface's
+  colour (1.94 px), a black one and a sharpening filter didn't fix it.
 - **The change** (`themes/psrp-neon.css` for the menu and key hints,
-  `storage.html` for the guide card):
+  `storage.html` for the guide card and the filter itself):
   - Text is GTA's menu grey, `rgb(225 225 225)`, rather than the skin's
     lilac-white.
-  - A faint dark hairline (`-webkit-text-stroke: 0.45px rgb(0 0 0 / 55%)`) trims
-    each letter back to 4.0 px. It scales with the menu, so the proportions hold
-    at every resolution (previewed at 2560×1440, 1920×1080 and 1600×900).
+  - The `vmenu-text` SVG filter in `storage.html` raises each pixel's coverage to
+    the power 2.5 (`feFuncA type="gamma" exponent="2.5"`). The faint outer pixels
+    fade, which thins the letters and steepens their edges in one step. At 1440p:
+    rows 4.01 px with a 1.12 px edge, against the old GTA menu's 3.95 px and
+    1.30 px. It is the same at 1080p (3.02 px, 1.12 px); at 900p strokes are
+    2.15 px, a little under proportional, and still read well.
+  - The filter changes only transparency, so it is only on elements that hold
+    text alone: row text and labels, separators, subtitle, description,
+    overflow arrows, stat and colour-panel labels, key-hint labels, and on the
+    card the title, paragraphs, header, TIP tag, tip text and key labels. The
+    tip text and key labels got their own spans for this, since the tip box is
+    see-through and the main key is solid.
   - Greyed-out rows, muted card text, the banner title and the key caps are left
     at full weight.
   - Bold (MenuAPI's inline `font-weight` for `~h~`, and the card's title, bold
-    words, header and TIP tag) is the regular letters with a 0.3 px outline in
-    their own colour. The hairline on the browser's fake bold draws inside the
-    smear as a grey ring, so fake bold is switched off.
+    words, header and TIP tag) is the regular letters with a 0.4 px outline in
+    their own colour, which the filter then sharpens: 1.34× regular in the menu
+    and 1.42× on the card, with 1.35–1.41 px edges. The browser's fake bold is
+    switched off.
+  - The filter only runs when the menu's content changes, not every frame.
 - **Considered and not used:** MenuAPI's `geometric` text mode draws identical
   pixels; its `supersampled` mode only reaches 4.6 px, needs a client DLL change,
   and on Chromium 144 its `zoom: 2` also doubles the menu's position.
 - **Guards:** `tests/psrp-skin` and `tests/player-guide` check every part of the
-  above, including that MenuAPI still marks `~h~` with an inline
-  `font-weight`, and that nothing asks GTA's font for a bold. 12 deliberate
+  above: the filter's exact list of text-only elements, its definition, no dark
+  hairline, the bold outline, that MenuAPI still marks `~h~` with an inline
+  `font-weight`, and that nothing asks GTA's font for a bold. 15 deliberate
   breakages each fail a test.
-- **Undo just this:** `deploy/release-n-undo-text-change/` holds the previous
-  `storage.html` and `themes/psrp-neon.css`.
+- **Undo just this:** `deploy/release-n-undo-text-change/` holds `storage.html`
+  and `themes/psrp-neon.css` from before both text changes (commit `ae93c9b`).
+  The hairline version is commit `bc4eba0`.
 
 **Why.** The owner asked for a guide new players can go through on their first
 F1, like the ones in PSRP_CAD and EasyAdmin, because players keep asking staff
