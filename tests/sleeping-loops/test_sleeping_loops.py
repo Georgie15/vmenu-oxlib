@@ -51,14 +51,14 @@ def method(source, name):
 SLEEPERS = {
     'PlayerOptions': ('playerOptionsSleeper', 'PlayerOptionsWanted'),
     'DoPlayerAndVehicleChecks': ('protectionsSleeper', 'ProtectionsWanted'),
-    'WeatherOptions': ('weatherOptionsSleeper', '() => false'),
+    'WeatherOptions': ('weatherOptionsSleeper', '() => AnyMenuOpen'),
     'HudOverlayTick': ('hudSleeper', 'HudWanted'),
     'UpdateLocation': ('locationSleeper', '() => MainMenu.MiscSettingsMenu?.ShowLocation == true'),
     'MiscSettings': ('miscSettingsSleeper', 'MiscSettingsWanted'),
     'MiscRecordingKeybinds': ('recordingKeysSleeper', '() => MainMenu.MiscSettingsMenu?.KbRecordKeys == true'),
     'DeathNotifications': ('deathNotificationsSleeper', '() => MainMenu.MiscSettingsMenu?.DeathNotifications == true'),
     'WeaponOptions': ('weaponOptionsSleeper', 'WeaponOptionsWanted'),
-    'ManageCamera': ('cameraSleeper', '() => camera != null'),
+    'ManageCamera': ('cameraSleeper', '() => camera != null || AnyMenuOpen'),
     'ModelDrawDimensions': ('outlinesDrawSleeper', 'OutlinesWanted'),
     'SlowMiscTick': ('outlinesScanSleeper', 'OutlinesWanted'),
     'PlayerOverheadNamesControl': ('namesSleeper', '() => MainMenu.MiscSettingsMenu?.MiscShowOverheadNames == true'),
@@ -68,17 +68,43 @@ SLEEPERS = {
     'PersonalVehicleOptions': ('pvOptionsSleeper', 'PersonalVehicleWanted'),
 }
 assert 'SleepRestMs' not in fc, 'no long rests are left (release M sleeps instead)'
+WS = r'\s*'
+GUARDS = {
+    'PlayerOptions': r'if \(AnyMenuOpen \|\| \(MainMenu\.PlayerOptionsMenu\.PlayerSuperJump && IsAllowed\(Permission\.POSuperjump\)\)\)\s*\{\s*return;\s*\}\s*'
+                     r'if \(PlayerOptionsWanted\(\)\)\s*\{\s*await Rest\(IdleRestMs\);\s*\}\s*else\s*\{\s*playerOptionsSleeper\.Sleep\(\);',
+    'DoPlayerAndVehicleChecks': r'if \(!AnyMenuOpen && !ProtectionsWanted\(\)\)\s*\{\s*protectionsSleeper\.Sleep\(\);',
+    'WeatherOptions': r'if \(!AnyMenuOpen\)\s*\{\s*weatherOptionsSleeper\.Sleep\(\);\s*return;',
+    'HudOverlayTick': r'if \(!AnyMenuOpen\)\s*\{\s*hudSleeper\.Sleep\(\);',
+    'UpdateLocation': r'if \(AnyMenuOpen\)\s*\{\s*await Delay\(1000\);\s*\}\s*else\s*\{\s*locationSleeper\.Sleep\(\);',
+    # The expanded radar is held 4 times a second, not left to sleep.
+    'MiscSettings': r'if \(AnyMenuOpen \|\| misc\.HideRadar \|\| misc\.LockCameraX \|\| misc\.LockCameraY \|\| hideStreetName\)\s*\{\s*return;\s*\}\s*'
+                    r'if \(bothSpeeds\)\s*\{\s*await Rest\(StateRestMs\);\s*\}\s*'
+                    r'else if \(expandedRadarProfile \|\| vMenuOpenedBigmap\)\s*\{\s*await Rest\(IdleRestMs\);\s*\}\s*else\s*\{\s*miscSettingsSleeper\.Sleep\(\);',
+    'MiscRecordingKeybinds': r'if \(!AnyMenuOpen\)\s*\{\s*recordingKeysSleeper\.Sleep\(\);',
+    'DeathNotifications': r'if \(MainMenu\.MiscSettingsMenu\.DeathNotifications \|\| AnyMenuOpen\)\s*\{\s*await Delay\(250\);\s*\}\s*else\s*\{\s*deathNotificationsSleeper\.Sleep\(\);',
+    'WeaponOptions': r'if \(AnyMenuOpen \|\| unlimitedAmmo\)\s*\{\s*return;\s*\}\s*'
+                     r'if \(WeaponOptionsWanted\(\)\)\s*\{\s*await Rest\(IdleRestMs\);\s*\}\s*else\s*\{\s*weaponOptionsSleeper\.Sleep\(\);',
+    'ManageCamera': r'if \(!AnyMenuOpen && camera == null\)\s*\{\s*cameraSleeper\.Sleep\(\);',
+    'ModelDrawDimensions': r'if \(!AnyMenuOpen\)\s*\{\s*outlinesDrawSleeper\.Sleep\(\);',
+    'SlowMiscTick': r'if \(!AnyMenuOpen\)\s*\{\s*outlinesScanSleeper\.Sleep\(\);',
+    'PlayerOverheadNamesControl': r'if \(MainMenu\.MiscSettingsMenu != null && !MainMenu\.MiscSettingsMenu\.MiscShowOverheadNames && !AnyMenuOpen\)\s*\{\s*namesSleeper\.Sleep\(\);',
+    'SnowballPickupHelpMessageTask': r'if \(EventManager\.IsSnowEnabled\)\s*\{\s*await Delay\(100\);\s*\}\s*else\s*\{\s*snowballSleeper\.Sleep\(\);',
+    'PersonalVehicleAutoLockTick': r'if \(personalVehicleMenu\?\.CurrentPersonalVehicle == null && !AnyMenuOpen\)\s*\{\s*pvAutoLockSleeper\.Sleep\(\);\s*return;',
+    'AutoPVBlipOnExitTick': r'if \(personalVehicle == null\)\s*\{\s*// SetCurrentPersonalVehicle wakes it\.\s*pvBlipSleeper\.Sleep\(\);',
+    'PersonalVehicleOptions': r'if \(veh == null && !AnyMenuOpen\)\s*\{\s*pvOptionsSleeper\.Sleep\(\);',
+}
+assert set(GUARDS) == set(SLEEPERS)
 setup = method(fc, 'SetupTickFunctions')
 for name, (field, wanted) in SLEEPERS.items():
     assert f'{field} = AddSleepingLoop(nameof({name}), {name}, {wanted});' in setup, f'{name} is registered as a sleeping loop'
     assert f'Tick += {name};' not in setup, f'{name} is registered once'
     body = method(fc, name)
-    assert f'{field}.Sleep();' in body, f'{name} sleeps'
-    # Never while a menu is open: options change there, and every loop must see them the next frame.
-    # Two have no option a menu could switch on while they sleep: snow (the server's weather) and the
-    # personal vehicle; GeneralTasks' 100 ms check wakes them when either appears.
-    if name not in ('SnowballPickupHelpMessageTask', 'AutoPVBlipOnExitTick'):
-        assert 'AnyMenuOpen' in body, f'{name} sleeps only with every menu closed'
+    assert body.count(f'{field}.Sleep();') == (2 if name == 'AutoPVBlipOnExitTick' else 1), f'{name} sleeps in one place'
+    # The exact guard each loop sleeps behind. Never while a menu is open: options change there, and
+    # every loop must see them on the next frame. Two have no option a menu could switch on while they
+    # sleep, snow (the server's weather) and the personal vehicle; GeneralTasks' 100 ms check wakes
+    # them when either appears.
+    assert re.search(GUARDS[name], body), f'{name} sleeps only behind its guard'
 sleeping = {m.group(1) for m in re.finditer(r'^        private async Task (\w+)\(\)\s*\n        \{(?:(?!^        \}$).)*?Sleeper\.Sleep\(\)', fc, re.M | re.S)}
 assert sleeping == set(SLEEPERS), f'only these loops sleep: {sorted(sleeping ^ set(SLEEPERS))}'
 # These watch the game, not just options, so they keep their shorter rests.
@@ -107,6 +133,16 @@ assert 'IdleRest.WakeAll();' in method(fc, 'OnMinimapReleased')
 checks = method(fc, 'DoPlayerAndVehicleChecks')
 assert checks.count('await Delay(100);') == 0 and 'await Delay(1000);' in checks
 assert 'RegisterCommand("vmenu_ticks"' in method(fc, 'WireSleepingLoops'), 'vmenu_ticks lists which loops are asleep'
+# Review fixes: set up once (a second run would register every loop twice, and a sleep removes one copy).
+once = re.search(r'if \(tickFunctionsSetUp\)\s*\{\s*return;\s*\}\s*tickFunctionsSetUp = true;', setup)
+assert once and once.start() < setup.index('RegisterKeyBindings();'), 'SetupTickFunctions runs once'
+# Noclip ending: god mode is not dropped, an invisible player on foot stays invisible, and the loops holding
+# vMenu's options check again on the next frame rather than after their 250 ms rest.
+noclip = (root / 'vMenu' / 'Noclip.cs').read_text(encoding='utf-8-sig')
+handler = method(noclip, 'NoClipHandler')
+assert re.search(r'if \(!\(onFoot && playerOptions != null && playerOptions\.PlayerGodMode\s*&& vMenuShared\.PermissionsManager\.IsAllowed\(vMenuShared\.PermissionsManager\.Permission\.POGod\)\)\)\s*\{\s*SetEntityInvincible\(noclipEntity, false\);', handler)
+assert 'if (playerOptions == null || !playerOptions.PlayerInvisible || !onFoot' in handler, 'the visibility reset matches its comment'
+assert handler.index('while (NoclipActive)') < handler.index('IdleRest.WakeAll();') < handler.index('await Task.FromResult(0);'), 'noclip ending wakes the option loops'
 print(f'PASS: {len(SLEEPERS)} option-only loops sleep off the tick list; a menu, permissions, integrations, a personal vehicle, '
       'the radar and GeneralTasks\' 100 ms check wake them')
 

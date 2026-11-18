@@ -270,11 +270,22 @@ namespace vMenuClient
                 // After the next game tick, reset the entity properties.
                 await Delay(0);
                 FreezeEntityPosition(noclipEntity, false);
-                SetEntityInvincible(noclipEntity, false);
+                // vMenu's god mode keeps the player invincible: PlayerOptions now holds it 4 times a
+                // second rather than every frame, so noclip leaves it on instead of dropping it.
+                var playerOptions = MainMenu.PlayerOptionsMenu;
+                var onFoot = noclipEntity == Game.PlayerPed.Handle;
+                if (!(onFoot && playerOptions != null && playerOptions.PlayerGodMode
+                    && vMenuShared.PermissionsManager.IsAllowed(vMenuShared.PermissionsManager.Permission.POGod)))
+                {
+                    SetEntityInvincible(noclipEntity, false);
+                }
                 SetEntityCollision(noclipEntity, true, true);
 
-                // If the player is not set as invisible by PlayerOptions or if the noclip entity is not the player ped, reset the visibility
-                if (MainMenu.PlayerOptionsMenu == null || !MainMenu.PlayerOptionsMenu.PlayerInvisible || (MainMenu.PlayerOptionsMenu.PlayerInvisible && noclipEntity == Game.PlayerPed.Handle))
+                // If the player is not set as invisible by PlayerOptions or if the noclip entity is not the player ped, reset the visibility.
+                // (This reset an invisible player on foot too, the opposite of what it says, which PlayerOptions
+                // undid on the next frame while it ran every frame.)
+                if (playerOptions == null || !playerOptions.PlayerInvisible || !onFoot
+                    || !vMenuShared.ConfigManager.GetSettingsBool(vMenuShared.ConfigManager.Setting.vmenu_handle_invisibility))
                 {
                     SetEntityVisible(noclipEntity, true, false);
                     SetLocalPlayerVisibleLocally(true);
@@ -286,6 +297,10 @@ namespace vMenuClient
                 SetEveryoneIgnorePlayer(Game.PlayerPed.Handle, false);
                 SetPoliceIgnorePlayer(Game.PlayerPed.Handle, false);
             }
+
+            // Noclip ended: the loops that hold vMenu's options (god mode, invisibility...) check again
+            // on the next frame, not after their 250 ms rest.
+            IdleRest.WakeAll();
 
             await Task.FromResult(0);
         }

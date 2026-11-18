@@ -49,7 +49,7 @@ assert setup.rstrip().endswith('''if (vehicleHealthCheckEnabled || highbeamFlash
         }'''), 'the shared tick is registered when any of its checks is'
 assert re.search(r'Tick \+= VehicleOptions;\s*vehicleHealthCheckEnabled = true;\s*if \(IsAllowed\(Permission\.VOFlashHighbeamsOnHonk\)\)\s*\{\s*highbeamFlashCheckEnabled = true;', setup), \
     'health text and highbeams keep their permissions'
-assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*cameraSleeper = AddSleepingLoop\(nameof\(ManageCamera\), ManageCamera, \(\) => camera != null\);\s*movementLockCheckEnabled = true;', setup)
+assert re.search(r'if \(IsAllowed\(Permission\.PAMenu\)\)\s*\{\s*cameraSleeper = AddSleepingLoop\(nameof\(ManageCamera\), ManageCamera, \(\) => camera != null \|\| AnyMenuOpen\);\s*movementLockCheckEnabled = true;', setup)
 assert re.search(r'if \(GetSettingsBool\(Setting\.vmenu_enable_animals_spawn_menu\)\)\s*\{\s*animalCameraCheckEnabled = true;', setup)
 # MenuAPI 3 forced a GC.Collect() every 60 s unless EnableManualGCs was off. MenuAPI 4 has no manual GC.
 csproj = (root / 'vMenu' / 'vMenuClient.csproj').read_text(encoding='utf-8-sig')

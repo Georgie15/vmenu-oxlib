@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release L: upstream bug fixes (plates, eyebrows, arrows, doors, loadouts), a Kick Passengers range, loops that sleep while idle, and a calmer PSRP Neon skin (client DLL, server DLL, `themes/psrp-neon.css`), on top of releases K, J, I and H. **Testing on branch `perf/release-l`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
+| Latest change | November 17, 2026 — release M: vMenu's idle loops switch fully off and options are set once, as in vMenu Enhanced (client DLL), on top of releases L, K, J, I and H. **Testing on branch `perf/release-m`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `2fc34daa2e0245c7ffa4d40bb5126b9f914883791980ab1ba89bc5ab94fb0c07` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,176 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 17, 2026 — release M: loops fully off while idle, options set once (client DLL) — TESTING, branch `perf/release-m`
+
+**Status: test build, not verified in game, not on `main`.** It is built on
+release L (`perf/release-l`). Only the client DLL changes.
+
+**Why.** The owner's profile of release L showed vMenu at 0.148 ms a frame:
+- about 0.11 ms of it was the C# runtime's bookkeeping for vMenu's resting
+  loops;
+- the rest was four loops that ran every frame because of options on the
+  owner's account.
+
+The owner asked for the rest of vMenu Enhanced's optimizations. A check of all
+74 of Enhanced's loops found two things releases H to L hadn't brought over:
+- Enhanced's loops stop completely while their feature is off.
+- Enhanced sets most player and weapon options once and re-applies them
+  occasionally, rather than every frame.
+
+**What changed:**
+- **Loops fully off while idle.** 17 loops have nothing to watch but menu
+  options:
+  - player, weapon and misc options; weather; the HUD and location; the
+    recording keys; death notifications; overhead names; entity outlines;
+  - the character editor camera; the snowball hint;
+  - the personal vehicle loops (without a personal vehicle);
+  - the shared player and vehicle protections.
+
+  With every menu closed and their options off, they take themselves off
+  FiveM's tick list (`TickSleeper`), so they cost nothing, not even a wait for
+  the runtime to check. They come back:
+  - **all at once,** on anything that ended release L's rests
+    (`IdleRest.Woken`): a menu opening, new permissions, the player blips and
+    names integration events, a new personal vehicle, the minimap key, or the
+    pause menu's expanded radar;
+  - **each on its own,** when `GeneralTasks` (every 100 ms) runs that loop's own
+    "wanted" test (cheap reads of options and permissions) and it says there is
+    work. This catches anything that changes without one of those events,
+    within 0.1 s; release L's fallback took 2 s.
+- **Options set once, then held 4 times a second,** as Enhanced does. These set
+  something the game keeps:
+  - player: god mode, no ragdoll, invisible, never wanted;
+  - weapons: no reload, which now uses the game's infinite clip flag (as
+    Enhanced) instead of refilling the clip every frame, and the auto-equip and
+    unlimited parachutes. With the flag, ammo doesn't go down at all (minigun
+    and probably throwables included), so No Reload now also acts like
+    unlimited ammo, as in Enhanced. In PSRP only `group.owner` has either
+    permission;
+  - the pause menu's expanded radar.
+
+  So they are re-applied every 250 ms rather than every frame. That puts them
+  back after a respawn or another script resetting them. Enhanced holds god
+  mode once a second; this is 4 times. These stay every frame because they
+  only last a frame: super jump, unlimited ammo (it follows the weapon in hand),
+  hide radar (it has to win against HUD scripts that show the radar every
+  frame), the camera locks, and the street name hide in a vehicle with both
+  speeds on.
+- **Vehicle options:** only the torque multiplier keeps the vehicle loop every
+  frame. These now ride on the 100 ms in-vehicle pass: vehicle god mode
+  (including repairs), freeze, keep clean, no helmet and infinite fuel.
+- **Player blips, when on:** they still refresh 10 times a second, but between
+  refreshes they turn with their players 20 times a second instead of every
+  frame. Enhanced updates them 4 times a second.
+- **`vmenu_ticks`** in F8 lists the loops that sleep while idle and whether each
+  is asleep, as Enhanced's command of the same name does.
+
+**Expected effect.** Not measured; the owner's next profile will tell.
+- **Menu closed, options off:** the 17 option-only loops leave the runtime's
+  list, which takes away most of the bookkeeping cost. vMenu should drop from
+  about 0.15 ms to roughly 0.08–0.10 ms a frame.
+- **Staff with god mode, blips and weapon options on:**
+  - PlayerOptions and WeaponOptions run 4 times a second instead of every frame
+    (unless super jump or unlimited ammo is on);
+  - blips run about 20 times a second instead of every frame.
+
+**Validation:**
+- **`tests/idle-rests`** still replays the live build (`build-2026-11-17-3`)
+  beside this one through a long random session, comparing what each version
+  does every frame. The every-frame options must match call for call. The
+  options now held 4 times a second are compared as the state the game keeps:
+  - invincible, visible, ragdoll, wanted level, no reload, parachutes, map,
+    autopilot;
+  - after a 300 ms settle following anything outside vMenu that resets them (a
+    respawn, a wanted level, a lost parachute).
+
+  It compared 18,225 frames, the kept state on 14,943 of them. It also checks:
+  - while idle, the four option loops it runs don't run at all;
+  - each option runs at its new rate: every frame, or 4 times a second.
+- **`tests/sleeping-loops`:**
+  - each of the 17 loops is registered with its own "wanted" test and sleeps
+    only with every menu closed (except the snowball hint and the personal
+    vehicle blip, which have no menu option);
+  - every wake path is wired;
+  - the real registry, with the real `TickSleeper` and `IdleRest`, sleeps and
+    wakes by event and by its own test, and `vmenu_ticks` lists it.
+- **`tests/vehicle-rests`:** only the torque multiplier keeps every frame, and
+  the five options above no longer force it.
+- **`tests/frame-costs`:** blips match the every-frame version at every refresh
+  and turn 20 times a second in between (32 turns in 260 frames).
+- **Updated:** `tests/hud-overlay`, `tests/client-guards`,
+  `tests/vehicle-conveniences`.
+- **Each change, undone on purpose, fails a test:**
+  - super jump, unlimited ammo or torque not every frame;
+  - god mode or no reload never applied;
+  - expanded radar dropped;
+  - a loop sleeping with the menu open;
+  - GeneralTasks or `IdleRest.Woken` not waking;
+  - vehicle god mode forcing every frame;
+  - blips turning every frame.
+- **Independent review.** No high-severity bugs. For all 17 loops, the
+  condition a loop sleeps under matches its own "wanted" test, so none can stay
+  asleep or bounce awake, and every latch is released before a loop sleeps.
+  Fixed from it:
+  - **Leaving noclip turned god mode off and showed an Invisible player.** That
+    lasted up to 250 ms now that PlayerOptions holds those 4 times a second;
+    before, the next frame put them back. Now:
+    - noclip leaves invincibility on while vMenu's god mode is on;
+    - its visibility reset matches its comment, so an Invisible player on foot
+      stays invisible (unless vMenu doesn't handle invisibility,
+      `vmenu_handle_invisibility`);
+    - noclip ending wakes the option loops for the next frame.
+  - **`SetupTickFunctions` runs once.** A second run would have put every loop
+    on the tick list twice, and a sleeping loop only takes one copy off.
+  - **The weather and character editor camera loops count an open menu as
+    work.** If the menu watcher ever missed a menu opening, the 100 ms check
+    still brings them back.
+
+  Accepted as designed, worth noticing in game:
+  - after a ped or model change (department outfit, character load), god mode,
+    no ragdoll and invisibility can be missing for up to 250 ms, and no helmet
+    for up to 100 ms;
+  - vehicle engine god and auto-repair act within 100 ms;
+  - with both speeds on, the street name can show for up to 100 ms on getting
+    in.
+- **All 45 tests in AGENTS.md pass.**
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `2fc34daa2e0245c7ffa4d40bb5126b9f914883791980ab1ba89bc5ab94fb0c07` |
+| `build/vMenu/vMenuServer.net.dll` | `fd943356…` (unchanged from release L) |
+| `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
+
+**Deploy (test):** on top of release L. Only `vMenuClient.net.dll` changes; it's
+in `deploy/release-m-test-build/`. Someone skipping releases uses
+`deploy/release-m-full-from-main/`.
+1. Check the installed client DLL is release L's (`8d5a4c47…`).
+2. Copy it, then run `restart vMenu` and have players reconnect.
+
+**In-game checks:**
+- **God mode:** survives a respawn and a PSRP_DeathScript revive. Another
+  script turning invincibility off is put back within a quarter second.
+- **Noclip:** with god mode and Invisible on, turn noclip off near someone. You
+  stay invincible and invisible.
+- **Invisible, no ragdoll, never wanted:** still hold. Getting a wanted level
+  clears within a quarter second.
+- **No reload:** no reloading. Note whether ammo now still goes down, because
+  the game's infinite clip flag may differ from the old refill. Also check the
+  parachute options.
+- **Expanded radar:** with the pause menu setting on, it stays expanded.
+- **Vehicle options:** vehicle god mode (damage repaired, engine kept), freeze,
+  keep clean, no helmet on a bike and infinite fuel. Torque still pulls.
+- **Blips:** turn smoothly with their players.
+- **`vmenu_ticks`** in F8: most loops show asleep with the menu closed, and
+  running while it's open.
+- **Outside switches with the menu closed:** a Discord role change with
+  `/refreshperms`, PSRP_Clockin's blips and names, the minimap key. Each takes
+  effect within a moment.
+- **Everything in release L's list.**
+
+**Roll back to release L:** copy back release L's `vMenuClient.net.dll` from
+`deploy/rollback-to-release-l/`.
 
 ## November 17, 2026 — release L: upstream bug fixes, sleeping loops, refined skin (client DLL, server DLL, `themes/psrp-neon.css`) — TESTING, branch `perf/release-l`
 
@@ -188,7 +358,7 @@ option off:
 
 | File | SHA-256 |
 | --- | --- |
-| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
+| `build/vMenu/vMenuClient.net.dll` | `2fc34daa2e0245c7ffa4d40bb5126b9f914883791980ab1ba89bc5ab94fb0c07` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` |
 | `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
 
@@ -373,7 +543,7 @@ button already opens PSRP_spawner.
 
 | File | SHA-256 |
 | --- | --- |
-| `build/vMenu/vMenuClient.net.dll` | `8d5a4c471878cc7e3fe9bdee839eaeadd25452371b449b3d57a242d826a486fa` |
+| `build/vMenu/vMenuClient.net.dll` | `2fc34daa2e0245c7ffa4d40bb5126b9f914883791980ab1ba89bc5ab94fb0c07` |
 | `build/vMenu/vMenuServer.net.dll` | `03147fa748dcee86dba985a99edb08fda6a58a9fca0b8cb8958409f80a70d39d` |
 | `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
 

@@ -121,6 +121,7 @@ namespace vMenuClient
         }
 
         private readonly List<SleepingLoop> sleepingLoops = new();
+        private bool tickFunctionsSetUp;
         private bool sleepingLoopsWired;
 
         private TickSleeper AddSleepingLoop(string name, Func<Task> loop, Func<bool> wanted)
@@ -248,6 +249,14 @@ namespace vMenuClient
         [EventHandler("vMenu:SetupTickFunctions")]
         public void SetupTickFunctions()
         {
+            // Once: a second run would put every loop on the tick list twice, and a sleeping loop only
+            // takes one copy off (any resource can trigger this event).
+            if (tickFunctionsSetUp)
+            {
+                return;
+            }
+            tickFunctionsSetUp = true;
+
             // Always needed
             // The visor, snowball, point, minimap, drift and teleport-to-waypoint keys are FiveM key
             // bindings (see Key bindings below), so nothing polls them every frame.
@@ -263,7 +272,8 @@ namespace vMenuClient
             // Configuration and permissions based
             if (IsAllowed(Permission.WOMenu) && GetSettingsBool(Setting.vmenu_enable_weather_sync))
             {
-                weatherOptionsSleeper = AddSleepingLoop(nameof(WeatherOptions), WeatherOptions, () => false);
+                // Its work is the weather menu: back with any menu, also if the menu watcher missed one opening.
+                weatherOptionsSleeper = AddSleepingLoop(nameof(WeatherOptions), WeatherOptions, () => AnyMenuOpen);
             }
             if (IsAllowed(Permission.TOMenu) && GetSettingsBool(Setting.vmenu_enable_time_sync))
             {
@@ -314,7 +324,7 @@ namespace vMenuClient
             }
             if (IsAllowed(Permission.PAMenu))
             {
-                cameraSleeper = AddSleepingLoop(nameof(ManageCamera), ManageCamera, () => camera != null);
+                cameraSleeper = AddSleepingLoop(nameof(ManageCamera), ManageCamera, () => camera != null || AnyMenuOpen);
                 movementLockCheckEnabled = true;
             }
             if (IsAllowed(Permission.MSPlayerBlips))
