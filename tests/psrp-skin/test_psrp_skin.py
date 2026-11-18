@@ -54,6 +54,31 @@ assert re.search(r'#menuapi \.menuapi-slider \{[^}]*background-color:[^;]*!impor
 assert re.search(r'#menuapi \.menuapi-row--selected \.menuapi-icon \{[^}]*--tint:[^;]*!important', code)
 assert re.search(r'#menuapi \.menuapi-row--selected \.menuapi-icon--checkbox \{[^}]*filter: invert\(1\)', code)
 
+# Text weight. The browser draws GTA's font about a quarter heavier than the game did, so a faint
+# dark hairline trims every letter back to the game's weight; greyed-out rows, the banner title and
+# the key caps keep their full weight. The text is GTA's own menu grey.
+def rule(selector_pattern):
+    found = [body for sel, body in rules if re.fullmatch(selector_pattern, ' '.join(sel.split()))]
+    assert len(found) == 1, f'expected one rule for {selector_pattern}, found {len(found)}'
+    return found[0]
+
+
+edge = rule(r'#menuapi, #menuapi-buttons')
+assert re.search(r'-webkit-text-stroke:\s*0\.45px rgb\(0 0 0 / 55%\)', edge), 'the text hairline is missing or changed'
+reset = rule(r'#menuapi \.menuapi-row--disabled, #menuapi \.menuapi-header__title, #menuapi-buttons \.menuapi-key')
+assert re.search(r'-webkit-text-stroke:\s*0;', reset), 'greyed-out rows, the title and key caps must keep full weight'
+assert re.search(r'--psrp-text:\s*rgb\(225 225 225\)', code), 'menu text is GTA grey'
+
+# Bold. MenuAPI draws GTA's ~h~ as an inline font-weight on a span; GTA's font has no bold, so the
+# browser would fake one (half again as heavy) and the hairline above would show inside it as a
+# grey outline. Bold is the regular letters with a thin outline in their own colour instead.
+menuapi_js = (root / 'build' / 'vMenu' / 'menuapi' / 'menuapi.min.js').read_text(encoding='utf-8-sig')
+assert 'style.fontWeight="bold"' in menuapi_js, 'MenuAPI no longer marks ~h~ bold with an inline font-weight; update the bold rule'
+bold = rule(r'#menuapi span\[style\*="font-weight"\]')
+assert re.search(r'font-weight:\s*normal\s*!important', bold), 'bold must not use the browser\'s fake bold'
+assert re.search(r'-webkit-text-stroke:\s*0\.3px currentColor', bold), 'bold is drawn with an own-colour outline'
+assert not re.search(r'font-weight:\s*(bold|[6-9]00)', code), 'nothing in the skin may ask GTA\'s font for a bold it doesn\'t have'
+
 # storage.html loads it after MenuAPI's own stylesheets, so it wins.
 assert storage.index('menuapi/menuapi.min.css') < storage.index('themes/psrp-neon.css')
 print(f'PASS: the skin sets {len(set_here)} MenuAPI tokens, all real, styles only the menu and its key hints, and uses only its own defined colours')

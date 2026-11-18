@@ -175,6 +175,27 @@ style = page[:page.index('</style>')]
 for selector in re.findall(r'^\s*([^\n{]*#menuapi[^\n{]*)\{', style, re.M):
     check('vmenu-guide' in selector, f'a #menuapi rule outside the guide: {selector.strip()}')
 
+# The card's text matches the menu's (themes/psrp-neon.css): GTA grey, a faint dark hairline that
+# trims GTA's font to the game's weight, and bold drawn as an own-colour outline, because the font
+# has no bold and the browser's fake one smears (and shows the hairline inside it as a grey ring).
+guide_rules = {}
+for sel, body in re.findall(r'([^{}]+)\{([^{}]*)\}', re.sub(r'/\*.*?\*/', '', style, flags=re.S)):
+    sel = ' '.join(sel.split())
+    if sel.startswith('#vmenu-guide'):
+        guide_rules[sel] = guide_rules.get(sel, '') + body
+card_rule = guide_rules.get('#vmenu-guide', '')
+check('color: rgb(225 225 225);' in card_rule and '-webkit-text-stroke: 0.45px rgb(0 0 0 / 55%);' in card_rule,
+      'the card\'s text is GTA grey with the same hairline as the menu')
+for sel in ('#vmenu-guide .g-head', '#vmenu-guide h3', '#vmenu-guide b', '#vmenu-guide .g-tag'):
+    check('-webkit-text-stroke: 0.3px currentColor;' in guide_rules.get(sel, ''), f'{sel} is bold by an own-colour outline')
+for sel in ('#vmenu-guide h3', '#vmenu-guide b'):
+    check('font-weight: normal;' in guide_rules.get(sel, ''), f'{sel} is bold by default, so it turns the browser\'s fake bold off')
+for sel, body in guide_rules.items():
+    if re.search(r'font-weight:\s*(bold|[6-9]00)', body):
+        check(sel == '#vmenu-guide kbd', f'{sel} asks GTA\'s font for a bold it doesn\'t have (only the Arial key caps may be bold)')
+check(re.search(r'-webkit-text-stroke: 0;', guide_rules.get('#vmenu-guide .g-head span + span, #vmenu-guide .g-foot, #vmenu-guide kbd', '')),
+      'muted text and the key caps keep their full weight')
+
 # ---- Manifest and What's New ----
 check("'config/player-guide.json'" in manifest, 'the manifest ships config/player-guide.json')
 handler = whats_new[whats_new.index("AddEventHandler('vMenu:MenuStateChanged'"):]

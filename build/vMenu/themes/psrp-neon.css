@@ -13,7 +13,7 @@
   --psrp-glass: rgb(17 14 26 / 86%);
   --psrp-glass-strong: rgb(24 19 37 / 94%);
   --psrp-edge: rgb(255 255 255 / 7%);
-  --psrp-text: rgb(236 233 245);
+  --psrp-text: rgb(225 225 225);   /* GTA's own menu grey; see "Text" below */
   --psrp-text-muted: rgb(132 126 152);
   --psrp-accent: rgb(128 64 230);
   --psrp-accent-soft: rgb(178 150 255);
@@ -68,6 +68,25 @@
 #menuapi .menuapi-row--selected .menuapi-icon { --tint: rgb(255 255 255) !important; }
 #menuapi .menuapi-row--selected .menuapi-icon--checkbox { filter: invert(1); }
 #menuapi .menuapi-row--selected.menuapi-row--disabled .menuapi-icon { opacity: 0.6; }
+
+/* Text. The browser draws GTA's font about a quarter heavier than the game did (5.1px strokes at
+   1440p against the old GTA-drawn menu's 4.0px), so the letters crowd together and read as soft.
+   A faint dark hairline over each letter's edge trims it back to 4.0px. Greyed-out rows keep their
+   full weight so they stay readable; the banner title and the key caps are left as they are. */
+#menuapi,
+#menuapi-buttons { -webkit-text-stroke: 0.45px rgb(0 0 0 / 55%); }
+#menuapi .menuapi-row--disabled,
+#menuapi .menuapi-header__title,
+#menuapi-buttons .menuapi-key { -webkit-text-stroke: 0; }
+
+/* Bold (GTA's ~h~, which MenuAPI draws as an inline font-weight). GTA's font has no bold, so the
+   browser fakes one by smearing each letter, about half again as heavy, and the hairline above
+   would show inside the smear as a grey outline. Bold is drawn as the regular letters with a thin
+   outline in their own colour instead: clearly heavier, with the gaps between letters kept. */
+#menuapi span[style*="font-weight"] {
+  font-weight: normal !important;
+  -webkit-text-stroke: 0.3px currentColor;
+}
 
 /* The key hints in the bottom right: the same glass, light keys. */
 #menuapi-buttons {

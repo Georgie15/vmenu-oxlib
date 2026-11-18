@@ -21,7 +21,7 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
-## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`) — TESTING, branch `feature/release-n-player-guide`
+## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`, `themes/psrp-neon.css`) — TESTING, branch `feature/release-n-player-guide`
 
 **Status: test build, not verified in game, not on `main`.** It is built on
 release M (`perf/release-m`). Only the client DLL and client-side files change;
@@ -69,6 +69,42 @@ Appearance › Clothing Quick Toggles" showed a white block for each `›`.
   those was drawn from the font to check it.
 - The guide's `version` stays 1: the text fix doesn't need to show the guide to
   everyone again.
+
+**Sharper text (November 18).** The owner found the menu's text a little soft
+since MenuAPI 4 (release I).
+- **Not the owner's setup.** They run ReShade with QuantV's effects, but their
+  in-game screenshot shows no fringing, halos or grain on the menu or card text,
+  and the same page drawn by Edge at 2560×1440 matches it almost pixel for pixel.
+  FiveM's browser is Chromium 144 (`FiveM.app/bin/libcef.dll`), so Edge previews
+  hold. Scaling the 1080p layout up (`transform: scale`) isn't the cause either:
+  CSS `zoom` gives identical text pixels.
+- **The cause.** The browser draws GTA's font heavier than the game did. In one of
+  the owner's September screenshots, the old GTA-drawn "Player Related Options"
+  has 4.0 px strokes at 1440p; the new menu has 5.1 px at the same size and width,
+  so the letters crowd together. GTA's font also has no bold, so bold is the
+  browser's fake one, about half again as heavy (7.6 px), which smears.
+- **The change** (`themes/psrp-neon.css` for the menu and key hints,
+  `storage.html` for the guide card):
+  - Text is GTA's menu grey, `rgb(225 225 225)`, rather than the skin's
+    lilac-white.
+  - A faint dark hairline (`-webkit-text-stroke: 0.45px rgb(0 0 0 / 55%)`) trims
+    each letter back to 4.0 px. It scales with the menu, so the proportions hold
+    at every resolution (previewed at 2560×1440, 1920×1080 and 1600×900).
+  - Greyed-out rows, muted card text, the banner title and the key caps are left
+    at full weight.
+  - Bold (MenuAPI's inline `font-weight` for `~h~`, and the card's title, bold
+    words, header and TIP tag) is the regular letters with a 0.3 px outline in
+    their own colour. The hairline on the browser's fake bold draws inside the
+    smear as a grey ring, so fake bold is switched off.
+- **Considered and not used:** MenuAPI's `geometric` text mode draws identical
+  pixels; its `supersampled` mode only reaches 4.6 px, needs a client DLL change,
+  and on Chromium 144 its `zoom: 2` also doubles the menu's position.
+- **Guards:** `tests/psrp-skin` and `tests/player-guide` check every part of the
+  above, including that MenuAPI still marks `~h~` with an inline
+  `font-weight`, and that nothing asks GTA's font for a bold. 12 deliberate
+  breakages each fail a test.
+- **Undo just this:** `deploy/release-n-undo-text-change/` holds the previous
+  `storage.html` and `themes/psrp-neon.css`.
 
 **Why.** The owner asked for a guide new players can go through on their first
 F1, like the ones in PSRP_CAD and EasyAdmin, because players keep asking staff
@@ -203,7 +239,7 @@ how to get an outfit or a car. A clickable mockup was approved first.
 `deploy/release-n-full-from-main/`.
 1. Check the installed client DLL is release M's (`2fc34daa…`).
 2. Copy `vMenuClient.net.dll`, `storage.html`, `fxmanifest.lua`,
-   `client/whatsNew.lua` and `config/player-guide.json`.
+   `client/whatsNew.lua`, `config/player-guide.json` and `themes/psrp-neon.css`.
 3. Run `refresh`, then `restart vMenu` (the manifest changed). Have players
    reconnect.
 
@@ -223,6 +259,9 @@ how to get an outfit or a car. A clickable mockup was approved first.
 - **What's New** doesn't pop up for a new player alongside the guide.
 - **F8:** no `[vMenu] [Player Guide]` line (that line means the file couldn't be
   used).
+- **Text:** grey and crisp, with the letters not crowding. Greyed-out rows are
+  still easy to read, and bold words on the card (and the version in About
+  vMenu) are bold without smearing.
 - **Everything in release M's list.**
 
 **Roll back to release M:** copy back the files from

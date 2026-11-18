@@ -326,7 +326,12 @@
     pointer-events: none;
     font-family: "GTA Chalet", "Helvetica Neue", Arial, sans-serif;
     line-height: 1.4;
-    color: rgb(236 233 245);
+    color: rgb(225 225 225);
+    /* The same text treatment as the menu (themes/psrp-neon.css, "Text"): a faint dark hairline
+       trims GTA's font back to the game's weight, and bold is the regular letters with a thin
+       outline in their own colour, because the font has no bold and the browser's fake one smears.
+       Muted text and the Arial key caps are left at full weight. */
+    -webkit-text-stroke: 0.45px rgb(0 0 0 / 55%);
     background: rgb(24 19 37 / 94%);
     border-radius: 10px;
     box-shadow: 0 0 0 1px rgb(255 255 255 / 7%), 0 12px 32px rgb(0 0 0 / 45%);
@@ -347,7 +352,7 @@
     justify-content: space-between;
     padding: 14px 20px 11px;
     font-size: 16px;
-    font-weight: bold;
+    -webkit-text-stroke: 0.3px currentColor;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: rgb(178 150 255);
@@ -378,7 +383,8 @@
   #vmenu-guide h3 {
     margin: 0;
     font-size: 26px;
-    font-weight: bold;
+    font-weight: normal;
+    -webkit-text-stroke: 0.3px currentColor;
     line-height: 1.2;
     color: rgb(255 255 255);
   }
@@ -389,6 +395,8 @@
   }
 
   #vmenu-guide b {
+    font-weight: normal;
+    -webkit-text-stroke: 0.3px currentColor;
     color: rgb(255 255 255);
   }
 
@@ -412,7 +420,7 @@
   #vmenu-guide .g-tag {
     margin-right: 6px;
     font-size: 15px;
-    font-weight: bold;
+    -webkit-text-stroke: 0.3px currentColor;
     letter-spacing: 0.12em;
     color: rgb(178 150 255);
   }
@@ -420,6 +428,12 @@
   #vmenu-guide .g-foot {
     font-size: 16px;
     color: rgb(132 126 152);
+  }
+
+  #vmenu-guide .g-head span + span,
+  #vmenu-guide .g-foot,
+  #vmenu-guide kbd {
+    -webkit-text-stroke: 0;
   }
 
   #vmenu-guide .g-keys {
