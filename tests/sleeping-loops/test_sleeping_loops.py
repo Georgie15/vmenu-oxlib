@@ -186,7 +186,7 @@ namespace Sleep
     {
         public static Menu Current;
         public static bool Dead, Dying, BackReleased;
-        public static int Closed, Opened, KeyFrames, Offers, Saves, Delays;
+        public static int Closed, Opened, KeyFrames, Offers, Saves, Delays, GuideOffers;
         public static List<string> Events = new List<string>(), Alerts = new List<string>();
         public static TaskCompletionSource<bool> SaveRunning;
     }
@@ -196,6 +196,7 @@ namespace Sleep
         public static void CloseAllMenus() { if (W.Current != null) W.Current.Visible = false; W.Current = null; W.Closed++; }
     }
     public static class IdleRest { public static void MenuOpened() => W.Opened++; }
+    public static class PlayerGuide { public static bool MenuOpened() { W.GuideOffers++; return false; } }
     public static class MenuKeys { public static void OnFrame(Menu m) => W.KeyFrames++; }
     public enum Control { PhoneCancel }
     public static class Game { public static bool IsDisabledControlJustReleased(int g, Control c) => W.BackReleased; }
@@ -312,6 +313,7 @@ namespace Sleep
                 "a menu opens: the event wakes it and does the open frame at once (rests end, state event sent)");
             m.Frame(); m.Frame();
             Check(!MainMenu.Asleep && W.Opened == 1 && W.KeyFrames == keyFrames + 3, "while a menu is open it runs every frame, and announces the open once");
+            Check(W.GuideOffers == 1, "the Player Guide is offered once when a menu opens");
 
             var creator = MainMenu.MpPedCustomizationMenu.createCharacterMenu;
             main.Visible = false; creator.Visible = true; W.Current = creator;
@@ -325,6 +327,7 @@ namespace Sleep
             m.Frame();
             Check(MainMenu.Asleep && !MpPedCustomization.DisableBackButton && W.Offers == 1 && W.Events[W.Events.Count - 1] == "vMenu:MenuStateChanged:False",
                 "every menu closed: the close frame is handled (guard off, saved vehicle offer, state event), then it sleeps");
+            Check(W.GuideOffers == 1, "closing doesn't offer the guide");
             creator.Visible = true; W.Current = creator;
             MainMenu.Changed();
             Check(MpPedCustomization.DisableBackButton && MpPedCustomization.DontCloseMenus && W.Opened == 2,

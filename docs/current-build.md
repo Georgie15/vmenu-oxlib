@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 17, 2026 — release M: vMenu's idle loops switch fully off and options are set once, as in vMenu Enhanced (client DLL), on top of releases L, K, J, I and H. **Testing on branch `perf/release-m`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `2fc34daa2e0245c7ffa4d40bb5126b9f914883791980ab1ba89bc5ab94fb0c07` |
+| Latest change | November 18, 2026 — release N: the Player Guide, a first-time walkthrough of the menu (client DLL, page, guide text), on top of releases M, L, K, J, I and H. **Testing on branch `feature/release-n-player-guide`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `5a66bf81068c4f6fded77957a1e10f5cad1ca57728294a6130632929eb8846a1` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,171 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`) — TESTING, branch `feature/release-n-player-guide`
+
+**Status: test build, not verified in game, not on `main`.** It is built on
+release M (`perf/release-m`). Only the client DLL and client-side files change;
+the server DLL and MenuAPI are release M's.
+
+**Why.** The owner asked for a guide new players can go through on their first
+F1, like the ones in PSRP_CAD and EasyAdmin, because players keep asking staff
+how to get an outfit or a car. A clickable mockup was approved first.
+
+**What players see:**
+- **The first time they open the menu,** a card beside it asks "New to the
+  menu?". <kbd>Enter</kbd> starts the guide; <kbd>Esc</kbd> skips it.
+- **The guide** is eight short steps. Each one opens the real menu page, selects
+  and lights up the rows it talks about, and dims the rest:
+  1. Find your way around (keys, mouse, where to rebind).
+  2. Make your character (MP Ped Customization).
+  3. Change clothes and save outfits.
+  4. Department uniforms: only while `vmenu_dept_outfits` is on, so it's left
+     out until release K's Department Outfits are switched on.
+  5. Get a car (Vehicle Spawner; Custom Vehicles and F9; the 5-vehicle cap, 3
+     in a purge, from PSRP_Framework's `sv_spawnlimiter.lua`; `/dv`).
+     PSRP_welcome and PSRP_loading still say 3; that text is out of date.
+  6. Keep your car (Saved Vehicles, Save to CAD, vehicle codes).
+  7. Your personal vehicle.
+  8. Back up your saves (only while `vmenu_backups` is on).
+  9. You're all set (where to find it again; the Discord).
+- **Keys while it's up:** <kbd>Enter</kbd> or <kbd>→</kbd> next,
+  <kbd>Backspace</kbd> or <kbd>←</kbd> back, <kbd>Esc</kbd> skip. On a controller:
+  A, B, and X to skip (without also jumping). These match EasyAdmin's staff
+  guide and the CAD tour. The menu's own keys do nothing while a card is up,
+  and Esc doesn't open the pause menu. Over a fade, a player switch or the pause
+  menu, MenuAPI hides the menu; the card hides with it, and keys don't move it on.
+- **Main Menu > Player Guide**, the new first row: "Start the guide", then
+  "How do I…?" questions. A question opens just that answer on the right page;
+  Enter leaves the player there to use it, Backspace returns to the questions.
+- **Seen:** finishing or skipping counts; closing the menu partway doesn't, so
+  the welcome comes back next time. It's saved on the player's PC
+  (`vmenu_player_guide_seen`), like the CAD tour's flag. Every current player
+  gets the welcome once too, since the flag is new.
+- **What's New** waits while the guide's card is up: the menu watcher now sends
+  `vMenu:MenuStateChanged` with a second value, whether the card is up. A new
+  player (no note seen yet) never gets the note on top of the guide; anyone
+  else gets a newer note on their next open. It stays in Misc Settings > What's
+  New In vMenu.
+
+**How it's built:**
+- `vMenu/PlayerGuide.cs`: the menu rows, the first-open check, and a loop that
+  runs only while a card is up (`TickSleeper`). It reads the game's frontend
+  controls itself while `MenuController.DisableMenuButtons` keeps the menu still.
+  MenuAPI 4 acts on a key's release, so after the guide ends it keeps the
+  buttons off until the key is let go (plus 150 ms). Otherwise the Enter that
+  finished the guide would also pick the selected row. It also waits 400 ms
+  after another resource's on-screen keyboard closes. MenuAPI saves the buttons
+  setting when a keyboard opens and writes it back 300 ms after it closes.
+  Handing the buttons back first would leave them off for good.
+- `vMenu/PlayerGuideContent.cs`: no game calls. It holds the JSON reader, the
+  step flow, key routing and the button hold, so tests run them directly.
+- `config/player-guide.json`: all the wording. `**bold**` and `[KEY]` are the
+  only marks; the page shows everything else as plain text. A card names its
+  menu page and the rows to light up, and can depend on a convar
+  (`requiresConvar`). A card whose menu the player doesn't have is left out, and
+  the step count follows. A broken file turns the guide off with an F8 line
+  saying why, rather than showing half a guide. Raise `version` to show the
+  guide to everyone again.
+- `storage.html`: the card (`#vmenu-guide`), placed beside the menu at its
+  scale (on the left of a right-aligned menu). It lights up rows by matching
+  MenuAPI's row text, and re-applies after each MenuAPI redraw.
+- `client/whatsNew.lua`: the What's New skip above.
+
+**Validation:**
+- **New tests:**
+  - `dotnet run --project tests/player-guide` (419 checks):
+    - the packaged file reads, and broken copies are refused with a reason
+      (misspelt setting, unknown menu, missing title or body, duplicate ids, a
+      question on a missing step, version 0 or in quotes);
+    - every path through the flow: welcome, next, back, skip, finish, menu
+      closed, started from the menu, questions;
+    - cards left out when their convar or menu is missing, with the count
+      following;
+    - key routing (Esc also counts as the game's cancel, X skips only on a
+      controller);
+    - row scrolling;
+    - the button hold (held, released, pressed again, an on-screen keyboard).
+  - `python tests/player-guide/test_player_guide.py`:
+    - every row a card lights up is made and added to that card's menu;
+    - every **bold** name in the text is a real row label;
+    - every convar a card needs is set in `permissions.cfg`;
+    - the wiring in MainMenu, the input loop, the page, the manifest and What's
+      New.
+
+    It caught the outfit-code question pointing at rows that live in the
+    character editor, not on the MP Ped Customization page.
+- **Updated tests:**
+  - `tests/whats-new`: the note waits while the card is up.
+  - `tests/sleeping-loops`: the watcher offers the guide once per open.
+- **Each behaviour, broken on purpose, fails a test (21 cases):**
+  - the button hold, the keyboard wait and the key order;
+  - Esc, jump and the hidden-menu guard;
+  - seen only on finish or skip;
+  - unavailable steps left out, and unknown settings refused;
+  - the watcher's offer and What's New's wait;
+  - a renamed row in the highlights or the text;
+  - the card's text shown as HTML.
+- **Browser check:** `storage.html` with a stand-in menu and a guide message. The
+  card sits beside the menu, the two rows are outlined, the others are dimmed,
+  and the keys and progress bar show.
+- **Independent review** against MenuAPI 4.1.3's source. Nothing serious:
+  - presses during the guide are dropped;
+  - the release can't pick a row;
+  - page changes don't re-announce the menu;
+  - a menu closing under the guide ends it cleanly;
+  - every lit row exists for a regular player.
+
+  Fixed from it:
+  - **The card stayed on screen over a fade.** It stayed during a fade or player
+    switch from another resource while the menu was hidden, and Enter still
+    moved it on. The card now hides with the menu, and keys are ignored then.
+  - **What's New could disagree with the guide.** It now goes by whether the
+    card is actually up, not by its own guess. With a broken guide file, or a
+    guide version bump, both could have shown at once or the note been lost.
+  - **X on a controller also jumped.** Jump is now held off while a card is up.
+  - **The menu buttons could stay off for good.** That happened when another
+    resource's on-screen keyboard opened during the guide. The hold now waits
+    out MenuAPI's keyboard check.
+  - **The car step said 3 vehicles.** PSRP_Framework's cap is 5 (3 in a purge).
+- **All 47 tests in AGENTS.md pass.**
+
+| File | SHA-256 |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `5a66bf81068c4f6fded77957a1e10f5cad1ca57728294a6130632929eb8846a1` |
+| `build/vMenu/vMenuServer.net.dll` | `fd943356…` (unchanged from release L) |
+| `build/vMenu/MenuAPI.dll` | `43442a16…` (unchanged) |
+
+**Deploy (test):** on top of release M. The files are in
+`deploy/release-n-test-build/`. Someone skipping releases uses
+`deploy/release-n-full-from-main/`.
+1. Check the installed client DLL is release M's (`2fc34daa…`).
+2. Copy `vMenuClient.net.dll`, `storage.html`, `fxmanifest.lua`,
+   `client/whatsNew.lua` and `config/player-guide.json`.
+3. Run `refresh`, then `restart vMenu` (the manifest changed). Have players
+   reconnect.
+
+**In-game checks:**
+- **First F1:** the welcome card shows beside the menu. Esc skips it, and the
+  pause menu does not open. The next F1 doesn't show it again. To see it again,
+  delete the `vmenu_player_guide_seen` KVP, or raise `version` in the file.
+- **The guide:** Enter goes through every step; each opens the right page with
+  the rows lit. Backspace goes back. Finishing leaves the main menu on Player
+  Guide, and that Enter does not open the Player Guide menu.
+- **Closing mid-guide:** F1 closes the menu, and the welcome comes back next
+  open.
+- **Questions:** Main Menu > Player Guide > a question. Enter leaves you on that
+  page, and the menu works normally. Backspace returns to the questions.
+- **Controller:** A, B and X work, and the card shows A, B and X.
+- **Right Align Menu** (Misc Settings): the card moves to the left of the menu.
+- **What's New** doesn't pop up for a new player alongside the guide.
+- **F8:** no `[vMenu] [Player Guide]` line (that line means the file couldn't be
+  used).
+- **Everything in release M's list.**
+
+**Roll back to release M:** copy back the files from
+`deploy/rollback-to-release-m/`, `refresh`, and `restart vMenu`.
+`config/player-guide.json` can stay; release M doesn't read it.
 
 ## November 17, 2026 — release M: loops fully off while idle, options set once (client DLL) — TESTING, branch `perf/release-m`
 

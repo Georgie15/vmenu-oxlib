@@ -313,10 +313,167 @@
     font-family: Antonio, "GTA Chalet", sans-serif;
     font-weight: 600;
   }
+
+  /* The Player Guide's card (PlayerGuide.cs sends "vmenuGuide"). It sits beside the menu at the
+     menu's scale. The #menuapi rules below only act while a card is up: the vmenu-guide-* classes
+     exist only then, to light up the rows a card talks about and dim the rest. */
+  #vmenu-guide {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 460px;
+    transform-origin: top left;
+    pointer-events: none;
+    font-family: "GTA Chalet", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.4;
+    color: rgb(236 233 245);
+    background: rgb(24 19 37 / 94%);
+    border-radius: 10px;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 7%), 0 12px 32px rgb(0 0 0 / 45%);
+    overflow: hidden;
+  }
+
+  #vmenu-guide[hidden] {
+    display: none !important;
+  }
+
+  /* MenuAPI hides the menu over a fade, a player switch or the pause menu; the card goes with it. */
+  #menuapi[hidden] ~ #vmenu-guide {
+    display: none !important;
+  }
+
+  #vmenu-guide .g-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 20px 11px;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgb(178 150 255);
+  }
+
+  #vmenu-guide .g-head span + span {
+    color: rgb(132 126 152);
+    letter-spacing: 0.06em;
+  }
+
+  #vmenu-guide .g-bar {
+    height: 4px;
+    background: rgb(255 255 255 / 8%);
+  }
+
+  #vmenu-guide .g-bar i {
+    display: block;
+    height: 100%;
+    background: rgb(128 64 230);
+  }
+
+  #vmenu-guide .g-body {
+    display: grid;
+    gap: 12px;
+    padding: 16px 20px 6px;
+  }
+
+  #vmenu-guide h3 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: bold;
+    line-height: 1.2;
+    color: rgb(255 255 255);
+  }
+
+  #vmenu-guide p {
+    margin: 0;
+    font-size: 19px;
+  }
+
+  #vmenu-guide b {
+    color: rgb(255 255 255);
+  }
+
+  #vmenu-guide kbd {
+    font-family: Arial, "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: rgb(24 19 37);
+    background: rgb(226 222 238);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  #vmenu-guide .g-tip {
+    font-size: 17px;
+    background: rgb(255 255 255 / 5%);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  #vmenu-guide .g-tag {
+    margin-right: 6px;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    color: rgb(178 150 255);
+  }
+
+  #vmenu-guide .g-foot {
+    font-size: 16px;
+    color: rgb(132 126 152);
+  }
+
+  #vmenu-guide .g-keys {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 12px 16px 14px;
+    font-size: 17px;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+  }
+
+  #vmenu-guide .g-grow {
+    flex: 1;
+  }
+
+  #vmenu-guide .g-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border-radius: 6px;
+  }
+
+  #vmenu-guide .g-key--main {
+    color: rgb(255 255 255);
+    background: rgb(128 64 230);
+  }
+
+  #menuapi.vmenu-guide-dim .menuapi-row:not(.vmenu-guide-hi):not(.menuapi-row--separator) {
+    opacity: 0.45;
+  }
+
+  /* An outline, which draws above the selected row's own background. */
+  #menuapi .menuapi-row.vmenu-guide-hi {
+    outline: 3px solid rgb(178 150 255);
+    outline-offset: -3px;
+    animation: vmenu-guide-ring 1.6s ease-in-out infinite;
+  }
+
+  #menuapi .menuapi-row.vmenu-guide-hi:not(.menuapi-row--selected) {
+    background: rgb(178 150 255 / 16%);
+  }
+
+  @keyframes vmenu-guide-ring {
+    0%, 100% { outline-color: rgb(178 150 255 / 100%); }
+    50% { outline-color: rgb(178 150 255 / 40%); }
+  }
 </style>
 
 <body>
   <div id="menuapi"></div>
+
+  <div id="vmenu-guide" hidden></div>
 
   <div id="vmenu-hud" hidden>
     <div id="vmenu-hud-coords" hidden></div>
@@ -475,6 +632,121 @@
           if (speed.kmh !== null) { kmh.textContent = speed.kmh + " KM/h"; place(kmh, undefined, 0.955, speed.h); }
           if (speed.mph !== null) { mph.textContent = speed.mph + " MPH"; place(mph, undefined, speed.kmh !== null ? 0.925 : 0.955, speed.h); }
         }
+      });
+    })();
+  </script>
+
+  <script>
+    // The Player Guide's card and lit-up rows, see #vmenu-guide above. The text comes from
+    // config/player-guide.json and is only ever shown as text: **bold** and [KEY] are the two marks.
+    (() => {
+      const card = document.getElementById("vmenu-guide");
+      const menu = document.getElementById("menuapi");
+      let on = false;
+      let lit = new Set();
+
+      function el(tag, cls, ...children) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        e.append(...children);
+        return e;
+      }
+
+      function rich(text) {
+        const out = document.createDocumentFragment();
+        const marks = /\*\*(.+?)\*\*|\[([^\]]+)\]/g;
+        let at = 0;
+        let m;
+        while ((m = marks.exec(text))) {
+          if (m.index > at) out.append(text.slice(at, m.index));
+          out.append(m[1] !== undefined ? el("b", null, m[1]) : el("kbd", null, m[2]));
+          at = marks.lastIndex;
+        }
+        if (at < text.length) out.append(text.slice(at));
+        return out;
+      }
+
+      function key(cap, text, main) {
+        return el("span", main ? "g-key g-key--main" : "g-key", el("kbd", null, cap), text);
+      }
+
+      function rowName(row) {
+        const text = row.querySelector(".menuapi-row__text");
+        return text ? text.textContent.replace(/ /g, " ").trim() : "";
+      }
+
+      function light() {
+        menu.classList.toggle("vmenu-guide-dim", on && lit.size > 0);
+        for (const row of menu.querySelectorAll(".menuapi-row")) {
+          row.classList.toggle("vmenu-guide-hi", on && lit.has(rowName(row)));
+        }
+      }
+
+      function place() {
+        const r = menu.getBoundingClientRect();
+        const scale = parseFloat(getComputedStyle(menu).getPropertyValue("--menuapi-scale")) || 1;
+        const gap = 14 * scale;
+        card.style.top = r.top + "px";
+        card.style.transform = "scale(" + scale + ")";
+        if (menu.dataset.align === "right") {
+          card.style.transformOrigin = "top right";
+          card.style.left = "auto";
+          card.style.right = (window.innerWidth - r.left + gap) + "px";
+        } else {
+          card.style.transformOrigin = "top left";
+          card.style.right = "auto";
+          card.style.left = (r.right + gap) + "px";
+        }
+      }
+
+      // MenuAPI rebuilds the rows whenever the menu changes, so they are lit again each time.
+      new MutationObserver(() => {
+        if (on) {
+          light();
+          place();
+        }
+      }).observe(menu, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-align", "hidden"] });
+      window.addEventListener("resize", () => { if (on) place(); });
+
+      window.addEventListener("message", (event) => {
+        const d = event.data;
+        if (!d || d.action !== "vmenuGuide") return;
+        on = !!d.visible;
+        lit = new Set(on && Array.isArray(d.highlight) ? d.highlight : []);
+        card.hidden = !on;
+        if (!on) {
+          card.replaceChildren();
+          light();
+          return;
+        }
+
+        const caps = d.pad ? { next: "A", back: "B", skip: "X" } : { next: "ENTER", back: "BKSP", skip: "ESC" };
+        const parts = [];
+        let keys;
+        if (d.kind === "welcome") {
+          parts.push(el("div", "g-head", el("span", null, "Player guide"), el("span", null, "First time")));
+          keys = [key(caps.skip, "Skip"), el("span", "g-grow"), key(caps.next, "Start the guide", true)];
+        } else if (d.kind === "tour") {
+          parts.push(el("div", "g-head", el("span", null, "Player guide"), el("span", null, d.number + " / " + d.count)));
+          const fill = el("i");
+          fill.style.width = Math.round(d.number / d.count * 100) + "%";
+          parts.push(el("div", "g-bar", fill));
+          keys = [d.last ? null : key(caps.skip, "Skip"), el("span", "g-grow"), key(caps.back, "Back"),
+            key(caps.next, d.last ? "Finish" : "Next", true)].filter(Boolean);
+        } else {
+          parts.push(el("div", "g-head", el("span", null, "How do I…?"), el("span", null, "Player guide")));
+          keys = [key(caps.back, "Questions"), el("span", "g-grow"), key(caps.next, "Got it", true)];
+        }
+
+        const body = el("div", "g-body", el("h3", null, d.title || ""));
+        for (const line of d.body || []) body.append(el("p", null, rich(line)));
+        if (d.tip) body.append(el("div", "g-tip", el("span", "g-tag", "TIP"), rich(d.tip)));
+        if (d.foot) body.append(el("p", "g-foot", rich(d.foot)));
+        parts.push(body, el("div", "g-keys", ...keys));
+
+        card.replaceChildren(...parts);
+        light();
+        place();
       });
     })();
   </script>

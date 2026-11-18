@@ -52,4 +52,20 @@ check(not plain.dialogs[1].content:find('Back up your saves', 1, true) and not p
 local seenOld = newClient({}, { vmenu_whats_new_seen = 'an-older-version' })
 seenOld.fire('vMenu:MenuStateChanged', true)
 check(#seenOld.dialogs == 1, 'a player who saw an older note sees the new one')
+-- The menu watcher says whether the Player Guide's card is up on this open (PlayerGuide.cs).
+local newPlayer = newClient({})
+newPlayer.fire('vMenu:MenuStateChanged', true, true)
+check(#newPlayer.dialogs == 0 and newPlayer.kvps.vmenu_whats_new_seen == version,
+    'a new player gets the guide instead, and the note counts as seen')
+newPlayer.fire('vMenu:MenuStateChanged', true, false)
+check(#newPlayer.dialogs == 0, 'and it does not come later either')
+newPlayer.fire('vMenu:whatsNew:show')
+check(#newPlayer.dialogs == 1, 'Misc Settings still shows it')
+
+local veteran = newClient({}, { vmenu_whats_new_seen = 'an-older-version' })
+veteran.fire('vMenu:MenuStateChanged', true, true)
+check(#veteran.dialogs == 0 and veteran.kvps.vmenu_whats_new_seen == 'an-older-version',
+    'a player who saw an older note waits while the guide is up...')
+veteran.fire('vMenu:MenuStateChanged', true, false)
+check(#veteran.dialogs == 1 and veteran.kvps.vmenu_whats_new_seen == version, '...and gets the new note on the next open')
 print('PASS: what\'s new shows once per version, on demand, and only lists switched-on features')

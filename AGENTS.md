@@ -48,6 +48,10 @@ Instructions for any AI agent or developer working in this repository.
   version as the DLL. Keep `storage.html`'s own styles scoped to
   `#vmenu-storage`, so they can't restyle the menu. The menu's skin is
   `build/vMenu/themes/psrp-neon.css`, linked from `storage.html`.
+- The Player Guide's text is `build/vMenu/config/player-guide.json`. If you
+  rename a menu row, run `tests/player-guide`: it fails when the guide names or
+  lights up a row that no longer exists. Raise the file's `version` to show the
+  guide to everyone again.
 
 ## Tests
 
@@ -97,6 +101,8 @@ lua tests/request-guard/test_request_guard.lua
 python tests/sleeping-loops/test_sleeping_loops.py
 python tests/upstream-bug-fixes/test_upstream_bug_fixes.py
 python tests/psrp-skin/test_psrp_skin.py
+dotnet run --project tests/player-guide
+python tests/player-guide/test_player_guide.py
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

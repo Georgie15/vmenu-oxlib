@@ -33,8 +33,14 @@ local function show()
     end)
 end
 
-AddEventHandler('vMenu:MenuStateChanged', function(open)
+-- guideShown: the Player Guide's card is up on this open (PlayerGuide.cs). Then this waits: a new
+-- player (no note seen yet) doesn't need it at all, and anyone else gets it on their next open.
+AddEventHandler('vMenu:MenuStateChanged', function(open, guideShown)
     if not open or GetResourceKvpString(SEEN_KEY) == VERSION then return end
+    if guideShown then
+        if GetResourceKvpString(SEEN_KEY) == nil then SetResourceKvp(SEEN_KEY, VERSION) end
+        return
+    end
     SetResourceKvp(SEEN_KEY, VERSION)
     show()
 end)

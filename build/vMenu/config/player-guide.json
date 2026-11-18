@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "welcome": {
+    "menu": "main",
+    "highlight": ["Player Guide"],
+    "title": "New to the menu?",
+    "body": [
+      "This menu is where you make your character, change clothes and get cars. The guide shows you where each one is.",
+      "It takes about two minutes."
+    ],
+    "foot": "Skip it now and find it later at the top of the menu: **Player Guide**."
+  },
+  "steps": [
+    {
+      "id": "menu",
+      "menu": "main",
+      "title": "Find your way around",
+      "body": [
+        "[F1] opens and closes this menu. [↑] [↓] move, [ENTER] picks and [BACKSPACE] goes back a page.",
+        "The mouse works too: left-click picks and right-click goes back."
+      ],
+      "tip": "Change any vMenu key in **Pause › Settings › Key Bindings › FiveM**. Look for \"vMenu\"."
+    },
+    {
+      "id": "character",
+      "menu": "mpPed",
+      "highlight": ["Create Male Character", "Create Female Character"],
+      "title": "Make your character",
+      "body": [
+        "Pick **Create Male Character** or **Create Female Character**. Choose parents, face, hair and clothes, then pick **Save Character** and give it a name.",
+        "Only characters made here can be saved and edited later."
+      ],
+      "tip": "Open **Saved Characters**, pick yours and choose **Set As Default Character**. With **Respawn As Default MP Character** on in Misc Settings, you spawn as them every time."
+    },
+    {
+      "id": "outfits",
+      "menu": "mpPed",
+      "highlight": ["Saved Outfits"],
+      "title": "Change clothes and save outfits",
+      "body": [
+        "Dress up, open **Saved Outfits** and pick **Save Current Outfit**. Change into it later without touching your face or hair."
+      ],
+      "tip": "**Player Appearance › Clothing Quick Toggles** takes off your hat, glasses or mask, and puts back exactly what you had."
+    },
+    {
+      "id": "uniforms",
+      "menu": "mpPed",
+      "highlight": ["Department Outfits"],
+      "requiresConvar": "vmenu_dept_outfits",
+      "title": "Department uniforms",
+      "body": [
+        "Go on duty with **/duty** and pick your department. **Department Outfits** then lists the uniforms your department has published for your body type.",
+        "Nothing shows while you're off duty."
+      ],
+      "tip": "Department heads publish and update these outfits from the same page."
+    },
+    {
+      "id": "car",
+      "menu": "vehicleSpawner",
+      "highlight": ["Custom Vehicles"],
+      "title": "Get a car",
+      "body": [
+        "**Custom Vehicles** opens Paradise State's vehicle packs. [F9] opens them straight away. Some packs need a role.",
+        "For standard GTA cars, pick a category further down, or type a model with **Spawn Vehicle By Model Name**."
+      ],
+      "tip": "You can have up to 5 vehicles out at once (3 during a purge). **/dv** deletes one you're done with."
+    },
+    {
+      "id": "keep",
+      "menu": "savedVehicles",
+      "highlight": ["Save Current Vehicle"],
+      "title": "Keep your car",
+      "body": [
+        "Tune and paint it in **Vehicle Options**, then sit in it and pick **Save Current Vehicle**. It spawns exactly the same next time.",
+        "Open the saved car from **Vehicle Class** or **Vehicle Category** and pick **Save to CAD** to register it to your character."
+      ],
+      "tip": "**Generate Vehicle Code** on a saved car gives a friend a code. They load it with **Load Vehicle Code**."
+    },
+    {
+      "id": "personal",
+      "menu": "personalVehicle",
+      "highlight": ["Lock Vehicle Doors", "Unlock Vehicle Doors", "Set Waypoint To My Car"],
+      "title": "Your personal vehicle",
+      "body": [
+        "Drive a car as the driver and it becomes your personal vehicle.",
+        "From here you can lock and unlock it, start the engine, sound the horn and set a waypoint to it."
+      ],
+      "tip": "Turn on **Auto-Lock When I Walk Away** and it locks itself."
+    },
+    {
+      "id": "backup",
+      "menu": "misc",
+      "highlight": ["Back Up My Saves", "Auto Back Up My Saves", "Restore My Saves"],
+      "requiresConvar": "vmenu_backups",
+      "title": "Back up your saves",
+      "body": [
+        "Your characters, outfits and cars are saved on your own PC. Clearing the FiveM cache or changing PC loses them.",
+        "**Back Up My Saves** keeps a copy on the server and **Restore My Saves** brings it back. **Auto Back Up My Saves** does it for you."
+      ]
+    },
+    {
+      "id": "done",
+      "menu": "main",
+      "highlight": ["Player Guide"],
+      "title": "You're all set",
+      "body": [
+        "Replay this guide, or look up one question, from **Player Guide** at the top of the menu.",
+        "Still stuck? Ask on our Discord: **discord.gg/paradisestaterp**."
+      ]
+    }
+  ],
+  "questions": [
+    { "question": "How do I make a character?", "step": "character" },
+    { "question": "How do I save an outfit?", "step": "outfits" },
+    { "question": "How do I get my department uniform?", "step": "uniforms" },
+    { "question": "How do I get a car?", "step": "car" },
+    { "question": "How do I save my car?", "step": "keep" },
+    {
+      "question": "How do I register my car in the CAD?",
+      "menu": "savedVehicles",
+      "highlight": ["Vehicle Class", "Vehicle Category"],
+      "body": [
+        "Save the car first. Then open it from **Vehicle Class** or **Vehicle Category** and pick **Save to CAD**.",
+        "It's registered to the character you're playing, so a plate check shows it's yours."
+      ]
+    },
+    { "question": "How do I lock or find my car?", "step": "personal" },
+    {
+      "question": "How do I share an outfit or a car?",
+      "menu": "mpPed",
+      "highlight": ["Saved Characters"],
+      "requiresConvar": "vmenu_outfitcodes",
+      "body": [
+        "Open your character from **Saved Characters** and pick **Edit Saved Character**. In there, **Generate Outfit Code** gives you a code for what you're wearing, and your friend types it into **Load Shared Outfit**.",
+        "Cars work the same way: **Generate Vehicle Code** on a saved car, and **Load Vehicle Code** in Saved Vehicles."
+      ]
+    },
+    { "question": "How do I keep my saves on a new PC?", "step": "backup" },
+    {
+      "question": "How do I change how I walk?",
+      "menu": "appearance",
+      "highlight": ["Walking Style"],
+      "body": [
+        "Change **Walking Style** with [←] and [→]. It stays until you change it."
+      ]
+    },
+    {
+      "question": "How do I get more peds?",
+      "menu": "appearance",
+      "highlight": ["Spawn Peds"],
+      "body": [
+        "Open **Spawn Peds**. The **Ped Pack** in there has extra peds from the PSRP store, and you can preview them before you buy."
+      ]
+    },
+    {
+      "question": "How do I take screenshots without the HUD?",
+      "menu": "misc",
+      "highlight": ["Photo Mode"],
+      "requiresConvar": "vmenu_photo_mode",
+      "body": [
+        "**Photo Mode** gives you a free camera with the HUD hidden. It stays within 15 m of you."
+      ]
+    }
+  ]
+}

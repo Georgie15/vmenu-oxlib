@@ -28,6 +28,8 @@ files {
     'config/addons.json',
     'config/pedpack.json',
     'config/clothing-layouts.json',
+    -- The Player Guide's text (Main Menu > Player Guide).
+    'config/player-guide.json',
     'storage.html',
     -- MenuAPI 4 draws the menus on storage.html with these files.
     'menuapi/**/*',

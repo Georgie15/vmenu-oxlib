@@ -617,13 +617,16 @@ namespace vMenuClient
                 if (isMenuOpen != _wasMenuOpen)
                 {
                     _wasMenuOpen = isMenuOpen;
+                    var guideShown = false;
                     if (isMenuOpen)
                     {
                         // Ends every idle rest in progress, so the resting loops are back to every
                         // frame while the menu is open (see IdleRest).
                         IdleRest.MenuOpened();
+                        // The first time, this offers the Player Guide. What's New hears whether it did.
+                        guideShown = PlayerGuide.MenuOpened();
                     }
-                    TriggerEvent("vMenu:MenuStateChanged", isMenuOpen);
+                    TriggerEvent("vMenu:MenuStateChanged", isMenuOpen, guideShown);
                     if (!isMenuOpen)
                     {
                         OfferToUpdateSavedVehicle();
@@ -693,6 +696,9 @@ namespace vMenuClient
         private static void CreateSubmenus()
         {
             // Online Players and Banned Players were removed: unused, and staff actions are handled by EasyAdmin.
+            // The Player Guide is the first row (config/player-guide.json); its questions are added at the end.
+            PlayerGuide.AddToMainMenu(Menu);
+
             var playerSubmenuBtn = new MenuItem("Player Related Options", "Open this submenu for player related subcategories.") { Label = "→→→" };
             Menu.AddMenuItem(playerSubmenuBtn);
 
@@ -872,6 +878,9 @@ namespace vMenuClient
                 Label = "→→→"
             };
             AddMenu(Menu, sub, btn);
+
+            // Every menu exists now, so the guide knows which questions this player gets.
+            PlayerGuide.AddQuestions();
 
             // Refresh everything.
             MenuController.Menus.ForEach((m) => m.RefreshIndex());
