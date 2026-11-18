@@ -74,15 +74,25 @@ for name, card in cards:
 # Every **name** the text uses is a real row (or one of the few non-row phrases below), so renaming a
 # row can't leave the guide telling players to pick something that isn't there.
 client_source = '\n'.join(p.read_text(encoding='utf-8-sig') for p in (root / 'vMenu').rglob('*.cs') if 'obj' not in p.parts and 'bin' not in p.parts)
-NOT_ROWS = {'Pause › Settings › Key Bindings › FiveM', '/duty', '/dv', 'discord.gg/paradisestaterp'}
+NOT_ROWS = {'Pause → Settings → Key Bindings → FiveM', '/duty', '/dv', 'discord.gg/paradisestaterp'}
 all_cards = [guide['welcome']] + guide['steps'] + guide.get('questions', [])
 for card in all_cards:
     texts = card.get('body', []) + [card.get('tip') or '', card.get('foot') or '']
     for bold in re.findall(r'\*\*(.+?)\*\*', ' '.join(texts)):
         if bold in NOT_ROWS:
             continue
-        for part in bold.split(' › '):
+        for part in bold.split(' → '):
             check(f'"{part}"' in client_source, f'"{part}" (in **{bold}**) is not a row label anywhere in the client')
+
+# The card and the menu use GTA's own font (menuapi/fonts/chalet-london.woff), which swaps some
+# characters for game icons: › draws as a blank button and ‹ as the Rockstar "CREATED" badge. Text
+# may use printable ASCII and these, each checked by drawing it from that font.
+FONT_SAFE = set('←→↑↓…•–—“”‘’·×')
+guide_text = read('build/vMenu/config/player-guide.json')
+guide_strings = ''.join(re.findall(r'"(?:[^"\\\n]|\\.)*"', guide_cs + content_cs))
+for where, text in (('player-guide.json', guide_text), ('PlayerGuide strings', guide_strings)):
+    for ch in sorted({c for c in text if not (' ' <= c <= '~') and c not in '\r\n\t'}):
+        check(ch in FONT_SAFE, f'{where} uses U+{ord(ch):04X} {ch!r}, which GTA\'s font may draw as an icon; use one of {"".join(sorted(FONT_SAFE))}')
 
 # Every menu id the content may name is one PlayerGuide.MenuFor knows.
 menu_ids = re.search(r'MenuIds\s*=\s*\{(.*?)\};', content_cs, re.S).group(1)

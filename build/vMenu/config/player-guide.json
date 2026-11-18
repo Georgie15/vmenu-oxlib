@@ -19,7 +19,7 @@
         "[F1] opens and closes this menu. [↑] [↓] move, [ENTER] picks and [BACKSPACE] goes back a page.",
         "The mouse works too: left-click picks and right-click goes back."
       ],
-      "tip": "Change any vMenu key in **Pause › Settings › Key Bindings › FiveM**. Look for \"vMenu\"."
+      "tip": "Change any vMenu key in **Pause → Settings → Key Bindings → FiveM**. Look for \"vMenu\"."
     },
     {
       "id": "character",
@@ -40,7 +40,7 @@
       "body": [
         "Dress up, open **Saved Outfits** and pick **Save Current Outfit**. Change into it later without touching your face or hair."
       ],
-      "tip": "**Player Appearance › Clothing Quick Toggles** takes off your hat, glasses or mask, and puts back exactly what you had."
+      "tip": "**Player Appearance → Clothing Quick Toggles** takes off your hat, glasses or mask, and puts back exactly what you had."
     },
     {
       "id": "uniforms",

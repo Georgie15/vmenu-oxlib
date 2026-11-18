@@ -57,6 +57,19 @@ welcome card never showed.
   - 7 more deliberate breakages each fail a test, 28 in all.
 - **First build's client DLL:** `5a66bf81…`. Don't deploy it.
 
+**Second in-game fix (November 18): white blocks in two tips.** The card and the
+menu use GTA's own font (`menuapi/fonts/chalet-london.woff`), which swaps some
+characters for game icons: `›` (U+203A) is a blank button and `‹` (U+2039) the
+Rockstar "CREATED" badge. "Pause › Settings › Key Bindings › FiveM" and "Player
+Appearance › Clothing Quick Toggles" showed a white block for each `›`.
+- `config/player-guide.json` now uses `→`, which that font draws as a chevron.
+  Only this file changed.
+- `tests/player-guide` now fails on any character in the guide's text, or in
+  PlayerGuide's strings, outside printable ASCII and `←→↑↓…•–—“”‘’·×`. Each of
+  those was drawn from the font to check it.
+- The guide's `version` stays 1: the text fix doesn't need to show the guide to
+  everyone again.
+
 **Why.** The owner asked for a guide new players can go through on their first
 F1, like the ones in PSRP_CAD and EasyAdmin, because players keep asking staff
 how to get an outfit or a car. A clickable mockup was approved first.
