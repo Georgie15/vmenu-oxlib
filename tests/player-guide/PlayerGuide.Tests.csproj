@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../vMenu/PlayerGuideContent.cs" Link="PlayerGuideContent.cs" />
+    <Compile Include="../../vMenu/DressingRoomFlow.cs" Link="DressingRoomFlow.cs" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>../../dependencies/shared/Newtonsoft.Json.dll</HintPath>
     </Reference>

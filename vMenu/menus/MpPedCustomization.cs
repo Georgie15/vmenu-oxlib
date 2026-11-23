@@ -1857,6 +1857,9 @@ namespace vMenuClient.menus
                 {
                     if (await SavePed())
                     {
+                        // The dressing room's last step (a new player's first character).
+                        DressingRoomGuide.CharacterSaved();
+
                         while (!MenuController.IsAnyMenuOpen())
                         {
                             await BaseScript.Delay(0);
@@ -2212,6 +2215,21 @@ namespace vMenuClient.menus
                 snapshot.SaveName = newPedKey;
                 SaveMpCharacterSnapshot(snapshot);
             }
+        }
+
+        /// <summary>
+        /// After a save in the dressing room: the character just saved becomes the one the next join
+        /// restores (RestorePreferredMpAppearance), as spawning it from Saved Characters would make it.
+        /// A new character is otherwise only worn until the player leaves.
+        /// </summary>
+        internal void RememberCurrentCharacter()
+        {
+            if (currentCharacter.Version < 1 || string.IsNullOrEmpty(currentCharacter.SaveName))
+            {
+                return;
+            }
+            SetResourceKvp("vmenu_last_character", GetMpCharacterKey(currentCharacter.SaveName));
+            SaveMpCharacterSnapshot(currentCharacter);
         }
 
         private void RefreshCurrentCharacterSnapshot()

@@ -42,6 +42,8 @@ namespace vMenuClient
         internal const int ControlJump = 22;            // Space / X: kept from jumping when X skips
         private static readonly int[] GuideControls =
             { ControlPause, ControlPauseAlternate, ControlAccept, ControlCancel, ControlX, ControlLeft, ControlRight, ControlJump };
+        /// <summary>The keys a card with its own keys reads (the dressing room's finish card too).</summary>
+        internal static int[] Controls => GuideControls;
 
         /// <summary>Keys pressed this soon after a card opens are ignored, so the press that opened it can't also move it on.</summary>
         internal const int InputDelayMs = 200;
@@ -60,6 +62,12 @@ namespace vMenuClient
         private static int acceptInputAt;
         /// <summary>Set after an error: the guide stays off for the rest of the session.</summary>
         private static bool broken;
+
+        /// <summary>The guide's text, or null when config/player-guide.json can't be used.</summary>
+        internal static GuideContent Content => content;
+
+        /// <summary>A card is up, or the menu's buttons aren't back yet after one.</summary>
+        internal static bool Busy => flow != null && (flow.Mode != GuideMode.Off || hold.Holding);
 
         public PlayerGuide()
         {
@@ -99,6 +107,11 @@ namespace vMenuClient
 
             guideMenu.OnItemSelect += (sender, item, index) =>
             {
+                if (DressingRoomGuide.Active)
+                {
+                    Notify.Info("Finish the dressing room first. The guide is here whenever you want it.");
+                    return;
+                }
                 if (broken || flow == null || flow.Mode != GuideMode.Off)
                 {
                     if (broken)
@@ -156,6 +169,14 @@ namespace vMenuClient
                 case "savedVehicles": return MainMenu.SavedVehiclesMenu?.GetTypeMenu();
                 case "personalVehicle": return MainMenu.PersonalVehicleMenu?.GetMenu();
                 case "misc": return MainMenu.MiscSettingsMenu?.GetMenu();
+                // The character creator's pages (the dressing room).
+                case "mpCreator": return MainMenu.MpPedCustomizationMenu?.createCharacterMenu;
+                case "mpFaceSkin": return MainMenu.MpPedCustomizationMenu?.inheritanceMenu;
+                case "mpAppearance": return MainMenu.MpPedCustomizationMenu?.appearanceMenu;
+                case "mpFaceShape": return MainMenu.MpPedCustomizationMenu?.faceShapeMenu;
+                case "mpTattoos": return MainMenu.MpPedCustomizationMenu?.tattoosMenu;
+                case "mpClothes": return MainMenu.MpPedCustomizationMenu?.clothesMenu;
+                case "mpProps": return MainMenu.MpPedCustomizationMenu?.propsMenu;
                 default: return null;
             }
         }
@@ -179,6 +200,11 @@ namespace vMenuClient
         /// </summary>
         internal static bool MenuOpened()
         {
+            // The dressing room's card is up instead; true keeps What's New from opening over it.
+            if (DressingRoomGuide.Active)
+            {
+                return true;
+            }
             if (broken || flow == null || flow.Mode != GuideMode.Off || hold.Holding)
             {
                 return false;

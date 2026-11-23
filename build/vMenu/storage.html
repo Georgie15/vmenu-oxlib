@@ -463,11 +463,68 @@
     gap: 7px;
     padding: 5px 8px;
     border-radius: 6px;
+    white-space: nowrap;
   }
 
   #vmenu-guide .g-key--main {
     color: rgb(255 255 255);
     background: rgb(128 64 230);
+  }
+
+  /* The dressing room's checklist: done steps ticked, the current one in white. */
+  #vmenu-guide .g-list {
+    display: grid;
+    gap: 6px;
+    margin: 2px 0 0;
+    padding: 12px 0 0;
+    list-style: none;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+  }
+
+  #vmenu-guide .g-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 17px;
+    color: rgb(132 126 152);
+  }
+
+  #vmenu-guide .g-list li.is-now {
+    color: rgb(255 255 255);
+  }
+
+  #vmenu-guide .g-list li.is-done {
+    color: rgb(178 150 255);
+  }
+
+  #vmenu-guide .g-check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 2px currentColor;
+  }
+
+  #vmenu-guide .g-list li.is-done .g-check {
+    background: rgb(128 64 230);
+    box-shadow: none;
+  }
+
+  /* A tick drawn with borders: GTA's font may draw a tick character as an icon. */
+  #vmenu-guide .g-list li.is-done .g-check::after {
+    content: "";
+    width: 8px;
+    height: 4px;
+    margin-top: -2px;
+    border: solid rgb(255 255 255);
+    border-width: 0 0 2px 2px;
+    transform: rotate(-45deg);
+  }
+
+  #vmenu-guide .g-hint {
+    color: rgb(132 126 152);
   }
 
   #menuapi.vmenu-guide-dim .menuapi-row:not(.vmenu-guide-hi):not(.menuapi-row--separator) {
@@ -764,6 +821,19 @@
           parts.push(el("div", "g-bar", fill));
           keys = [d.last ? null : key(caps.skip, "Skip"), el("span", "g-grow"), key(caps.back, "Back"),
             key(caps.next, d.last ? "Finish" : "Next", true)].filter(Boolean);
+        } else if (d.kind === "dressing" || d.kind === "dressingDone") {
+          // The dressing room (DressingRoomGuide.cs): the menu stays the player's, so only the
+          // finish card has keys of its own.
+          const list = Array.isArray(d.checklist) ? d.checklist : [];
+          const finished = d.kind === "dressingDone";
+          parts.push(el("div", "g-head", el("span", null, "Dressing room"),
+            el("span", null, finished ? "Ready" : "Step " + d.number + " / " + d.count)));
+          const fill = el("i");
+          fill.style.width = Math.round(list.filter((c) => c.done).length / Math.max(1, list.length) * 100) + "%";
+          parts.push(el("div", "g-bar", fill));
+          keys = finished
+            ? [key(caps.back, "Keep changing"), el("span", "g-grow"), key(caps.next, "Head out", true)]
+            : [el("span", "g-label g-hint", "Use the menu as normal. This card follows along.")];
         } else {
           parts.push(el("div", "g-head", el("span", null, "How do I…?"), el("span", null, "Player guide")));
           keys = [key(caps.back, "Questions"), el("span", "g-grow"), key(caps.next, "Got it", true)];
@@ -773,6 +843,10 @@
         for (const line of d.body || []) body.append(el("p", null, rich(line)));
         if (d.tip) body.append(el("div", "g-tip", el("span", "g-tag", "TIP"), el("span", "g-text", rich(d.tip))));
         if (d.foot) body.append(el("p", "g-foot", rich(d.foot)));
+        if (Array.isArray(d.checklist) && d.checklist.length) {
+          body.append(el("ol", "g-list", ...d.checklist.map((c) =>
+            el("li", c.done ? "is-done" : c.current ? "is-now" : null, el("span", "g-check"), el("span", "g-text", String(c.title || ""))))));
+        }
         parts.push(body, el("div", "g-keys", ...keys));
 
         card.replaceChildren(...parts);

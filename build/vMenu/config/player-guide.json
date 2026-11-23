@@ -161,5 +161,89 @@
         "**Photo Mode** gives you a free camera with the HUD hidden. It stays within 15 m of you."
       ]
     }
-  ]
+  ],
+  "dressingRoom": {
+    "steps": [
+      {
+        "id": "body",
+        "menu": "mpPed",
+        "highlight": ["Create Male Character", "Create Female Character"],
+        "done": "open",
+        "opens": "mpCreator",
+        "title": "Pick a body",
+        "body": [
+          "This is where you make the character you play as. Pick **Create Male Character** or **Create Female Character** to start."
+        ],
+        "tip": "Face, hair and clothes come next. You can change all of it later too."
+      },
+      {
+        "id": "face",
+        "menu": "mpCreator",
+        "highlight": ["Face & Skin"],
+        "done": "visit",
+        "opens": "mpFaceSkin",
+        "title": "Face and skin",
+        "body": [
+          "Open **Face & Skin** to pick a face and a skin tone."
+        ],
+        "inside": [
+          "[←] [→] on **Face** and **Skin Tone** go through the faces and skin tones. The blend rows under them are optional.",
+          "Happy with it? [BKSP] goes back to the creator."
+        ],
+        "tip": "In a hurry? **Randomize Character** gives you a random face and hair to start from."
+      },
+      {
+        "id": "hair",
+        "menu": "mpCreator",
+        "highlight": ["Character Appearance"],
+        "done": "visit",
+        "opens": "mpAppearance",
+        "title": "Hair and makeup",
+        "body": [
+          "Open **Character Appearance** for hair, beard, eyebrows, makeup and eye colour."
+        ],
+        "inside": [
+          "Each row is one thing: [←] [→] change the style, and the colour and opacity rows under it fine-tune it.",
+          "Done? [BKSP] goes back to the creator."
+        ]
+      },
+      {
+        "id": "clothes",
+        "menu": "mpCreator",
+        "highlight": ["Character Clothes"],
+        "done": "visit",
+        "opens": "mpClothes",
+        "title": "Get dressed",
+        "body": [
+          "Open **Character Clothes** to pick your clothes."
+        ],
+        "inside": [
+          "Each row is one piece. [←] [→] go through the styles, and [ENTER] changes the colour of the one you're wearing.",
+          "Done? [BKSP] goes back to the creator. Hats and glasses are in **Character Props**."
+        ],
+        "tip": "Tops are **Shirt Overlay & Jackets**, with **Shirt & Accessory** under them."
+      },
+      {
+        "id": "save",
+        "menu": "mpCreator",
+        "highlight": ["Save Character"],
+        "done": "save",
+        "title": "Save your character",
+        "body": [
+          "Pick **Save Character** and give it a name. That keeps this look for next time."
+        ],
+        "tip": "Want to change something first? Go back into any page. Nothing is lost until you save."
+      }
+    ],
+    "finish": {
+      "menu": "mpPed",
+      "highlight": ["Saved Outfits"],
+      "title": "Looking good",
+      "body": [
+        "Your character is saved, and you'll be in it next time you join.",
+        "To change clothes later, open **Saved Outfits** and keep the outfits you like. [ENTER] takes you to {destination}."
+      ],
+      "tip": "[F1] opens this menu whenever you want to change your look."
+    }
+  }
 }

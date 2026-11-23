@@ -232,7 +232,146 @@ static class Program
         kb.Abandon();
         Check(!kb.Holding && kb.ReadyToRelease(true, 60001), "after an error the hold is dropped at once");
 
+        DressingRoom(packaged, content);
+
         Console.WriteLine($"player-guide: {checks} checks passed");
         return 0;
+    }
+
+    // ---- The dressing room (psrp_dressing_room): a new player's first character ----
+    static void DressingRoom(string packaged, GuideContent content)
+    {
+        var room = content.DressingRoom;
+        Check(room != null, "the packaged file has the dressing room");
+        Check(room.Steps.Count >= 3 && room.Steps.Count <= 7, "a short dressing room: 3 to 7 steps");
+        Check(room.Steps.First().Card.Menu == "mpPed" && room.Steps.First().Done == DressingDone.Open && room.Steps.First().Opens == "mpCreator",
+            "it starts on MP Ped Customization and is done when the creator opens");
+        Check(room.Steps.Last().Done == DressingDone.Save, "it ends with saving");
+        Check(room.Finish.Menu == "mpPed", "the finish card is on the page vMenu shows after a save");
+        Check(room.Finish.Body.Concat(new[] { room.Finish.Title, room.Finish.Tip ?? "" }).Any(t => t.Contains("{destination}")),
+            "the finish card says where they go next");
+        foreach (var step in room.Steps)
+        {
+            var c = step.Card;
+            Check(c.Body.Count <= 3 && step.Inside.Count <= 3, $"{c.Title}: three paragraphs at most");
+            Check(c.Body.Concat(step.Inside).All(p => p.Length <= 260), $"{c.Title}: short paragraphs");
+            Check(c.Highlight.Count > 0, $"{c.Title}: points at its row");
+            foreach (var text in c.Body.Concat(step.Inside).Append(c.Tip ?? ""))
+            {
+                Check(text.Split("**").Length % 2 == 1, $"{c.Title}: every ** is closed");
+                Check(text.Count(ch => ch == '[') == text.Count(ch => ch == ']'), $"{c.Title}: every [KEY] is closed");
+                Check(!text.Contains('<') && !text.Contains('>'), $"{c.Title}: no HTML");
+            }
+        }
+
+        // Broken dressing rooms are refused, with a reason (and so the whole guide is off: tests keep the packaged one sound).
+        ParseFails(Mutate(packaged, o => o["dressingRoom"] = "x"), "\"dressingRoom\" must be an object", "a dressing room that isn't an object");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"] = new JArray()), "at least one step", "a dressing room with no steps");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][1]["done"] = "look"), "open, visit or save", "an unknown way to be done");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][1]["opens"].Parent.Remove()), "\"opens\" is missing", "a visit step that opens nothing");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][1]["opens"] = "vehicle"), "another creator page", "a step opening a page outside the creator");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][1]["opens"] = o["dressingRoom"]["steps"][2]["opens"]), "already opens", "two steps opening one page");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][1]["menu"] = "misc"), "mpPed or a creator page", "a step on a page outside the dressing room");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][0]["inside"] = new JArray("x")), "only a visit step", "inside on an open step");
+        ParseFails(Mutate(packaged, o => ((JArray)o["dressingRoom"]["steps"]).RemoveAt(((JArray)o["dressingRoom"]["steps"]).Count - 1)),
+            "only that one, saves", "no save step");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["finish"].Parent.Remove()), "\"finish\" is missing", "no finish card");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["finish"]["menu"] = "mpCreator"), "must be mpPed", "a finish card on the creator");
+        ParseFails(Mutate(packaged, o => o["dressingRoom"]["steps"][2]["requiresConvar"] = "x"), "unknown setting \"requiresConvar\"", "a convar on a dressing step");
+        var without = ParseOk(Mutate(packaged, o => o["dressingRoom"].Parent.Remove()), "a guide with no dressing room");
+        Check(without.DressingRoom == null, "no dressing room: none (vMenu answers Unavailable)");
+
+        // ---- The steps, the way MP Ped Customization moves between pages ----
+        var flow = new DressingRoomFlow(room);
+        var visits = room.Steps.Where(s => s.Done == DressingDone.Visit).ToList();
+        Check(flow.View() == null && !flow.Update("mpPed"), "off until started");
+        flow.Start("Legion Square");
+        Check(flow.Phase == DressingPhase.Steps && flow.Destination == "Legion Square", "started, knowing where they go next");
+        Check(flow.View() == null, "no card while no menu is open");
+        flow.Update("mpPed");
+        var view = flow.View();
+        Check(view.Number == 1 && view.Count == room.Steps.Count && view.Title == room.Steps[0].Card.Title, "step 1 on MP Ped Customization");
+        Check(view.Highlight.SequenceEqual(room.Steps[0].Card.Highlight), "lighting up Create Male and Female Character");
+        Check(view.Checklist.Count == room.Steps.Count && view.Checklist[0].Current && !view.Checklist.Any(c => c.Done), "the checklist: step 1 is current");
+        Check(!flow.Update("mpPed"), "the same page again changes nothing");
+
+        flow.Update(DressingRoomFlow.Elsewhere);
+        view = flow.View();
+        Check(view.Number == 1 && view.Highlight.Count == 0 && view.Foot == DressingRoomFlow.BackToCustomization, "wandered off: the same step, and the way back");
+        flow.Update(DressingRoomFlow.Closed);
+        Check(flow.View() == null && flow.Phase == DressingPhase.Steps, "menu closed: no card, but still on");
+
+        flow.Update("mpPed");
+        flow.Update("mpCreator");
+        Check(flow.IsDone(0) && flow.CurrentIndex == 1, "the creator opened: step 1 done");
+        view = flow.View();
+        Check(view.Number == 2 && view.Highlight.SequenceEqual(room.Steps[1].Card.Highlight), "step 2 lights up its row in the creator");
+
+        var first = visits[0];
+        var firstIndex = room.Steps.IndexOf(first);
+        flow.Update(first.Opens);
+        view = flow.View();
+        Check(view.Number == firstIndex + 1 && view.Body.SequenceEqual(first.Inside.Count > 0 ? first.Inside : first.Card.Body) && view.Highlight.Count == 0,
+            "inside its page: that page's own help");
+        Check(!flow.IsDone(firstIndex), "opening a page isn't doing it");
+        flow.Update("mpCreator");
+        Check(flow.IsDone(firstIndex) && flow.CurrentIndex == firstIndex + 1, "back on the creator: done, on to the next");
+
+        // Out of order: the last visit step first ticks that one, the current one stays.
+        var last = visits.Last();
+        var lastIndex = room.Steps.IndexOf(last);
+        if (lastIndex != flow.CurrentIndex)
+        {
+            flow.Update(last.Opens);
+            Check(flow.View().Number == lastIndex + 1, "another step's page shows that step's help");
+            flow.Update("mpCreator");
+            Check(flow.IsDone(lastIndex) && flow.CurrentIndex == firstIndex + 1, "done out of order, the current step stays");
+        }
+
+        // A page that is no step (Face Shape, Tattoos, Props): the current step, and the way back.
+        flow.Update("mpFaceShape");
+        view = flow.View();
+        Check(view.Number == flow.CurrentIndex + 1 && view.Foot == DressingRoomFlow.BackToCreator, "an extra page: carry on with the current step");
+        flow.Update("mpCreator");
+
+        // Exit Without Saving: the menu closes for the question, then MP Ped Customization opens.
+        flow.Update(DressingRoomFlow.Closed);
+        Check(flow.IsDone(firstIndex), "the menu closing for the question keeps the steps");
+        flow.Update("mpPed");
+        Check(flow.CurrentIndex == 0 && !flow.IsDone(firstIndex), "out of the creator without saving: it starts over");
+        Check(flow.View().Highlight.SequenceEqual(room.Steps[0].Card.Highlight), "back to picking a body");
+
+        // Every step, then the save.
+        flow.Update("mpCreator");
+        foreach (var step in visits)
+        {
+            flow.Update(step.Opens);
+            flow.Update("mpCreator");
+        }
+        Check(flow.CurrentIndex == room.Steps.Count - 1 && flow.View().Highlight.SequenceEqual(room.Steps.Last().Card.Highlight),
+            "all pages visited: Save Character is next");
+        Check(!flow.Leave() && !flow.Stay(), "the finish keys do nothing before the save");
+        Check(flow.Saved() && flow.Phase == DressingPhase.Finish, "saved: the finish card");
+        Check(!flow.Saved(), "saved twice changes nothing");
+        flow.Update("mpPed"); // vMenu goes back to MP Ped Customization after a save
+        view = flow.View();
+        Check(view.Phase == DressingPhase.Finish && view.Checklist.All(c => c.Done && !c.Current), "every step ticked");
+        Check(view.Body.Any(p => p.Contains("Legion Square")) && !view.Body.Any(p => p.Contains("{destination}")), "the finish card names the spawn");
+        Check(view.Highlight.SequenceEqual(room.Finish.Highlight), "and lights up its row");
+        Check(flow.Leave() && flow.Phase == DressingPhase.Off && flow.View() == null, "Enter: off they go");
+
+        // Saving early is fine: the finish card ticks everything.
+        flow.Start(null);
+        Check(flow.Destination == "your spawn", "no destination given: your spawn");
+        flow.Update("mpPed");
+        flow.Update("mpCreator");
+        flow.Saved();
+        Check(flow.Phase == DressingPhase.Finish && flow.Stay() && flow.Phase == DressingPhase.Off, "saved early, then Backspace: they keep the menu");
+        flow.Start("x");
+        flow.Update("mpPed");
+        Check(flow.Saved() && flow.Phase == DressingPhase.Finish, "a save from anywhere finishes (Edit Saved Character too)");
+        flow.Start("x");
+        flow.Stop();
+        Check(flow.Phase == DressingPhase.Off && !flow.Saved() && flow.View() == null, "stopped from outside: off, and a later save does nothing");
     }
 }

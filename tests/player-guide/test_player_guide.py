@@ -57,8 +57,13 @@ MENUS = {
     'misc': (read('vMenu/menus/MiscSettings.cs'), 'menu'),
 }
 
+mp_ped_cs = read('vMenu/menus/MpPedCustomization.cs')
+MENUS['mpCreator'] = (mp_ped_cs, 'createCharacterMenu')
+dressing = guide.get('dressingRoom', {})
+dressing_cards = [('dressing ' + s['id'], s) for s in dressing.get('steps', [])] + \
+    ([('dressing finish', dressing['finish'])] if 'finish' in dressing else [])
 cards = [('welcome', guide['welcome'])] + [(s['id'], s) for s in guide['steps']] + \
-    [(q['question'], q) for q in guide.get('questions', []) if 'step' not in q]
+    [(q['question'], q) for q in guide.get('questions', []) if 'step' not in q] + dressing_cards
 for name, card in cards:
     menu_id = card.get('menu', 'main')
     for label in card.get('highlight', []):
@@ -75,9 +80,9 @@ for name, card in cards:
 # row can't leave the guide telling players to pick something that isn't there.
 client_source = '\n'.join(p.read_text(encoding='utf-8-sig') for p in (root / 'vMenu').rglob('*.cs') if 'obj' not in p.parts and 'bin' not in p.parts)
 NOT_ROWS = {'Pause → Settings → Key Bindings → FiveM', '/duty', '/dv', 'discord.gg/paradisestaterp'}
-all_cards = [guide['welcome']] + guide['steps'] + guide.get('questions', [])
+all_cards = [guide['welcome']] + guide['steps'] + guide.get('questions', []) + [c for _, c in dressing_cards]
 for card in all_cards:
-    texts = card.get('body', []) + [card.get('tip') or '', card.get('foot') or '']
+    texts = card.get('body', []) + card.get('inside', []) + [card.get('tip') or '', card.get('foot') or '']
     for bold in re.findall(r'\*\*(.+?)\*\*', ' '.join(texts)):
         if bold in NOT_ROWS:
             continue
@@ -89,7 +94,9 @@ for card in all_cards:
 # may use printable ASCII and these, each checked by drawing it from that font.
 FONT_SAFE = set('←→↑↓…•–—“”‘’·×')
 guide_text = read('build/vMenu/config/player-guide.json')
-guide_strings = ''.join(re.findall(r'"(?:[^"\\\n]|\\.)*"', guide_cs + content_cs))
+dressing_cs = read('vMenu/DressingRoomGuide.cs')
+dressing_flow_cs = read('vMenu/DressingRoomFlow.cs')
+guide_strings = ''.join(re.findall(r'"(?:[^"\\\n]|\\.)*"', guide_cs + content_cs + dressing_cs + dressing_flow_cs))
 for where, text in (('player-guide.json', guide_text), ('PlayerGuide strings', guide_strings)):
     for ch in sorted({c for c in text if not (' ' <= c <= '~') and c not in '\r\n\t'}):
         check(ch in FONT_SAFE, f'{where} uses U+{ord(ch):04X} {ch!r}, which GTA\'s font may draw as an icon; use one of {"".join(sorted(FONT_SAFE))}')
@@ -205,6 +212,39 @@ for sel, body in guide_rules.items():
     if re.search(r'font-weight:\s*(bold|[6-9]00)', body):
         check(sel == '#vmenu-guide kbd', f'{sel} asks GTA\'s font for a bold it doesn\'t have (only the Arial key caps may be bold)')
 check('-webkit-text-stroke: 0;' in guide_rules.get('#vmenu-guide .g-head span + span', ''), 'the muted step counter isn\'t bold')
+
+# ---- The dressing room (DressingRoomGuide, for psrp_dressing_room) ----
+check(dressing.get('steps') and dressing.get('finish'), 'the packaged guide has the dressing room steps and finish card')
+save_at = mp_ped_cs.find('if (await SavePed())')
+check(save_at >= 0 and re.match(r'if \(await SavePed\(\)\)\s*\{\s*(//[^\n]*\n\s*)*DressingRoomGuide\.CharacterSaved\(\);', mp_ped_cs[save_at:]),
+      'Save Character tells the dressing room, right after a successful save')
+check('internal void RememberCurrentCharacter()' in mp_ped_cs, 'a dressing room save makes the character the one the next join restores')
+remember = method_body(mp_ped_cs, 'internal void RememberCurrentCharacter()')
+check('SetResourceKvp("vmenu_last_character"' in remember and 'SaveMpCharacterSnapshot(currentCharacter);' in remember,
+      'as spawning it from Saved Characters does (last character and snapshot)')
+check(re.search(r'internal static bool MenuOpened\(\)\s*\{\s*(//[^\n]*\n\s*)*if \(DressingRoomGuide\.Active\)\s*\{\s*return true;', guide_cs),
+      'while the dressing room runs, the Player Guide stays off and What\'s New waits')
+for event in ('vMenu:DressingRoom:Start', 'vMenu:DressingRoom:Stop'):
+    check(f'EventHandlers.Add("{event}"' in dressing_cs, f'the dressing room listens for {event}')
+for event in ('vMenu:DressingRoom:Started', 'vMenu:DressingRoom:Unavailable', 'vMenu:DressingRoom:Saved',
+              'vMenu:DressingRoom:Leave', 'vMenu:DressingRoom:Ended'):
+    check(f'TriggerEvent("{event}"' in dressing_cs, f'the dressing room tells psrp_dressing_room {event}')
+check('new TickSleeper(FrameTick' in dressing_cs and 'sleeper.Sleep();' in dressing_cs, 'its loop sleeps while it is off')
+frame_tick = method_body(dressing_cs, 'private static async Task FrameTick()')
+check(re.search(r'try\s*\{\s*Frame\(\);\s*\}\s*catch \(Exception e\)\s*\{\s*Fail\(e\);\s*ReleaseButtonsNow\(\);', frame_tick),
+      'an error in its loop stops it and hands the menu its buttons at once')
+frame = method_body(dressing_cs, 'private static void Frame()')
+check('hold.ReadyToRelease(' in frame and frame.index('hold.ReadyToRelease(') < frame.index('MenuController.DisableMenuButtons = hold.ButtonsBefore;'),
+      'after the finish card the buttons come back only once its key is let go')
+finish_keys = method_body(dressing_cs, 'private static void FinishKeys(bool pad)')
+check('MenuController.DisableMenuButtons = true;' in finish_keys and 'left: false' in finish_keys and 'right: false' in finish_keys,
+      'the finish card keeps the menu\'s buttons off every frame, and the arrows don\'t send anyone off')
+saved = method_body(dressing_cs, 'internal static void CharacterSaved()')
+check('hold.Start(buttonsAtStart);' in saved, 'the buttons go back to what they were before the dressing room, not what a keyboard left')
+check('MenuController.DisableMenuButtons' not in method_body(dressing_cs, 'private static void Start(string destination)').replace('buttonsAtStart = MenuController.DisableMenuButtons;', ''),
+      'during the steps the menu is the player\'s: Start never turns its buttons off')
+check('"dressing"' in script and '"dressingDone"' in script, 'the page draws the dressing room card')
+check('el("span", "g-text", String(c.title || ""))' in script, 'checklist text has its own span (the text filter is for text-only elements)')
 
 # ---- Manifest and What's New ----
 check("'config/player-guide.json'" in manifest, 'the manifest ships config/player-guide.json')

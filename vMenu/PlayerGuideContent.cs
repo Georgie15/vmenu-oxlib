@@ -24,6 +24,30 @@ namespace vMenuClient
         public string RequiresConvar;
     }
 
+    /// <summary>How a dressing room step is done: its row's page opens, the player visits a page and comes back, or the character is saved.</summary>
+    public enum DressingDone { Open, Visit, Save }
+
+    /// <summary>One step of the dressing room: a card, and what the player does to tick it off.</summary>
+    public sealed class DressingStep
+    {
+        public GuideCard Card;
+        public DressingDone Done;
+        /// <summary>The page this step's row opens (open and visit steps).</summary>
+        public string Opens;
+        /// <summary>What the card says while that page is open (visit steps). Empty: the step's own body.</summary>
+        public List<string> Inside = new();
+    }
+
+    /// <summary>
+    /// The dressing room (psrp_dressing_room): a new player's first character, made with the guide's
+    /// card beside a menu they use themselves. "{destination}" in the finish card is where they go next.
+    /// </summary>
+    public sealed class DressingContent
+    {
+        public List<DressingStep> Steps = new();
+        public GuideCard Finish;
+    }
+
     /// <summary>The Player Guide's content, read from config/player-guide.json.</summary>
     public sealed class GuideContent
     {
@@ -31,7 +55,14 @@ namespace vMenuClient
         public static readonly string[] MenuIds =
         {
             "main", "guide", "player", "vehicle", "playerOptions", "appearance", "mpPed",
-            "vehicleOptions", "vehicleSpawner", "savedVehicles", "personalVehicle", "misc"
+            "vehicleOptions", "vehicleSpawner", "savedVehicles", "personalVehicle", "misc",
+            "mpCreator", "mpFaceSkin", "mpAppearance", "mpFaceShape", "mpTattoos", "mpClothes", "mpProps"
+        };
+
+        /// <summary>The character creator's pages, in MP Ped Customization.</summary>
+        public static readonly string[] CreatorPages =
+        {
+            "mpCreator", "mpFaceSkin", "mpAppearance", "mpFaceShape", "mpTattoos", "mpClothes", "mpProps"
         };
 
         public int Version = 1;
@@ -39,9 +70,13 @@ namespace vMenuClient
         public List<GuideCard> Steps = new();
         /// <summary>The "How do I…?" questions. A question's Title is the question itself.</summary>
         public List<GuideCard> Questions = new();
+        /// <summary>The dressing room's steps, or null when the file has none.</summary>
+        public DressingContent DressingRoom;
 
         private static readonly string[] CardKeys = { "id", "menu", "highlight", "title", "body", "tip", "foot", "requiresConvar" };
         private static readonly string[] QuestionKeys = { "question", "step", "menu", "highlight", "body", "tip", "requiresConvar" };
+        private static readonly string[] DressingStepKeys = { "id", "menu", "highlight", "title", "body", "tip", "done", "opens", "inside" };
+        private static readonly string[] DressingFinishKeys = { "menu", "highlight", "title", "body", "tip" };
 
         /// <summary>
         /// Reads the guide. Returns null and says why in <paramref name="error"/> when the file is
@@ -70,7 +105,7 @@ namespace vMenuClient
             try
             {
                 var content = new GuideContent();
-                Unknown(root, new[] { "version", "welcome", "steps", "questions" }, "the file");
+                Unknown(root, new[] { "version", "welcome", "steps", "questions", "dressingRoom" }, "the file");
 
                 if (root["version"] is JToken v)
                 {
@@ -121,6 +156,15 @@ namespace vMenuClient
                     }
                 }
 
+                if (root["dressingRoom"] is JToken dr)
+                {
+                    if (dr is not JObject dressing)
+                    {
+                        throw new FormatException("\"dressingRoom\" must be an object");
+                    }
+                    content.DressingRoom = ReadDressingRoom(dressing);
+                }
+
                 return content;
             }
             catch (FormatException e)
@@ -130,9 +174,92 @@ namespace vMenuClient
             }
         }
 
-        private static GuideCard ReadCard(JObject o, string where, bool requireId)
+        private static DressingContent ReadDressingRoom(JObject o)
         {
-            Unknown(o, CardKeys, where);
+            const string where = "dressingRoom";
+            Unknown(o, new[] { "steps", "finish" }, where);
+            if (o["steps"] is not JArray steps || steps.Count == 0)
+            {
+                throw new FormatException($"{where}: \"steps\" must list at least one step");
+            }
+            var dressing = new DressingContent();
+            for (var i = 0; i < steps.Count; i++)
+            {
+                var at = $"{where} step {i + 1}";
+                if (steps[i] is not JObject s)
+                {
+                    throw new FormatException($"{at} isn't an object");
+                }
+                var card = ReadCard(s, at, requireId: true, DressingStepKeys);
+                if (dressing.Steps.Any(x => x.Card.Id == card.Id))
+                {
+                    throw new FormatException($"{where}: two steps have the id \"{card.Id}\"");
+                }
+                if (card.Menu != "mpPed" && !CreatorPages.Contains(card.Menu))
+                {
+                    throw new FormatException($"{at}: \"menu\" must be mpPed or a creator page ({string.Join(", ", CreatorPages)})");
+                }
+
+                var step = new DressingStep { Card = card, Opens = Text(s, "opens", at, required: false) };
+                switch (Text(s, "done", at, required: true))
+                {
+                    case "open": step.Done = DressingDone.Open; break;
+                    case "visit": step.Done = DressingDone.Visit; break;
+                    case "save": step.Done = DressingDone.Save; break;
+                    default: throw new FormatException($"{at}: \"done\" must be open, visit or save");
+                }
+                if (step.Done == DressingDone.Save)
+                {
+                    if (step.Opens != null || s["inside"] != null)
+                    {
+                        throw new FormatException($"{at}: a save step has no \"opens\" or \"inside\"");
+                    }
+                }
+                else
+                {
+                    if (step.Opens == null)
+                    {
+                        throw new FormatException($"{at}: \"opens\" is missing (the page its row opens)");
+                    }
+                    if (!CreatorPages.Contains(step.Opens) || step.Opens == card.Menu)
+                    {
+                        throw new FormatException($"{at}: \"opens\" must be another creator page ({string.Join(", ", CreatorPages)})");
+                    }
+                    if (dressing.Steps.Any(x => x.Opens == step.Opens))
+                    {
+                        throw new FormatException($"{at}: another step already opens \"{step.Opens}\"");
+                    }
+                }
+                if (s["inside"] != null)
+                {
+                    if (step.Done != DressingDone.Visit)
+                    {
+                        throw new FormatException($"{at}: only a visit step has \"inside\"");
+                    }
+                    step.Inside = Lines(s, at, "inside");
+                }
+                dressing.Steps.Add(step);
+            }
+            if (dressing.Steps.Count(x => x.Done == DressingDone.Save) != 1 || dressing.Steps.Last().Done != DressingDone.Save)
+            {
+                throw new FormatException($"{where}: the last step, and only that one, saves the character (\"done\": \"save\")");
+            }
+
+            if (o["finish"] is not JObject finish)
+            {
+                throw new FormatException($"{where}: \"finish\" is missing");
+            }
+            dressing.Finish = ReadCard(finish, $"{where} finish", requireId: false, DressingFinishKeys);
+            if (dressing.Finish.Menu != "mpPed")
+            {
+                throw new FormatException($"{where} finish: \"menu\" must be mpPed (the page vMenu shows after a save)");
+            }
+            return dressing;
+        }
+
+        private static GuideCard ReadCard(JObject o, string where, bool requireId, string[] keys = null)
+        {
+            Unknown(o, keys ?? CardKeys, where);
             var card = new GuideCard
             {
                 Id = Text(o, "id", where, required: requireId) ?? "",
@@ -224,18 +351,18 @@ namespace vMenuClient
             return ((string)token).Trim();
         }
 
-        private static List<string> Lines(JObject o, string where)
+        private static List<string> Lines(JObject o, string where, string key = "body")
         {
-            if (o["body"] is not JArray body || body.Count == 0)
+            if (o[key] is not JArray body || body.Count == 0)
             {
-                throw new FormatException($"{where}: \"body\" must list at least one paragraph");
+                throw new FormatException($"{where}: \"{key}\" must list at least one paragraph");
             }
             var lines = new List<string>();
             foreach (var line in body)
             {
                 if (line.Type != JTokenType.String || string.IsNullOrWhiteSpace((string)line))
                 {
-                    throw new FormatException($"{where}: every \"body\" paragraph must be text");
+                    throw new FormatException($"{where}: every \"{key}\" paragraph must be text");
                 }
                 lines.Add(((string)line).Trim());
             }

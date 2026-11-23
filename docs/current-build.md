@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 18, 2026 — release N: the Player Guide, a first-time walkthrough of the menu (client DLL, page, guide text), on top of releases M, L, K, J, I and H. **Testing on branch `feature/release-n-player-guide`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `d34b825ebdcdc5755edc8fa0b52b6fb1af778525c3d6ed18872ec4e821c4fc4d` |
+| Latest change | November 23, 2026 — release O: the dressing room guide for PSRP's psrp_dressing_room (client DLL, page, guide text), on top of releases N, M, L, K, J, I and H. **Testing on branch `feature/release-o-dressing-room`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `5464a38a4001676fec458e65ec63ae17529704abb25dc9693970afe912cba1a2` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,83 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 23, 2026 — release O: the dressing room guide (client DLL, `storage.html`, `config/player-guide.json`) — TESTING, branch `feature/release-o-dressing-room`
+
+**Status: test build, not verified in game, not on `main`.** Built on release N
+(`feature/release-n-player-guide`). Only the client DLL and two client-side
+files change; the server DLL and MenuAPI are release N's.
+
+PSRP-Development's new `psrp_dressing_room` resource sends a brand-new player
+(and anyone in its testing mode, `dressingroom test <id>` in the server
+console) to a clothing store in a private lobby before their first spawn. The
+owner tried it with only a text prompt and wanted vMenu itself to open and walk
+the player through making a character. This is that half.
+
+- **Start.** After the welcome, psrp_dressing_room fires the local event
+  `vMenu:DressingRoom:Start` (where the player goes next). vMenu answers
+  `vMenu:DressingRoom:Started`, or `vMenu:DressingRoom:Unavailable` when the
+  player has no MP Ped Customization or the guide file has no dressing room;
+  the resource then falls back to its own prompt. An older vMenu answers
+  nothing, which also means fall back.
+- **The steps** (`config/player-guide.json`, `dressingRoom`): pick a body
+  (done when the creator opens), Face & Skin, Character Appearance, Character
+  Clothes (each done by visiting the page and coming back), Save Character.
+  `DressingRoomFlow` (no game calls, tested) decides from the open page; it
+  ticks steps done out of order, shows a page's own help while it is open, and
+  starts over after Exit Without Saving. `DressingRoomGuide` opens MP Ped
+  Customization, reads the open menu every frame while on (a `TickSleeper`
+  otherwise), moves the cursor to the next step's row and draws the card.
+- **The menu stays the player's.** Unlike the Player Guide's tour, the card
+  takes no keys and never turns the menu's buttons off during the steps. If
+  the player closes the menu, the card hides; opening the menu again goes
+  straight back to the step's page.
+- **Finish.** A successful Save Character calls
+  `DressingRoomGuide.CharacterSaved()` (`MpPedCustomization`). The finish card
+  has keys, the Player Guide's way (menu buttons off until the key is let go,
+  `GuideButtonHold`, restored to their value from before the dressing room):
+  Enter fires `vMenu:DressingRoom:Leave` and closes the menu; Backspace, Esc
+  or closing the menu fires `vMenu:DressingRoom:Ended` ("stay"). No arrow keys,
+  so one slip can't send anyone off.
+- **The next join.** A new character used to be worn only until the player
+  left: vMenu restores the last character spawned from Saved Characters, not
+  one just made. `RememberCurrentCharacter()` sets `vmenu_last_character` and
+  the snapshot after a dressing room save, as spawning it would. Other saves
+  are unchanged.
+- **The rest of vMenu.** `PlayerGuide.MenuOpened()` returns true while the
+  dressing room runs, so the Player Guide's welcome stays off and What's New
+  waits. Player Guide > Start the guide says to finish the dressing room first.
+  `vMenu:DressingRoom:Stop` (the resource sending the player off, or stopping)
+  hides the card and closes the menu.
+- **The card** (`storage.html`): kinds `dressing` and `dressingDone`, the same
+  card with "Dressing room" and the step in its head, a checklist (ticks drawn
+  with borders: GTA's font may draw a tick character as an icon) and, on the
+  finish card only, keys. Key labels no longer wrap. Checked at 2560x1440 in
+  headless Edge with the packaged page and mock messages.
+
+Reviewed with `tools/ilcompare` against release N's DLL: the new
+`DressingRoom*`/`Dressing*` types, the guide file reader (`ReadDressingRoom`,
+`ReadCard` and `Lines` taking their keys), `PlayerGuide` (`MenuFor` creator
+pages, `MenuOpened`, the Start the guide guard, `Content`/`Busy`/`Controls`)
+and `MpPedCustomization` (the save hook and `RememberCurrentCharacter`). The
+other `MpPedCustomization` entries are compiler-numbered local functions
+renumbered by the new method, with no change.
+
+Tests: `tests/player-guide` (both halves) now also cover the dressing room:
+the packaged steps, refused broken ones, the flow (pages, out of order,
+extras, Exit Without Saving, save, finish keys, stop), every lit row being a
+row of its menu, and the wiring. All 47 tests in AGENTS.md pass.
+
+Deploy, on top of release N (`deploy/README.txt`, "RELEASE O"): copy
+`vMenuClient.net.dll`, `storage.html` and `config/player-guide.json`, then
+`restart vMenu`. Deploy psrp_dressing_room's `client/main.lua` with it.
+`deploy/release-o-full-from-main/` brings main or any of H to N up to O;
+`deploy/rollback-to-release-n/` has N's three files.
+
+Not checked in game: everything above, in particular MenuAPI keeping the
+cursor on the row the guide picks after the creator opens, the finish card's
+Enter not also picking a row after the save name keyboard, and the next join
+restoring the saved character.
 
 ## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`, `themes/psrp-neon.css`) — TESTING, branch `feature/release-n-player-guide`
 
