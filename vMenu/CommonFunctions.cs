@@ -56,8 +56,8 @@ namespace vMenuClient
             try { return Exports["PSRP_Framework"].blocksPersonalVehicleLock(inputFrame); }
             catch { return false; } // Older Framework versions lack this optional export.
         }
-        // Saved Outfits' outfit codes (client/outfitCodes.lua). Both answer with JSON; null when the
-        // Lua side failed.
+        // Outfit codes for a character's outfits page (client/outfitCodes.lua). Both answer with
+        // JSON; null when the Lua side failed.
         public async Task<string> RequestOutfitCode(string takenNamesJson)
         {
             try { return await Exports["vMenu"].requestOutfitCode(takenNamesJson); }

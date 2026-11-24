@@ -1,5 +1,5 @@
--- Outfit codes. Saved Outfits (vMenu's C#, MpPedCustomization.CreateSavedOutfitsMenu) loads a code
--- as an outfit and makes codes from outfits; the exports below do its server side
+-- Outfit codes. A character's outfits page (vMenu's C#, MpPedCustomization.CreateOutfitsMenu) loads
+-- a code as an outfit and makes codes from outfits; the exports below do its server side
 -- (server/oufitCodes.lua). exports.vMenu:loadOutfitFromCode(id) puts a code straight on, for other
 -- resources and /loadoutfitfromcode (config_client.lua).
 
@@ -76,7 +76,7 @@ local function cleanName(text)
     return name
 end
 
----Saved Outfits > Load Outfit Code. Asks for the code and a name, refuses a name the list it goes
+---Load Outfit Code, on a character's outfits page. Asks for the code and a name, refuses a name the list it goes
 ---into already has, and fetches the code. vMenu's C# checks it and saves it as an outfit.
 ---@param takenNamesJson string JSON list of the outfit names already in that list
 ---@return string JSON { ok = true, id, code, created, name, wear } or { ok = false, message } (no message: the dialog was closed)
@@ -122,7 +122,7 @@ exports("requestOutfitCode", function(takenNamesJson)
     return json.encode({ ok = true, id = id, code = code, created = created, name = name, wear = input[3] == true })
 end)
 
----Saved Outfits > Share, and Share What I'm Wearing. Stores the code vMenu built and copies its number.
+---Share and Share What I'm Wearing, on a character's outfits page. Stores the code vMenu built and copies its number.
 ---@param codeJson string the code vMenu built (ClothingSaves.BuildCode)
 ---@return string JSON { ok = true, id } or { ok = false, message }
 exports("shareOutfitCode", function(codeJson)
@@ -152,7 +152,7 @@ exports("shareOutfitCode", function(codeJson)
 end)
 
 ---Puts an outfit code straight on the player, without saving it. For other resources and
----/loadoutfitfromcode; players load codes in Saved Outfits.
+---/loadoutfitfromcode; players load codes on a character's outfits page (Saved Characters).
 ---@param outfitCode number
 ---@return boolean
 exports("loadOutfitFromCode", function(outfitCode)

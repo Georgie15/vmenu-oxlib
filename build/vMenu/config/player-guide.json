@@ -35,10 +35,10 @@
     {
       "id": "outfits",
       "menu": "mpPed",
-      "highlight": ["Saved Outfits"],
+      "highlight": ["Saved Characters"],
       "title": "Change clothes and save outfits",
       "body": [
-        "Dress up, open **Saved Outfits** and pick **Save Current Outfit**. Change into it later without touching your face or hair.",
+        "Dress up, open **Saved Characters** and pick your outfits at the top. **Save Current Outfit** keeps what you're wearing, and you can change into it later without touching your face or hair.",
         "[←] [→] on **Save Current Outfit** choose who it's for: the character you're playing, or all your characters of that body type."
       ],
       "tip": "**Player Appearance → Clothing Quick Toggles** takes off your hat, glasses or mask, and puts back exactly what you had."
@@ -129,10 +129,10 @@
     {
       "question": "How do I share an outfit or a car?",
       "menu": "mpPed",
-      "highlight": ["Saved Outfits"],
+      "highlight": ["Saved Characters"],
       "requiresConvar": "vmenu_outfitcodes",
       "body": [
-        "Open **Saved Outfits**. **Share What I'm Wearing** gives you a code for what you have on, or pick **Share** on a saved outfit. Your friend picks **Load Outfit Code** in Saved Outfits and types the code in.",
+        "Open **Saved Characters**, then your outfits at the top. **Share What I'm Wearing** gives you a code for what you have on, or pick **Share** on a saved outfit. Your friend picks **Load Outfit Code** in the same place and types the code in.",
         "Cars work the same way: **Generate Vehicle Code** on a saved car, and **Load Vehicle Code** in Saved Vehicles."
       ]
     },
@@ -238,11 +238,11 @@
     ],
     "finish": {
       "menu": "mpPed",
-      "highlight": ["Saved Outfits"],
+      "highlight": ["Saved Characters"],
       "title": "Looking good",
       "body": [
         "Your character is saved, and you'll be in it next time you join.",
-        "To change clothes later, open **Saved Outfits** and keep the outfits you like. [ENTER] takes you to {destination}."
+        "To change clothes later, open **Saved Characters** and pick your outfits at the top. [ENTER] takes you to {destination}."
       ],
       "tip": "[F1] opens this menu whenever you want to change your look."
     }

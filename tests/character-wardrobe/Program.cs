@@ -286,15 +286,16 @@ static class Program
         Check(lua.Contains("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'") && lua.Contains("'vMenu:DeptOutfits:Reply'") && lua.Contains("GetConvarBool('vmenu_dept_outfits', false)"), "the server uses the same events and convar");
         Check(!dept.Contains("IsAllowed(") && !Regex.IsMatch(dept, @"\[""org""\] = listing\.Duty"), "the client never decides access or claims its duty org");
 
-        // A character's own styles (Saved Characters > a character), and its own outfits (in Saved
-        // Outfits, next to the shared ones: tests/saved-outfits checks that menu).
-        Check(mp.Contains("CreateCharacterStylesMenu(characterStylesMenu);") && !mp.Contains("characterOutfitsMenu"), "the manage character menu has the styles page; outfits are in Saved Outfits");
+        // A character's own outfits (its outfits page, next to the shared ones: tests/saved-outfits
+        // checks that page) and styles, both on its page in Saved Characters.
+        Check(mp.Contains("CreateCharacterStylesMenu(characterStylesMenu);") && mp.Contains("CreateOutfitsMenu(characterOutfitsMenu, () => \"mp_ped_\" + selectedSavedCharacterManageName);"),
+            "the manage character menu has the outfits and styles pages");
         var wardrobe = Member(mp, @"^        private void CreateCharacterStylesMenu\(Menu stylesMenu\).*?^        }$");
         Check(wardrobe.Contains("stylesMenu.OnMenuOpen += (m) => Rebuild();") && wardrobe.Contains("CharacterWardrobe.KeyFor(kind, CharacterKey(), name)") && wardrobe.Contains("const CharacterWardrobe.Kind kind = CharacterWardrobe.Kind.Style;"),
             "rebuilt for the selected character each time it opens");
-        var outfits = Member(mp, @"^        private void CreateSavedOutfitsMenu\(Menu outfitsMenu\).*?^        }$");
+        var outfits = Member(mp, @"^        private void CreateOutfitsMenu\(Menu outfitsMenu, Func<string> characterFor\).*?^        }$");
         Check(outfits.Contains("const CharacterWardrobe.Kind kind = CharacterWardrobe.Kind.Outfit;") && outfits.Contains("ClothingSaves.Read(ClothingSaves.Kind.Outfit, json)")
-            && outfits.Contains("WearOutfit(save, $\"Outfit {name}\")") && outfits.Contains("StillPlaying(entry.CharacterKey)"), "a character's outfits are worn through the shared path, while you play that character");
+            && outfits.Contains("WearOutfit(save, $\"Outfit {name}\")") && outfits.Contains("if (forKey != null && !await EnsureWearingCharacter(forKey))"), "a character's outfits are worn through the shared path, as that character");
         Check(wardrobe.Contains("ApplyHairMakeupStyle(style, out var problem)") && wardrobe.Contains("CaptureHairMakeupStyle(character)") && wardrobe.Contains("await EnsureWearingCharacter(characterKey)"), "styles are captured and applied, as that character");
         Check(wardrobe.Contains("GetUserConfirmation(\"Delete Style\"") && wardrobe.Contains("GetUserConfirmation(\"Update Style\""), "delete and update ask first");
         Check(Regex.Matches(wardrobe, @"SetResourceKvp\(").Count == 3 && !wardrobe.Contains("SetResourceKvp(characterKey") && !wardrobe.Contains("SetResourceKvp(\"mp_ped_")

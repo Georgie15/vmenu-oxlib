@@ -162,7 +162,7 @@ s.enabled = false
 check(select(2, s.call('vMenu:Vehicles:Generate', 1, vehicle())):find('disabled', 1, true), 'refused while the convar is off')
 print('PASS: server stores only real outfits and saved vehicles, limits per license')
 
--- Client: the Lua side fetches and stores codes for Saved Outfits (vMenu's C#, which turns codes
+-- Client: the Lua side fetches and stores codes for a character's outfits page (vMenu's C#, which turns codes
 -- into outfits and outfits into codes: tests/clothing-refs), and passes the server's reasons on.
 local function newClient(reply, created)
     local c = { exports = {}, handlers = {}, kvps = {}, notes = {}, reply = reply, created = created, calls = {}, sent = nil,
@@ -222,7 +222,7 @@ check(c.exports.loadSharedVehicle() == false and c.lastNote().msg:find('too quic
 c = newClient(false)
 check(c.exports.loadSharedVehicle() == false and c.lastNote().msg == "There's no vehicle code #7.", 'an unknown vehicle code says so')
 
--- Saved Outfits > Load Outfit Code.
+-- Load Outfit Code (a character's outfits page).
 local function request(client, taken)
     local answer = client.exports.requestOutfitCode(json.encode(taken or {}))
     check(type(answer) == 'string', 'requestOutfitCode answers JSON')
@@ -277,7 +277,7 @@ for what, reply in pairs({ ['not JSON'] = '{', ['no clothes'] = '{"Props":{}}', 
     check(answer.ok == false and answer.message:find('damaged', 1, true), 'a damaged outfit code is refused: ' .. what)
 end
 
--- Saved Outfits > Share and Share What I'm Wearing.
+-- Share and Share What I'm Wearing (a character's outfits page).
 local payload = { v = 2, Model = 1885233650, Clothes = { ['11'] = { Item = 44, Texture = 2 } }, Props = {}, Refs = { v = 2, model = 1885233650, clothes = {}, props = {} } }
 c = newClient()
 c.generated = 42
@@ -308,4 +308,4 @@ check(c.exports.loadOutfitFromCode(7) == false and c.lastNote().msg:find('matche
 check(c.exports.loadOutfitFromCode('7') == false, 'the code must be a number')
 
 check(c.exports.loadSharedOutfit == nil and c.handlers['vMenu:Outfits:GenerateCode'] == nil, 'the old character-copy load and the editor generate event are gone')
-print("PASS: client fetches and stores codes for Saved Outfits and passes the server's reasons on")
+print("PASS: client fetches and stores codes for outfits pages and passes the server's reasons on")

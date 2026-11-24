@@ -1,7 +1,7 @@
 // Run: dotnet run --project tests/saved-outfits
 // Drives the production SavedOutfit: what is captured (clothing only, never face or hair), how it
-// dresses the ped, damaged storage, and the Saved Outfits menu wiring: one list with the played
-// character's own outfits and the shared ones, where outfit codes are loaded and made.
+// dresses the ped, damaged storage, and the outfits page wiring (in Saved Characters): one list with
+// a character's own outfits and the shared ones, where outfit codes are loaded and made.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -59,42 +59,56 @@ static class Program
         Check(dir != null, "repo root found");
         string Read(params string[] parts) => File.ReadAllText(Path.Combine(dir, Path.Combine(parts))).Replace("\r\n", "\n");
         var mp = Read("vMenu", "menus", "MpPedCustomization.cs");
-        var menu = Regex.Match(mp, @"private void CreateSavedOutfitsMenu\(Menu outfitsMenu\).*?\n        \}\n", RegexOptions.Singleline).Value;
+        var menu = Regex.Match(mp, @"private void CreateOutfitsMenu\(Menu outfitsMenu, Func<string> characterFor\).*?\n        \}\n", RegexOptions.Singleline).Value;
         // Saving and wearing go through the capture and wear shared with characters' own outfits and
         // department outfits (tests/character-wardrobe checks those too).
         var wear = Regex.Match(mp, @"private bool WearOutfit\(ClothingSave save, string what\).*?\n        \}\n", RegexOptions.Singleline).Value;
         var capture = Regex.Match(mp, @"private static SavedOutfit CaptureCurrentOutfit\(\).*?\n        \}\n", RegexOptions.Singleline).Value;
-        Check(mp.Contains("CreateSavedOutfitsMenu(savedOutfitsMenu);"), "MP Ped Customization has the menu");
-        Check(menu.Contains("if (!IsCurrentPedMpFreemode())") && menu.Contains("outfit.Model == model") && wear.Contains("save.Model != (uint)GetEntityModel(ped)"), "only for MP characters, and only outfits of the current body type");
+        // Outfits are part of Saved Characters: its top row is the character you're playing, and
+        // each character's page has Outfits. No Saved Outfits row of its own.
+        Check(mp.Contains("CreateOutfitsMenu(playingOutfitsMenu, PlayingCharacterKey);") && mp.Contains("MenuController.BindMenuItem(savedCharactersMenu, playingOutfitsMenu, playingOutfitsRow);")
+            && mp.Contains("CreateOutfitsMenu(characterOutfitsMenu, () => \"mp_ped_\" + selectedSavedCharacterManageName);") && !mp.Contains("new MenuItem(\"Saved Outfits\""),
+            "outfits are in Saved Characters: the played character's at the top, and each character's on its page");
+        var update = Regex.Match(mp, @"private void UpdateSavedPedsMenu\(\).*?\n        \}\n", RegexOptions.Singleline).Value;
+        Check(update.IndexOf("savedCharactersMenu.AddMenuItem(playingOutfitsRow);") >= 0
+            && update.IndexOf("savedCharactersMenu.AddMenuItem(playingOutfitsRow);") < update.IndexOf("savedCharactersMenu.AddMenuItem(createCategoryBtn);")
+            && mp.Contains("savedCharactersMenu.OnMenuOpen += (m) => RefreshPlayingOutfitsRow();") && mp.Contains("if (item == playingOutfitsRow)\n                {\n                    return;"),
+            "the outfits row comes first, is named after the character you play each time, and never starts a new category");
+        Check(mp.Contains("return key != \"\" && IsWearingCharacter(key) && !string.IsNullOrEmpty(GetResourceKvpString(key)) ? key : null;"),
+            "the top row is the saved character you're playing, or none");
+        Check(menu.Contains("else if (IsCurrentPedMpFreemode())") && menu.Contains("forModel = character.ModelHash;") && menu.Contains("outfit.Model == model") && wear.Contains("save.Model != (uint)GetEntityModel(ped)"),
+            "a page lists outfits for its character's body type; with no character, only for MP characters");
         Check(menu.Contains("if (!WearOutfit(save, $\"Outfit {name}\"))") && wear.Contains("currentCharacter = ReplacePedDataClothing(currentCharacter, keepUnresolved: true);"), "wearing updates the character being worn, so Update Character Clothing keeps it");
         Check(wear.Contains("ClothingService.Resolve(save, ClothingResolver.OutfitSlots, ped)") && wear.Contains("ClothingService.Report(what, resolution, true);"), "wearing resolves by collection and reports pieces left off");
         Check(Regex.Matches(menu, @"CaptureCurrentOutfit\(\)\.ToJson\(\)").Count == 3 && capture.Contains("(slot, global, texture) => ClothingResolver.Capture(slot, global, texture, ClothingService.Layouts, runtime)"),
             "saving, updating and sharing what you wear record collection references");
         Check(menu.Contains("await GetUserConfirmation(\"Delete Outfit\"") && menu.Contains("await GetUserConfirmation(\"Update Outfit\""), "deleting and updating ask first");
-        Check(Regex.Matches(menu, @"Taken\((entry|renamed)\) \|\| !Store\(").Count == 3 && menu.Contains("!StillPlaying(characterKey) || Taken(entry) || !Store(entry, CaptureCurrentOutfit().ToJson())"),
+        Check(Regex.Matches(menu, @"Taken\((entry|renamed)\) \|\| !Store\(").Count == 3 && menu.Contains("!OnBody() || Taken(entry) || !Store(entry, CaptureCurrentOutfit().ToJson())"),
             "saving, loading a code and renaming never overwrite an outfit");
 
-        // One list: the character you're playing's own outfits, then the ones its body type shares.
+        // One list: the character's own outfits, then the ones its body type shares.
         var entry = Regex.Match(mp, @"private sealed class OutfitEntry.*?\n        \}\n", RegexOptions.Singleline).Value;
         Check(entry.Contains("SavedOutfit.KeyFor(Name)") && entry.Contains("CharacterWardrobe.KeyFor(CharacterWardrobe.Kind.Outfit, CharacterKey, Name)"),
             "both kinds keep their storage: vmenu_outfit_<name> and vmenu_character_outfit_<character>|<name>");
-        Check(menu.Contains("Section(playing, $\"{Who(playing)}'s Outfits\"") && menu.Contains("Section(null, Everyone(),")
-            && menu.IndexOf("Section(playing,") < menu.IndexOf("Section(null,"), "the character's own outfits come first, then the shared ones");
-        Check(menu.Contains("return key != \"\" && IsWearingCharacter(key) && !string.IsNullOrEmpty(GetResourceKvpString(key)) ? key : null;"),
-            "a character's own outfits are listed only while you play that saved character");
-        Check(menu.Contains("var scopes = playing == null ? new[] { (string)null } : new[] { playing, null };") && menu.Contains("SetScopes(saveCurrent, playing,") && menu.Contains("SetScopes(loadCode, playing,"),
-            "saving and loading a code choose who it's for: the character you play first, or the whole body type");
-        Check(menu.Contains("Names(characterKey).Count < CharacterWardrobe.MaxEntries") && Regex.Matches(menu, @"if \(Full\(characterKey\)\)").Count == 2, "a character keeps its 50-outfit limit");
+        Check(menu.Contains("Section(forKey, $\"{Who(forKey)}'s Outfits\"") && menu.Contains("Section(null, Everyone(),")
+            && menu.IndexOf("Section(forKey,") < menu.IndexOf("Section(null,") && menu.Contains("GetSpacerMenuItem($\"↓ {title} ↓\", description)"),
+            "the character's own outfits come first, then the shared ones");
+        Check(menu.Contains("var scopes = forKey == null ? new[] { (string)null } : new[] { forKey, null };") && menu.Contains("SetScopes(saveCurrent, \"Saves") && menu.Contains("SetScopes(loadCode, \"Loads"),
+            "saving and loading a code choose who it's for: the page's character first, or the whole body type");
+        Check(menu.Contains("Names(characterKey).Count < CharacterWardrobe.MaxEntries") && menu.Contains("if (!OnBody() || Full(characterKey))") && menu.Contains("if (Full(characterKey))"), "a character keeps its 50-outfit limit");
         Check(menu.Contains("CharacterWardrobe.CleanName(") && !menu.Contains("GetUserInput(\"Outfit name\", 30)"), "both kinds follow the same name rules");
-        Check(Regex.Matches(menu, @"!StillPlaying\(").Count >= 3, "an action for a character you're no longer playing is refused");
-        Check(!mp.Contains("characterOutfitsMenu") && !mp.Contains("CreateCharacterWardrobeMenu"), "Saved Characters no longer has its own Outfits page");
+        Check(menu.Contains("if (forKey != null && !await EnsureWearingCharacter(forKey))") && Regex.Matches(menu, @"await Wear\(json, name\)").Count == 2,
+            "wearing one (or a loaded code) spawns the page's character first if you're someone else");
+        Check(Regex.Matches(menu, @"OnBody\(\)").Count >= 4 && menu.Contains("if (IsCurrentPedMpFreemode() && PedModel() == forModel)"),
+            "saving and updating need the character's body type, since they take what you're wearing");
+        Check(!mp.Contains("CreateCharacterWardrobeMenu") && !mp.Contains("CreateSavedOutfitsMenu"), "one outfits page; the old wardrobe and Saved Outfits menus are gone");
 
         // Outfit codes live here.
-        Check(Regex.IsMatch(menu, @"if \(OutfitCodesEnabled\)\s*\{\s*SetScopes\(loadCode, playing,.*?outfitsMenu\.AddMenuItem\(loadCode\);\s*outfitsMenu\.AddMenuItem\(shareCurrent\);", RegexOptions.Singleline)
+        Check(Regex.IsMatch(menu, @"if \(OutfitCodesEnabled\)\s*\{\s*SetScopes\(loadCode, ""Loads.*?outfitsMenu\.AddMenuItem\(loadCode\);\s*outfitsMenu\.AddMenuItem\(shareCurrent\);", RegexOptions.Singleline)
             && menu.Contains("List<string> Actions() => OutfitCodesEnabled"), "Load Outfit Code, Share What I'm Wearing and Share only while outfit codes are on");
         var load = Regex.Match(menu, @"async Task LoadCode\(string characterKey\).*?\n            \}\n", RegexOptions.Singleline).Value;
-        Check(load.Contains("await RequestOutfitCode(new JArray(Names(characterKey)).ToString(Formatting.None))") && load.Contains("ClothingService.OutfitFromCode((string)reply[\"code\"]")
-            && load.IndexOf("Store(entry, json)") < load.IndexOf("WearOutfit(") && load.Contains("(bool?)reply[\"wear\"] == true"),
+        Check(load.Contains("await RequestOutfitCode(new JArray(Names(characterKey)).ToString(Formatting.None))") && load.Contains("ClothingService.OutfitFromCode((string)reply[\"code\"], (long?)reply[\"created\"] ?? 0, forModel, out error)")
+            && load.IndexOf("Store(entry, json)") < load.IndexOf("await Wear(json, name)") && load.Contains("(bool?)reply[\"wear\"] == true"),
             "a code is fetched, checked for this body, saved as an outfit, then worn if asked");
         Check(load.Contains("if (!string.IsNullOrEmpty((string)reply[\"message\"]))") && load.Contains("Notify.Error(error);"), "refusals say why; closing the dialog says nothing");
         var share = Regex.Match(menu, @"async Task Share\(ClothingSave save, string what, bool wearing\).*?\n            \}\n", RegexOptions.Singleline).Value;
@@ -121,7 +135,7 @@ static class Program
         {
             Check(Read("build", "vMenu", side, "backups.lua").Contains("'vmenu_outfit_'"), side + " backups include outfits");
         }
-        Console.WriteLine("PASS: Saved Outfits menu (both kinds of outfit, outfit codes), the creator, and backup wiring");
+        Console.WriteLine("PASS: outfits pages in Saved Characters (both kinds of outfit, outfit codes), the creator, and backup wiring");
         return 0;
     }
 }

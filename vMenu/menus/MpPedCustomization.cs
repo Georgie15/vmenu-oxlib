@@ -140,6 +140,10 @@ namespace vMenuClient.menus
         // The character creator's Facial Expression row.
         private MenuListItem faceExpressionList;
 
+        // Saved Characters' top row and the outfits page it opens: the character you're playing.
+        private readonly Menu playingOutfitsMenu = new(" ", "Outfits");
+        private MenuItem playingOutfitsRow;
+
         /// <summary>
         /// Makes or updates the character creator menu. Also has an option to load data from the <see cref="currentCharacter"/> data, to allow for editing an existing ped.
         /// </summary>
@@ -884,7 +888,11 @@ namespace vMenuClient.menus
             // Create the menu.
             menu = new Menu(" ", "MP Ped Customization");
 
-            var savedCharacters = new MenuItem("Saved Characters", "Spawn, edit or delete your existing saved multiplayer characters.")
+            // Outfits live here too: the character you're playing's at the top, and each character's
+            // on its page (CreateOutfitsMenu). There is no separate outfits row here.
+            var savedCharacters = new MenuItem("Saved Characters", OutfitCodesEnabled
+                ? "Your saved characters and their outfits: spawn or edit a character, change clothes, and load or share outfit codes."
+                : "Your saved characters and their outfits: spawn or edit a character, and change clothes.")
             {
                 Label = "→→→"
             };
@@ -907,18 +915,6 @@ namespace vMenuClient.menus
             MenuController.BindMenuItem(menu, createCharacterMenu, createFemaleBtn);
             menu.AddMenuItem(savedCharacters);
             MenuController.BindMenuItem(menu, savedCharactersMenu, savedCharacters);
-
-            var savedOutfitsMenu = new Menu(" ", "Saved Outfits");
-            var savedOutfits = new MenuItem("Saved Outfits", OutfitCodesEnabled
-                ? "Your outfits, for the character you're playing or all your characters: save what you're wearing, change into one, and load or share outfit codes. Your face, hair and tattoos stay as they are."
-                : "Your outfits, for the character you're playing or all your characters: save what you're wearing and change into one later. Your face, hair and tattoos stay as they are.")
-            {
-                Label = "→→→"
-            };
-            MenuController.AddSubmenu(menu, savedOutfitsMenu);
-            menu.AddMenuItem(savedOutfits);
-            MenuController.BindMenuItem(menu, savedOutfitsMenu, savedOutfits);
-            CreateSavedOutfitsMenu(savedOutfitsMenu);
 
             // setr vmenu_dept_outfits true; the server decides what each player sees and may change.
             if (DepartmentOutfitsBridge.Enabled)
@@ -953,7 +949,7 @@ namespace vMenuClient.menus
             var tattoosButton = new MenuItem("Character Tattoo Options", "Character tattoo options.");
             var clothesButton = new MenuItem("Character Clothes", "Character clothes.");
             var propsButton = new MenuItem("Character Props", "Character props.");
-            // Outfit codes are in Saved Outfits (CreateSavedOutfitsMenu), not here.
+            // Outfit codes are in a character's outfits (CreateOutfitsMenu), not here.
 
             var saveButton = new MenuItem("Save Character", "Save your character.");
             var exitNoSave = new MenuItem("Exit Without Saving", "Are you sure? All unsaved work will be lost.");
@@ -2250,6 +2246,12 @@ namespace vMenuClient.menus
         /// </summary>
         private void CreateSavedPedsMenu()
         {
+            // The top row of Saved Characters: the outfits of the character you're playing (or, when
+            // you aren't playing a saved one, the shared outfits of your body type).
+            MenuController.AddSubmenu(savedCharactersMenu, playingOutfitsMenu);
+            CreateOutfitsMenu(playingOutfitsMenu, PlayingCharacterKey);
+            savedCharactersMenu.OnMenuOpen += (m) => RefreshPlayingOutfitsRow();
+
             UpdateSavedPedsMenu();
 
             void PopulateSavedCharactersCategoryMenu()
@@ -2389,16 +2391,27 @@ namespace vMenuClient.menus
             manageSavedCharacterMenu.AddMenuItem(renameCharacter);
             manageSavedCharacterMenu.AddMenuItem(saveCurrentPedAsCharacter);
 
-            // The character's own hair & makeup styles, kept in their own KVPs (CharacterWardrobe.cs).
-            // Its own outfits are in Saved Outfits, next to the ones all characters share.
-            var characterStylesMenu = new Menu("vMenu", "Hair & Makeup Styles");
-            var characterStyles = new MenuItem("Hair & Makeup Styles", "This character's own hair and makeup styles: save your hair, eyebrows, beard, makeup, blush and lipstick under a name, and apply one later. Its outfits are in Saved Outfits.")
+            // The character's outfits (its own and the ones its body type shares) and its own hair &
+            // makeup styles, kept in their own KVPs (CharacterWardrobe.cs).
+            var characterOutfitsMenu = new Menu("vMenu", "Outfits");
+            var characterOutfits = new MenuItem("Outfits", OutfitCodesEnabled
+                ? "This character's outfits, and the ones all your characters of its body type share: change clothes, save what you're wearing, and load or share outfit codes. Wearing one spawns this character first if you're someone else."
+                : "This character's outfits, and the ones all your characters of its body type share: change clothes and save what you're wearing. Wearing one spawns this character first if you're someone else.")
             {
                 Label = "→→→"
             };
+            var characterStylesMenu = new Menu("vMenu", "Hair & Makeup Styles");
+            var characterStyles = new MenuItem("Hair & Makeup Styles", "This character's own hair and makeup styles: save your hair, eyebrows, beard, makeup, blush and lipstick under a name, and apply one later.")
+            {
+                Label = "→→→"
+            };
+            MenuController.AddSubmenu(manageSavedCharacterMenu, characterOutfitsMenu);
             MenuController.AddSubmenu(manageSavedCharacterMenu, characterStylesMenu);
+            manageSavedCharacterMenu.AddMenuItem(characterOutfits);
             manageSavedCharacterMenu.AddMenuItem(characterStyles);
+            MenuController.BindMenuItem(manageSavedCharacterMenu, characterOutfitsMenu, characterOutfits);
             MenuController.BindMenuItem(manageSavedCharacterMenu, characterStylesMenu, characterStyles);
+            CreateOutfitsMenu(characterOutfitsMenu, () => "mp_ped_" + selectedSavedCharacterManageName);
             CreateCharacterStylesMenu(characterStylesMenu);
 
             manageSavedCharacterMenu.AddMenuItem(delPed);
@@ -2662,6 +2675,11 @@ namespace vMenuClient.menus
             // Load selected category
             savedCharactersMenu.OnItemSelect += async (sender, item, index) =>
             {
+                // The outfits row opens its own page (bound in UpdateSavedPedsMenu).
+                if (item == playingOutfitsRow)
+                {
+                    return;
+                }
                 // Create new category
                 if (item.ItemData is not MpCharacterCategory)
                 {
@@ -3099,6 +3117,11 @@ namespace vMenuClient.menus
 
             savedCharactersMenu.ClearMenuItems();
 
+            playingOutfitsRow = new MenuItem("Outfits", "") { Label = "→→→" };
+            RefreshPlayingOutfitsRow();
+            savedCharactersMenu.AddMenuItem(playingOutfitsRow);
+            MenuController.BindMenuItem(savedCharactersMenu, playingOutfitsMenu, playingOutfitsRow);
+
             var createCategoryBtn = new MenuItem("Create Category", "Create a new character category.")
             {
                 Label = "→→→"
@@ -3202,7 +3225,7 @@ namespace vMenuClient.menus
             return names;
         }
 
-        /// <summary>One outfit in Saved Outfits: the character's own, or one its whole body type shares.</summary>
+        /// <summary>One outfit in an outfits page: a character's own, or one its whole body type shares.</summary>
         private sealed class OutfitEntry
         {
             internal string CharacterKey; // mp_ped_<name>; null for an outfit every character of the body type shares
@@ -3214,20 +3237,26 @@ namespace vMenuClient.menus
         }
 
         /// <summary>
-        /// Saved Outfits: clothes and props only, for the freemode body you are now. One list holds
-        /// the outfits of the character you're playing (CharacterWardrobe.cs,
-        /// vmenu_character_outfit_*) and the ones every character of this body type shares
-        /// (vmenu_outfit_*), both in the Saved Outfits format. Outfit codes load into either, and are
-        /// made from any outfit or from what you're wearing (client/outfitCodes.lua does the server
-        /// side). Wearing one also updates the character being worn, so Update Character Clothing
-        /// keeps it.
+        /// A character's outfits page (Saved Characters: the top row for the character you're
+        /// playing, and Outfits on each character's page). Clothes and props only. One list holds
+        /// the character's own outfits (CharacterWardrobe.cs, vmenu_character_outfit_*) and the ones
+        /// every character of its body type shares (vmenu_outfit_*), both in the Saved Outfits format.
+        /// Outfit codes load into either, and are made from any outfit or from what you're wearing
+        /// (client/outfitCodes.lua does the server side). Wearing one spawns the character first if
+        /// you're someone else, and also updates the character being worn, so Update Character
+        /// Clothing keeps it. <paramref name="characterFor"/> says whose page it is each time it
+        /// opens: a saved character's key, or null for only the shared outfits of the body you have.
         /// </summary>
-        private void CreateSavedOutfitsMenu(Menu outfitsMenu)
+        private void CreateOutfitsMenu(Menu outfitsMenu, Func<string> characterFor)
         {
             const CharacterWardrobe.Kind kind = CharacterWardrobe.Kind.Outfit;
             var saveCurrent = new MenuListItem("Save Current Outfit", new List<string> { "" }, 0, "");
             var loadCode = new MenuListItem("Load Outfit Code", new List<string> { "" }, 0, "");
             var shareCurrent = new MenuItem("Share What I'm Wearing", "Makes an outfit code for the clothes and props you have on now and copies it. Anyone with a character of this body type can load it.");
+
+            // Whose page this is (set each time it opens) and that character's body.
+            string forKey = null;
+            uint forModel = 0;
 
             Dictionary<string, SavedOutfit> LoadOutfits(uint model)
             {
@@ -3250,62 +3279,72 @@ namespace vMenuClient.menus
                 return outfits;
             }
 
-            uint Model() => (uint)GetEntityModel(Game.PlayerPed.Handle);
-            string Body() => Model() == (uint)GetHashKey("mp_f_freemode_01") ? "female" : "male";
-            string Everyone() => Body() == "female" ? "All Female Characters" : "All Male Characters";
+            uint PedModel() => (uint)GetEntityModel(Game.PlayerPed.Handle);
+            string Body(uint model) => model == (uint)GetHashKey("mp_f_freemode_01") ? "female" : "male";
+            string Everyone() => Body(forModel) == "female" ? "All Female Characters" : "All Male Characters";
             string Who(string characterKey) => CharacterWardrobe.CharacterName(characterKey);
-            string For(string characterKey) => characterKey == null ? $"for all your {Body()} characters" : $"for {Who(characterKey)}";
-
-            // The saved character you're playing, or null (a new character, or none loaded through vMenu).
-            string Playing()
-            {
-                var key = GetMpCharacterKey(currentCharacter.SaveName);
-                return key != "" && IsWearingCharacter(key) && !string.IsNullOrEmpty(GetResourceKvpString(key)) ? key : null;
-            }
+            string For(string characterKey) => characterKey == null ? $"for all your {Body(forModel)} characters" : $"for {Who(characterKey)}";
 
             List<string> Names(string characterKey) => characterKey == null
-                ? LoadOutfits(Model()).Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
+                ? LoadOutfits(forModel).Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
                 : CharacterWardrobe.Names(kind, characterKey, KvpKeys(CharacterWardrobe.KeyPrefix(kind, characterKey)));
 
             List<string> Actions() => OutfitCodesEnabled
                 ? new List<string> { "Wear", "Update", "Share", "Rename", "Delete" }
                 : new List<string> { "Wear", "Update", "Rename", "Delete" };
 
-            // Save Current Outfit and Load Outfit Code choose who an outfit is for, with left and right: the
-            // character you're playing (first), or every character of this body type.
-            void SetScopes(MenuListItem item, string playing, string what)
+            // Save Current Outfit and Load Outfit Code choose who an outfit is for, with left and
+            // right: the page's character (first), or every character of its body type.
+            void SetScopes(MenuListItem item, string what)
             {
-                var scopes = playing == null ? new[] { (string)null } : new[] { playing, null };
+                var scopes = forKey == null ? new[] { (string)null } : new[] { forKey, null };
                 item.ListItems = scopes.Select(k => k == null ? Everyone() : Who(k)).ToList();
                 item.ItemData = scopes;
                 item.ListIndex = Math.Min(item.ListIndex, scopes.Length - 1);
-                item.Description = playing == null
-                    ? $"{what} Every {Body()} character you have can wear it."
-                    : $"{what} Choose who it's for, only {Who(playing)} or all your {Body()} characters, then press Enter.";
+                item.Description = forKey == null
+                    ? $"{what} Every {Body(forModel)} character you have can wear it."
+                    : $"{what} Choose who it's for, only {Who(forKey)} or all your {Body(forModel)} characters, then press Enter.";
             }
 
             void Rebuild()
             {
                 outfitsMenu.ClearMenuItems();
-                if (!IsCurrentPedMpFreemode())
+                forKey = characterFor();
+                if (forKey != null)
+                {
+                    var character = StorageManager.GetSavedMpCharacterData(forKey);
+                    if (character.Version < 1 || character.ModelHash == 0)
+                    {
+                        outfitsMenu.AddMenuItem(new MenuItem("This character couldn't be loaded", "Its save can't be read.") { Enabled = false });
+                        outfitsMenu.RefreshIndex();
+                        return;
+                    }
+                    forModel = character.ModelHash;
+                }
+                else if (IsCurrentPedMpFreemode())
+                {
+                    forModel = PedModel();
+                }
+                else
                 {
                     outfitsMenu.AddMenuItem(new MenuItem("Only for MP characters", "Load or create an MP character to save and wear outfits.") { Enabled = false });
                     outfitsMenu.RefreshIndex();
                     return;
                 }
-                var playing = Playing();
-                SetScopes(saveCurrent, playing, "Saves the clothes and props you're wearing under a name.");
+                outfitsMenu.MenuSubtitle = forKey == null ? "Outfits" : $"{Who(forKey)}: Outfits";
+
+                SetScopes(saveCurrent, "Saves the clothes and props you're wearing under a name.");
                 outfitsMenu.AddMenuItem(saveCurrent);
                 if (OutfitCodesEnabled)
                 {
-                    SetScopes(loadCode, playing, "Loads an outfit code someone gave you and saves it as an outfit.");
+                    SetScopes(loadCode, "Loads an outfit code someone gave you and saves it as an outfit.");
                     outfitsMenu.AddMenuItem(loadCode);
                     outfitsMenu.AddMenuItem(shareCurrent);
                 }
 
                 void Section(string characterKey, string title, string description)
                 {
-                    outfitsMenu.AddMenuItem(new MenuItem(title, description) { Enabled = false });
+                    outfitsMenu.AddMenuItem(GetSpacerMenuItem($"↓ {title} ↓", description));
                     var names = Names(characterKey);
                     if (names.Count == 0)
                     {
@@ -3319,24 +3358,24 @@ namespace vMenuClient.menus
                         { ItemData = new OutfitEntry { CharacterKey = characterKey, Name = name } });
                     }
                 }
-                if (playing != null)
+                if (forKey != null)
                 {
-                    Section(playing, $"{Who(playing)}'s Outfits", $"Only {Who(playing)} has these.");
+                    Section(forKey, $"{Who(forKey)}'s Outfits", $"Only {Who(forKey)} has these.");
                 }
-                Section(null, Everyone(), $"Every {Body()} character you have can wear these. Face, hair and tattoos stay as they are.");
+                Section(null, Everyone(), $"Every {Body(forModel)} character you have can wear these. Face, hair and tattoos stay as they are.");
                 outfitsMenu.RefreshIndex();
             }
 
-            // Still the character an outfit or a choice was made for (the player may have changed
-            // character while a dialog was open).
-            bool StillPlaying(string characterKey)
+            // Saving or updating takes what you're wearing, so you need this page's body.
+            bool OnBody()
             {
-                if (characterKey == null || IsWearingCharacter(characterKey))
+                if (IsCurrentPedMpFreemode() && PedModel() == forModel)
                 {
                     return true;
                 }
-                Notify.Error($"You're not playing {Who(characterKey)} any more.");
-                Rebuild();
+                Notify.Error(forKey == null
+                    ? "You're not using this body type any more."
+                    : $"You're not using {Who(forKey)}'s body type. Spawn the character first.");
                 return false;
             }
 
@@ -3385,9 +3424,30 @@ namespace vMenuClient.menus
                 }
             }
 
+            // Puts an outfit on, as this page's character: spawns it first if you're someone else.
+            async Task<bool> Wear(string json, string name)
+            {
+                var save = ClothingSaves.Read(ClothingSaves.Kind.Outfit, json);
+                if (save == null)
+                {
+                    Notify.Error("This outfit can't be read.");
+                    return false;
+                }
+                if (forKey != null && !await EnsureWearingCharacter(forKey))
+                {
+                    return false;
+                }
+                if (!WearOutfit(save, $"Outfit {name}"))
+                {
+                    Notify.Error("This outfit is for the other body type.");
+                    return false;
+                }
+                return true;
+            }
+
             async Task SaveCurrent(string characterKey)
             {
-                if (Full(characterKey))
+                if (!OnBody() || Full(characterKey))
                 {
                     return;
                 }
@@ -3398,7 +3458,7 @@ namespace vMenuClient.menus
                     return;
                 }
                 var entry = new OutfitEntry { CharacterKey = characterKey, Name = name };
-                if (!StillPlaying(characterKey) || Taken(entry) || !Store(entry, CaptureCurrentOutfit().ToJson()))
+                if (!OnBody() || Taken(entry) || !Store(entry, CaptureCurrentOutfit().ToJson()))
                 {
                     return;
                 }
@@ -3435,12 +3495,8 @@ namespace vMenuClient.menus
                     Notify.Error(error);
                     return;
                 }
-                if (!StillPlaying(characterKey) || !IsCurrentPedMpFreemode())
-                {
-                    return;
-                }
                 // Damaged codes and codes for the other body type are refused here, with the reason.
-                var outfit = ClothingService.OutfitFromCode((string)reply["code"], (long?)reply["created"] ?? 0, Game.PlayerPed.Handle, out error);
+                var outfit = ClothingService.OutfitFromCode((string)reply["code"], (long?)reply["created"] ?? 0, forModel, out error);
                 if (outfit == null)
                 {
                     Notify.Error(error);
@@ -3453,7 +3509,7 @@ namespace vMenuClient.menus
                     return;
                 }
                 Rebuild();
-                if ((bool?)reply["wear"] == true && WearOutfit(ClothingSaves.Read(ClothingSaves.Kind.Outfit, json), $"Outfit {name}"))
+                if ((bool?)reply["wear"] == true && await Wear(json, name))
                 {
                     Notify.Success($"Outfit code #{id} saved as {name} {For(characterKey)}. You're wearing it now.");
                 }
@@ -3490,7 +3546,7 @@ namespace vMenuClient.menus
                     Notify.Error((string)reply["message"] ?? "The outfit code couldn't be made. Try again in a moment.");
                     return;
                 }
-                Notify.Success($"Outfit code #{(long?)reply["id"]} for {what} is copied. Anyone with a {Body()} character can load it in Saved Outfits > Load Outfit Code.");
+                Notify.Success($"Outfit code #{(long?)reply["id"]} for {what} is copied. Anyone with a {Body(save.Model)} character can load it with Load Outfit Code, in their outfits at the top of Saved Characters.");
             }
 
             outfitsMenu.OnMenuOpen += (m) => Rebuild();
@@ -3505,10 +3561,6 @@ namespace vMenuClient.menus
 
             outfitsMenu.OnListItemSelect += async (sender, item, listIndex, itemIndex) =>
             {
-                if (!IsCurrentPedMpFreemode())
-                {
-                    return;
-                }
                 if (item == saveCurrent || item == loadCode)
                 {
                     var scopes = item.ItemData as string[];
@@ -3526,7 +3578,7 @@ namespace vMenuClient.menus
                     }
                     return;
                 }
-                if (item.ItemData is not OutfitEntry entry || listIndex < 0 || listIndex >= item.ListItems.Count || !StillPlaying(entry.CharacterKey))
+                if (item.ItemData is not OutfitEntry entry || listIndex < 0 || listIndex >= item.ListItems.Count)
                 {
                     return;
                 }
@@ -3541,27 +3593,17 @@ namespace vMenuClient.menus
                 switch (item.ListItems[listIndex])
                 {
                     case "Wear":
-                        var save = ClothingSaves.Read(ClothingSaves.Kind.Outfit, json);
-                        if (save == null)
+                        if (await Wear(json, name))
                         {
-                            Notify.Error("This outfit can't be read.");
-                        }
-                        else if (!WearOutfit(save, $"Outfit {name}"))
-                        {
-                            Notify.Error("This outfit is for the other body type.");
-                        }
-                        else
-                        {
-                            var playing = Playing();
-                            Notify.Success(playing == null
+                            Notify.Success(forKey == null
                                 ? $"Changed into {name}."
-                                : $"Changed into {name}. To make it {Who(playing)}'s usual look, choose Update Character Clothing in Saved Characters.");
+                                : $"Changed into {name}. Update Character Clothing on {Who(forKey)}'s page makes it their usual look.");
                         }
                         break;
 
                     case "Update":
-                        if (await GetUserConfirmation("Update Outfit", $"Replace the outfit **{name}** with what you're wearing?")
-                            && StillPlaying(entry.CharacterKey) && Store(entry, CaptureCurrentOutfit().ToJson()))
+                        if (OnBody() && await GetUserConfirmation("Update Outfit", $"Replace the outfit **{name}** with what you're wearing?")
+                            && OnBody() && Store(entry, CaptureCurrentOutfit().ToJson()))
                         {
                             Notify.Success($"Outfit {name} updated with what you're wearing.");
                         }
@@ -3602,7 +3644,7 @@ namespace vMenuClient.menus
 
         /// <summary>
         /// What the player ped wears now, as an outfit in the Saved Outfits format: a collection
-        /// reference per slot, and the global numbers stamped with the running layout. Saved Outfits,
+        /// reference per slot, and the global numbers stamped with the running layout. Shared outfits,
         /// characters' own outfits and department outfits are all saved with this.
         /// </summary>
         private static SavedOutfit CaptureCurrentOutfit()
@@ -3617,7 +3659,7 @@ namespace vMenuClient.menus
         }
 
         /// <summary>
-        /// Puts an outfit (Saved Outfits, a character's own outfit, a department outfit) on the player
+        /// Puts an outfit (a shared one, a character's own outfit, a department outfit) on the player
         /// ped through the shared clothing resolver, and records it in the character being worn or
         /// edited, so saving the character keeps it. False when the outfit isn't for this body.
         /// </summary>
@@ -3962,6 +4004,29 @@ namespace vMenuClient.menus
             !string.IsNullOrEmpty(currentCharacter.SaveName) && GetMpCharacterKey(currentCharacter.SaveName) == GetMpCharacterKey(characterKey)
             && currentCharacter.ModelHash != 0 && (uint)GetEntityModel(Game.PlayerPed.Handle) == currentCharacter.ModelHash;
 
+        /// <summary>The saved character the player is playing (loaded through vMenu), or null.</summary>
+        private string PlayingCharacterKey()
+        {
+            var key = GetMpCharacterKey(currentCharacter.SaveName);
+            return key != "" && IsWearingCharacter(key) && !string.IsNullOrEmpty(GetResourceKvpString(key)) ? key : null;
+        }
+
+        /// <summary>Names Saved Characters' top row after the character you're playing.</summary>
+        private void RefreshPlayingOutfitsRow()
+        {
+            if (playingOutfitsRow == null)
+            {
+                return;
+            }
+            var playing = PlayingCharacterKey();
+            var name = CharacterWardrobe.CharacterName(playing);
+            var codes = OutfitCodesEnabled ? ", and load or share outfit codes" : "";
+            playingOutfitsRow.Text = playing == null ? "Outfits" : $"{name}'s Outfits";
+            playingOutfitsRow.Description = playing == null
+                ? $"The outfits all your characters of this body type share: change clothes, save what you're wearing{codes}. Spawn a saved character to see its own outfits here too."
+                : $"The outfits of {name}, the character you're playing, and the ones all your characters of this body type share: change clothes, save what you're wearing{codes}.";
+        }
+
         /// <summary>Spawns the saved character, unless the player already is it.</summary>
         private async Task<bool> EnsureWearingCharacter(string characterKey)
         {
@@ -4113,8 +4178,8 @@ namespace vMenuClient.menus
         /// <summary>
         /// A saved character's own Hair &amp; Makeup Styles (CharacterWardrobe.cs): save what you have
         /// now under a name; apply, update, rename or delete one. Applying one while you're someone
-        /// else spawns this character first. A character's own outfits are in Saved Outfits
-        /// (CreateSavedOutfitsMenu), next to the ones every character of its body type shares.
+        /// else spawns this character first. Its outfits are on its outfits page (CreateOutfitsMenu),
+        /// next to the ones every character of its body type shares.
         /// </summary>
         private void CreateCharacterStylesMenu(Menu stylesMenu)
         {

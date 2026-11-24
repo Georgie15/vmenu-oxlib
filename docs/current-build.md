@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 24, 2026 — `build-2026-11-24-2`: release P: one Saved Outfits menu (a character's own outfits and the shared ones), and outfit codes loaded and shared there as outfits, with the server's reasons shown. Not checked in game. Before it: `build-2026-11-24`, releases H to O, which the owner runs on the server |
-| `build/vMenu/vMenuClient.net.dll` | `08aebce8d93e5973388262928b0dd37085708e86b83b0686f554042aa58fd6c3` |
+| Latest change | November 24, 2026 — `build-2026-11-24-3`: release P, second build: outfits inside Saved Characters (the played character's at the top, each character's on its page), with outfit codes loaded and shared there, and the server's reasons shown. Not checked in game. Before it: `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
+| `build/vMenu/vMenuClient.net.dll` | `a1219c9174911624ce8b3a8cb982981c74186e32fef5a99f21713685f3d22622` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -21,9 +21,68 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
+## November 24, 2026 — `build-2026-11-24-3`: release P, second build: outfits inside Saved Characters (client DLL, `client/whatsNew.lua`, `config/player-guide.json`)
+
+**Status: on `main`, tagged `build-2026-11-24-3`; not checked in game.** Client DLL
+`a1219c9174911624ce8b3a8cb982981c74186e32fef5a99f21713685f3d22622`
+(first build: `08aebce8…`). The server DLL, MenuAPI, the server Lua and the
+database are unchanged.
+
+The owner loaded the first build and expected one place for characters and
+outfits, not a Saved Characters row and a Saved Outfits row. They picked
+"outfits inside characters":
+
+- **No Saved Outfits row.** MP Ped Customization has Create Male Character,
+  Create Female Character and Saved Characters (and Department Outfits when it's
+  on).
+- **Saved Characters' top row** is the outfits of the character you're playing,
+  named after it (`<name>'s Outfits`), above Create Category. When you aren't
+  playing a saved character it's `Outfits`, with only the shared ones of your
+  body type. The name is refreshed each time Saved Characters opens, and the row
+  never starts the Create Category prompt.
+- **Each character's page has Outfits again**, next to Hair & Makeup Styles: the
+  same page for that character. Wearing one there (or loading a code with "Wear
+  it now") spawns the character first if you're someone else, as the release K
+  page did. Saving and updating take what you're wearing, so they need the
+  character's body type.
+- Both are one method, `CreateOutfitsMenu(menu, characterFor)` (was
+  `CreateSavedOutfitsMenu`): the character's own outfits, then the shared ones of
+  its body type, under `↓ … ↓` headings like Saved Characters' own. Everything
+  else is the first build's: Save Current Outfit and Load Outfit Code choose who
+  an outfit is for, each outfit has Wear, Update, Share, Rename and Delete, and
+  codes are loaded and shared there. A code is now checked against the
+  character's body type (`ClothingService.OutfitFromCode(..., model, ...)`), not
+  the ped's.
+- The Player Guide's outfit card, the dressing room's finish card and "How do I
+  share an outfit or a car?" now point at Saved Characters. What's New's
+  "Saved Outfits" line now says Outfits (MP Ped Customization > Saved Characters),
+  with the same `VERSION`, so nobody sees it again; it only changes what Misc
+  Settings shows.
+
+Reviewed with `tools/ilcompare` against the first build's DLL: `CreateOutfitsMenu`
+replacing `CreateSavedOutfitsMenu`, `PlayingCharacterKey`,
+`RefreshPlayingOutfitsRow`, `UpdateSavedPedsMenu`, `CreateSavedPedsMenu`,
+`CreateMenu`, the constructor (the new page) and `ClothingService.OutfitFromCode`.
+The two `CreateDepartmentOutfitsMenu` entries are renumbered local functions.
+
+Tests: `tests/saved-outfits` checks the two entry points, the top row (first,
+renamed on open, never a new category), wearing as the page's character and the
+body checks; `tests/character-wardrobe` and `tests/whats-new` follow the move.
+All tests in AGENTS.md pass.
+
+Deploy: hash the installed `vMenuClient.net.dll`. From the first build
+(`08aebce8…`), copy `vMenuClient.net.dll`, `client/whatsNew.lua` and
+`config/player-guide.json` (`client/outfitCodes.lua` changed only in comments),
+then `restart vMenu`. From `build-2026-11-24` (`0572ace7…`), also copy
+`client/outfitCodes.lua` and `client/vehicleCodes.lua`.
+
+Not checked in game: everything in the first build's list below, from Saved
+Characters' top row and from a character's page, including wearing an outfit of
+a character you aren't playing.
+
 ## November 24, 2026 — `build-2026-11-24-2`: release P: one Saved Outfits menu, outfit codes as outfits (client DLL, `client/outfitCodes.lua`, `client/vehicleCodes.lua`, `config/player-guide.json`)
 
-**Status: on `main`, tagged `build-2026-11-24-2`; not checked in game.** Client DLL
+**Status: on `main`, tagged `build-2026-11-24-2`; the owner loaded it on November 24 and asked for the second build above.** Client DLL
 `08aebce8d93e5973388262928b0dd37085708e86b83b0686f554042aa58fd6c3`. The server
 DLL, MenuAPI, the server Lua and the database are unchanged.
 

@@ -141,7 +141,7 @@ namespace vMenuClient
         public ClothingService()
         {
             // exports.vMenu:loadOutfitFromCode puts a code straight on (client/outfitCodes.lua).
-            // Saved Outfits loads and makes codes itself (MpPedCustomization.CreateSavedOutfitsMenu).
+            // A character's outfits page loads and makes codes itself (MpPedCustomization.CreateOutfitsMenu).
             Exports.Add("vMenuApplyOutfitCode", new Func<string, object, string>(ApplyOutfitCode));
 
             // Another resource streaming clothes starting or stopping changes the layout.
@@ -383,13 +383,13 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// An outfit code fetched by client/outfitCodes.lua, as a Saved Outfits entry for the body
-        /// <paramref name="ped"/> has. Null, with the reason, when the code is damaged or is for the
-        /// other body type.
+        /// An outfit code fetched by client/outfitCodes.lua, as a Saved Outfits entry for
+        /// <paramref name="model"/> (the body of the character whose outfits it goes into). Null,
+        /// with the reason, when the code is damaged or is for the other body type.
         /// </summary>
-        internal static SavedOutfit OutfitFromCode(string codeJson, object created, int ped, out string error)
+        internal static SavedOutfit OutfitFromCode(string codeJson, object created, uint model, out string error)
         {
-            var code = ClothingSaves.ReadCode(codeJson, (uint)GetEntityModel(ped), Unix(created), out error);
+            var code = ClothingSaves.ReadCode(codeJson, model, Unix(created), out error);
             if (code == null)
             {
                 return null;

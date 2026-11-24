@@ -10,7 +10,7 @@ local function lines()
         '- **Favourite and Recent Vehicles** in the Vehicle Spawner, and **Favourite and Recent Peds** in Spawn Peds.',
         '- **Vehicle presets** (Vehicle Options > Vehicle Extras): your extras and livery on every spawn of that model.',
         '- Changed a **saved vehicle** in Vehicle Options? When you close the menu, vMenu offers to update its save.',
-        '- **Saved Outfits** (MP Ped Customization): change clothes without touching your face or hair.',
+        '- **Outfits** (MP Ped Customization > Saved Characters): change clothes without touching your face or hair.',
         '- **Clothing Quick Toggles** (Player Appearance): take off and put back your hat, glasses, mask and more.',
         '- **Personal Vehicle**: Auto-Lock When I Walk Away, and Set Waypoint To My Car.',
         '- **Ped Pack**: browse the pack and preview its peds before you buy.',

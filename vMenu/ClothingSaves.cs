@@ -467,8 +467,8 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// A Saved Outfits entry from an outfit code read with <see cref="ReadCode"/> (Saved Outfits >
-        /// Load Outfit Code). Every clothing slot and prop the code has gets a reference: the code's
+        /// A Saved Outfits entry from an outfit code read with <see cref="ReadCode"/> (Load Outfit
+        /// Code, on a character's outfits page). Every clothing slot and prop the code has gets a reference: the code's
         /// own, or, for a code made before references, its numbers converted with the captured
         /// baseline, else kept exactly as they are (<paramref name="pending"/>) and checked each time
         /// the outfit is worn. Props the code doesn't mention are taken off, as wearing a code

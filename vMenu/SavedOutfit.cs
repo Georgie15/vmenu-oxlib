@@ -6,8 +6,10 @@ using Newtonsoft.Json;
 namespace vMenuClient
 {
     /// <summary>
-    /// MP Ped Customization > Saved Outfits: the clothes and props an MP character wears, saved under
-    /// a name as <c>vmenu_outfit_&lt;name&gt;</c> and changed into later. Face (component 0), hair (2),
+    /// An outfit every character of a body type shares (MP Ped Customization > Saved Characters, a
+    /// character's outfits page): the clothes and props an MP character wears, saved under a name as
+    /// <c>vmenu_outfit_&lt;name&gt;</c> and changed into later. A character's own outfits use the same
+    /// format (CharacterWardrobe.cs). Face (component 0), hair (2),
     /// tattoos and everything else about the character stay as they are. An outfit belongs to the
     /// freemode model it was saved on (male or female). Kept free of game calls so it can be tested.
     ///

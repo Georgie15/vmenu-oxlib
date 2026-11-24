@@ -471,7 +471,7 @@ static class Program
     static void OutfitCodes()
     {
         var layouts = Layouts(validFrom: "2026-11-06T00:00:00Z");
-        // Saved Outfits > Share: a code is built from an outfit. Here, one saved before references,
+        // Share (a character's outfits page): a code is built from an outfit. Here, one saved before references,
         // upgraded with the baseline.
         var legacy = LegacyMale();
         var outfitJson = new SavedOutfit { Model = Male, Clothes = legacy.Components, Props = legacy.Props }.ToJson();
@@ -526,7 +526,7 @@ static class Program
         r = ClothingResolver.Resolve(read, ClothingSaves.CharacterSlots(read), layouts, MaleShifted());
         Check(r.Notes.Count == 1 && r.Notes[0].Contains("made before"), "an older code is flagged: it may predate the captured layout");
 
-        // Saved Outfits > Load Outfit Code: a code becomes a Saved Outfit.
+        // Load Outfit Code (a character's outfits page): a code becomes an outfit in the Saved Outfits format.
         read = ClothingSaves.ReadCode(oldCode.ToString(), Male, created, out _);
         var loaded = ClothingSaves.OutfitFromCode(read, layouts, out var pending);
         Check(pending.Count == 0 && loaded.Model == Male && loaded.Layout == null, "an old code becomes an outfit for this body, without claiming a layout for its numbers");

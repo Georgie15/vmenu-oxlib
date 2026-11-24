@@ -41,7 +41,7 @@ c.fire('vMenu:whatsNew:show')
 check(#c.dialogs == 2, 'Misc Settings shows it again')
 local content = c.dialogs[1].content
 check(content:find('Back up your saves', 1, true) and content:find('Photo Mode', 1, true), 'switched-on features are listed')
-check(content:find('Favourite and Recent Vehicles', 1, true) and content:find('Saved Outfits', 1, true) and content:find('Key Bindings', 1, true),
+check(content:find('Favourite and Recent Vehicles', 1, true) and content:find('Outfits** (MP Ped Customization > Saved Characters)', 1, true) and content:find('Key Bindings', 1, true),
     'the features everyone has are listed')
 
 local plain = newClient({})
