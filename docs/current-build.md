@@ -8,7 +8,7 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 24, 2026 — release O, second build: the dressing room guide opens the creator on the character's body and says in F8 why it can't start (client DLL), on top of release O's first build and releases N, M, L, K, J, I and H. **Testing on branch `feature/release-o-dressing-room`; `main` keeps `build-2026-11-17-3`** |
+| Latest change | November 24, 2026 — `build-2026-11-24`: releases H to O on `main` (idle rests, MenuAPI 4.1.3 and the PSRP Neon skin, Enhanced's performance patterns, department outfits and the request guard, upstream fixes, loops off while idle, the Player Guide, and the dressing room guide). The owner runs them on the server; the dressing room was checked in game on November 24 |
 | `build/vMenu/vMenuClient.net.dll` | `0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
@@ -21,9 +21,37 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
-## November 24, 2026 — release O, second build: the creator on the character's body (client DLL) — TESTING, branch `feature/release-o-dressing-room`
+## November 24, 2026 — `build-2026-11-24`: releases H to O on `main`
 
-**Status: test build, not verified in game, not on `main`.** Client DLL
+**Status: on `main`, tagged `build-2026-11-24`.** The owner runs releases H to
+O on the server and checked the dressing room in game: the creator opens on the
+character's gender after the welcome, with the guide's card. `main` was
+fast-forwarded from `build-2026-11-17-3` to release O's branch, so it takes
+every release below at once (29 commits). The package is release O's:
+
+| | |
+| --- | --- |
+| `build/vMenu/vMenuClient.net.dll` | `0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9` |
+| `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` |
+| `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
+
+The sections below were written while each release was a test build on its
+own branch; their status lines say so. Releases K and L change the server DLL,
+and its client and server DLLs go in and come out together.
+
+PSRP-Development's side (main, `d3735859`): psrp_dressing_room is on for new
+players, who are now decided by PSRP_welcome's record (a player who hasn't
+accepted its rules on this PC). Its testing mode is removed.
+
+Deploy: nothing new for a server already on release O's second build (hash the
+installed DLLs against the table above). From any older build, the files that
+changed are in each release's section below, from H upwards.
+
+All 47 tests in AGENTS.md pass on this commit.
+
+## November 24, 2026 — release O, second build: the creator on the character's body (client DLL) — on `main` since `build-2026-11-24` (was branch `feature/release-o-dressing-room`)
+
+**Status: written as a test build; on `main` since `build-2026-11-24`.** Client DLL
 `0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9`
 (first build: `5464a38a…`). `storage.html` and `config/player-guide.json` are
 the first build's.
@@ -71,9 +99,9 @@ With psrp_dressing_room's `client/main.lua` and character-spawn-selector's
 Not checked in game: the creator opening on the body, the cursor on Face &
 Skin after it opens, and everything in the first build's list below.
 
-## November 23, 2026 — release O: the dressing room guide (client DLL, `storage.html`, `config/player-guide.json`) — TESTING, branch `feature/release-o-dressing-room`
+## November 23, 2026 — release O: the dressing room guide (client DLL, `storage.html`, `config/player-guide.json`) — on `main` since `build-2026-11-24` (was branch `feature/release-o-dressing-room`)
 
-**Status: test build, not verified in game, not on `main`.** Built on release N
+**Status: written as a test build; on `main` since `build-2026-11-24`.** Built on release N
 (`feature/release-n-player-guide`). Only the client DLL and two client-side
 files change; the server DLL and MenuAPI are release N's.
 
@@ -148,9 +176,9 @@ cursor on the row the guide picks after the creator opens, the finish card's
 Enter not also picking a row after the save name keyboard, and the next join
 restoring the saved character.
 
-## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`, `themes/psrp-neon.css`) — TESTING, branch `feature/release-n-player-guide`
+## November 18, 2026 — release N: the Player Guide (client DLL, `storage.html`, `fxmanifest.lua`, `client/whatsNew.lua`, `config/player-guide.json`, `themes/psrp-neon.css`) — on `main` since `build-2026-11-24` (was branch `feature/release-n-player-guide`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on
 release M (`perf/release-m`). Only the client DLL and client-side files change;
 the server DLL and MenuAPI are release M's.
 
@@ -414,9 +442,9 @@ how to get an outfit or a car. A clickable mockup was approved first.
 `deploy/rollback-to-release-m/`, `refresh`, and `restart vMenu`.
 `config/player-guide.json` can stay; release M doesn't read it.
 
-## November 17, 2026 — release M: loops fully off while idle, options set once (client DLL) — TESTING, branch `perf/release-m`
+## November 17, 2026 — release M: loops fully off while idle, options set once (client DLL) — on `main` since `build-2026-11-24` (was branch `perf/release-m`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on
 release L (`perf/release-l`). Only the client DLL changes.
 
 **Why.** The owner's profile of release L showed vMenu at 0.148 ms a frame:
@@ -584,9 +612,9 @@ in `deploy/release-m-test-build/`. Someone skipping releases uses
 **Roll back to release L:** copy back release L's `vMenuClient.net.dll` from
 `deploy/rollback-to-release-l/`.
 
-## November 17, 2026 — release L: upstream bug fixes, sleeping loops, refined skin (client DLL, server DLL, `themes/psrp-neon.css`) — TESTING, branch `perf/release-l`
+## November 17, 2026 — release L: upstream bug fixes, sleeping loops, refined skin (client DLL, server DLL, `themes/psrp-neon.css`) — on `main` since `build-2026-11-24` (was branch `perf/release-l`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on
 release K (`perf/release-k`). Until it passes an in-game check, `main` and
 `build-2026-11-17-3` stay the live build and the fallback. It changes the
 server DLL (one range check), so client and server still go together, as with
@@ -793,9 +821,9 @@ change. They are in `deploy/release-l-test-build/`.
 **Roll back to release K:** copy back release K's two DLLs and
 `themes/psrp-neon.css` from `deploy/rollback-to-release-k/`.
 
-## November 17, 2026 — release K: department outfits, character wardrobe, data refresh, vehicle options, request guard (client DLL, server DLL, Lua, config, SQL) — TESTING, branch `perf/release-k`
+## November 17, 2026 — release K: department outfits, character wardrobe, data refresh, vehicle options, request guard (client DLL, server DLL, Lua, config, SQL) — on `main` since `build-2026-11-24` (was branch `perf/release-k`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on
 release J (`perf/release-j`). Until it passes an in-game check, `main` and
 `build-2026-11-17-3` stay the live build and the fallback. **It changes the
 server DLL** (the owner asked for the request guard and the live role refresh).
@@ -989,9 +1017,9 @@ from `deploy/rollback-to-release-j/`, then restart. Both DLLs go back together.
 The `vmenu_dept_outfits` table, the extra aces and the convars can stay; J
 ignores them.
 
-## November 17, 2026 — release J: the rest of Enhanced's performance patterns, empty teleport fields (client DLL, `storage.html`, `client/exports.lua`) — TESTING, branch `perf/release-j`
+## November 17, 2026 — release J: the rest of Enhanced's performance patterns, empty teleport fields (client DLL, `storage.html`, `client/exports.lua`) — on `main` since `build-2026-11-24` (was branch `perf/release-j`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on
 release I (`perf/menuapi4`), which is built on release H. Until it passes an
 in-game check, `main` and `build-2026-11-17-3` stay the live build and the
 fallback.
@@ -1145,9 +1173,9 @@ a vehicle with every option off, two fewer loops run every frame.
 **Roll back to release I:** copy back release I's `vMenuClient.net.dll`,
 `storage.html` and `client/exports.lua`.
 
-## November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`) — TESTING, branch `perf/menuapi4`
+## November 17, 2026 — release I: MenuAPI 4.1.3 and the PSRP Neon skin (client DLL, MenuAPI DLL, `storage.html`, `fxmanifest.lua`, `menuapi/`, `themes/`) — on `main` since `build-2026-11-24` (was branch `perf/menuapi4`)
 
-**Status: test build, not verified in game, not on `main`.** It is built on top
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It is built on top
 of release H (`perf/closed-menu`), so testing it tests release H too. Until it
 passes an in-game check, `main` and `build-2026-11-17-3` stay the live build
 and the fallback.
@@ -1367,9 +1395,9 @@ unlike release H, this client doesn't run with MenuAPI 3.2.2, and MenuAPI 4
 needs the new page. To keep release H only, use release H's two DLLs with
 `build-2026-11-17-3`'s `storage.html` and `fxmanifest.lua`.
 
-## November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL) — TESTING, branch `perf/closed-menu`
+## November 17, 2026 — release H: idle rests (client DLL, MenuAPI DLL) — on `main` since `build-2026-11-24` (was branch `perf/closed-menu`)
 
-**Status: test build, not verified in game, not on `main`.** It lives on the
+**Status: written as a test build; on `main` since `build-2026-11-24`.** It lives on the
 `perf/closed-menu` branch until it passes an in-game check. Until then, `main`
 and the `build-2026-11-17-3` package stay the live build and the fallback.
 
