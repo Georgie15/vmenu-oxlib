@@ -162,23 +162,15 @@ s.enabled = false
 check(select(2, s.call('vMenu:Vehicles:Generate', 1, vehicle())):find('disabled', 1, true), 'refused while the convar is off')
 print('PASS: server stores only real outfits and saved vehicles, limits per license')
 
--- Client: the Lua side fetches codes and hands them to vMenu's C# exports, which resolve the
--- clothing (tests/clothing-refs). Damaged codes are refused before reaching them.
+-- Client: the Lua side fetches and stores codes for Saved Outfits (vMenu's C#, which turns codes
+-- into outfits and outfits into codes: tests/clothing-refs), and passes the server's reasons on.
 local function newClient(reply, created)
-    local c = { exports = {}, handlers = {}, kvps = {}, notes = {}, reply = reply, created = created, calls = {}, sent = nil }
+    local c = { exports = {}, handlers = {}, kvps = {}, notes = {}, reply = reply, created = created, calls = {}, sent = nil,
+        requests = 0, waited = 0, dialogs = 0, dialog = { 7, 'Imported', true }, clipboard = nil }
     c.csharp = {
-        vMenuImportOutfitCode = function(_, code, made, from, to)
-            c.calls[#c.calls + 1] = { 'import', code, made, from, to }
-            c.kvps[to] = json.encode({ SaveName = to })
-            return json.encode({ ok = true, message = 'Outfit has been successfully loaded!' })
-        end,
         vMenuApplyOutfitCode = function(_, code, made)
             c.calls[#c.calls + 1] = { 'apply', code, made }
             return c.applyReply or json.encode({ ok = true, message = '' })
-        end,
-        vMenuBuildOutfitCode = function(_, key)
-            c.calls[#c.calls + 1] = { 'build', key }
-            return c.buildReply
         end,
     }
     _G.exports = setmetatable({}, {
@@ -190,17 +182,19 @@ local function newClient(reply, created)
     _G.RegisterCommand = function() end
     _G.TriggerEvent = function() end
     _G.SetTimeout = function() end
+    _G.Wait = function() c.waited = c.waited + 1 end
     _G.GetResourceKvpString = function(k) return c.kvps[k] end
     _G.SetResourceKvp = function(k, v) c.kvps[k] = v end
     _G.Config = { OutfitSharing = { CommandEnabled = false }, Notify = function(_, msg, kind) c.notes[#c.notes + 1] = { msg = msg, kind = kind } end }
     _G.lib = {
-        inputDialog = function() return { 7, 'Imported' } end,
+        inputDialog = function() c.dialogs = c.dialogs + 1; return c.dialog end,
         callback = { await = function(name, _, payload)
-            if name == 'vMenu:Outfits:Generate' then c.sent = payload; return 42 end
+            if name == 'vMenu:Outfits:Generate' then c.sent = payload; return c.generated or false, c.generateWhy end
+            c.requests = c.requests + 1
             return c.reply, c.created
         end },
         print = { debug = function() end, error = function() end },
-        setClipboard = function() end,
+        setClipboard = function(text) c.clipboard = text end,
     }
     _G.GetVehicleClassFromName = function() return 18 end
     _G.IsModelInCdimage = function() return true end
@@ -223,44 +217,95 @@ end
 local c = newClient(json.encode(vehicle()))
 check(c.exports.loadSharedVehicle() == true and json.decode(c.kvps.veh_Imported).cadSaveToken == nil and json.decode(c.kvps.veh_Imported).roofLivery == 1,
     'a good vehicle code is saved without the CAD token, with its roof livery')
+c = newClient(false, 'You are requesting vehicles too quickly. Please wait a moment.')
+check(c.exports.loadSharedVehicle() == false and c.lastNote().msg:find('too quickly', 1, true), "the server's reason for refusing a vehicle code is shown")
+c = newClient(false)
+check(c.exports.loadSharedVehicle() == false and c.lastNote().msg == "There's no vehicle code #7.", 'an unknown vehicle code says so')
 
-local character = json.encode({ SaveName = 'mp_ped_Main', DrawableVariations = { clothes = { ['3'] = { Key = 1, Value = 0 } } } })
-for what, reply in pairs({ ['not JSON'] = '{', ['no clothes'] = '{"Props":{}}', ['clothes that are text'] = '{"Clothes":"x","Props":{}}' }) do
-    c = newClient(reply)
-    c.kvps.mp_ped_Main = character
-    check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().msg:find('damaged', 1, true) and c.kvps.mp_ped_Imported == nil and #c.calls == 0,
-        'a damaged outfit code is reported, not saved: ' .. what)
+-- Saved Outfits > Load Outfit Code.
+local function request(client, taken)
+    local answer = client.exports.requestOutfitCode(json.encode(taken or {}))
+    check(type(answer) == 'string', 'requestOutfitCode answers JSON')
+    return json.decode(answer)
 end
 local code = json.encode({ Clothes = { ['3'] = { Item = 15, Texture = 1 } }, Props = { ['0'] = { Item = 6, Texture = 0 } } })
 c = newClient(code, 1762700000)
-c.kvps.mp_ped_Main = character
-check(c.exports.loadSharedOutfit('mp_ped_Main') == true and c.lastNote().kind == 'success', 'an outfit code is imported')
-local call = c.calls[1]
-check(call[1] == 'import' and call[2] == code and call[3] == 1762700000 and call[4] == 'mp_ped_Main' and call[5] == 'mp_ped_Imported',
-    'the code, its creation time, the source character and the new name go to vMenu')
-c = newClient(code)
-c.kvps.mp_ped_Main = character
-c.csharp.vMenuImportOutfitCode = function() return json.encode({ ok = false, message = 'This outfit code is for a female character.' }) end
-check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().msg:find('female', 1, true), 'a refusal from vMenu is shown')
-c.csharp.vMenuImportOutfitCode = function() error('boom') end
-check(c.exports.loadSharedOutfit('mp_ped_Main') == false and c.lastNote().kind == 'error', 'an export error is a message, not a Lua error')
+local answer = request(c)
+check(c.waited > 0, 'the export yields, so vMenu can await it')
+check(answer.ok == true and answer.code == code and answer.created == 1762700000 and answer.id == 7 and answer.name == 'Imported' and answer.wear == true,
+    'a code comes back with its creation time, number, name and the wear choice')
+check(#c.notes == 0 and next(c.kvps) == nil and #c.calls == 0, 'nothing is saved or put on from Lua: vMenu does that')
+answer = request(c)
+check(answer.ok == false and answer.message:find('Wait', 1, true) and c.requests == 1 and c.dialogs == 1, 'one code at a time: refused before the dialog')
 
+c = newClient(code, 5)
+c.dialog = { 1234, '   ', false }
+answer = request(c)
+check(answer.ok and answer.name == 'Code 1234' and answer.wear == false, 'an empty name becomes the code, and Wear can be unticked')
+c = newClient(code, 5)
+c.dialog = { 1234, nil, true }
+check(request(c).name == 'Code 1234', 'a missing name becomes the code')
+c = newClient(code)
+answer = request(c, { 'Work', 'Imported' })
+check(answer.ok == false and answer.message:find('Imported', 1, true) and c.requests == 0, 'a name already in that list is refused before anything is fetched')
+c = newClient(code)
+c.dialog = { 7, 'A|B', true }
+answer = request(c)
+check(answer.ok == false and answer.message:find('|', 1, true) and c.requests == 0, 'names follow the outfit name rules')
+c = newClient(code)
+c.dialog = { 7, string.rep('x', 31), true }
+check(request(c).ok == false and c.requests == 0, 'names are up to 30 characters')
+c = newClient(code)
+c.dialog = { 7.5, 'Imported', true }
+answer = request(c)
+check(answer.ok == false and answer.message:find('whole numbers', 1, true) and c.requests == 0, 'a code is a whole number')
+c = newClient(code)
+c.dialog = nil
+answer = request(c)
+check(answer.ok == false and answer.message == nil and c.requests == 0, 'closing the dialog is not an error')
+
+c = newClient(false)
+answer = request(c)
+check(answer.ok == false and answer.message == "There's no outfit code #7.", 'an unknown code says so')
+c = newClient(false, 'You are requesting outfits too quickly. Please wait a moment.')
+check(request(c).message:find('too quickly', 1, true), "the server's reason is passed on")
+c = newClient(false, 'Outfit codes are disabled on this server.')
+check(request(c).message:find('disabled', 1, true), 'codes switched off: said so')
+for what, reply in pairs({ ['not JSON'] = '{', ['no clothes'] = '{"Props":{}}', ['clothes that are text'] = '{"Clothes":"x","Props":{}}' }) do
+    c = newClient(reply)
+    answer = request(c)
+    check(answer.ok == false and answer.message:find('damaged', 1, true), 'a damaged outfit code is refused: ' .. what)
+end
+
+-- Saved Outfits > Share and Share What I'm Wearing.
+local payload = { v = 2, Model = 1885233650, Clothes = { ['11'] = { Item = 44, Texture = 2 } }, Props = {}, Refs = { v = 2, model = 1885233650, clothes = {}, props = {} } }
+c = newClient()
+c.generated = 42
+answer = json.decode(c.exports.shareOutfitCode(json.encode(payload)))
+check(c.waited > 0 and answer.ok == true and answer.id == 42 and c.clipboard == '42', 'a shared outfit gets its number, copied')
+check(c.sent and c.sent.v == 2 and c.sent.Model == 1885233650 and c.sent.Clothes['11'].Item == 44, 'the server gets the code vMenu built')
+answer = json.decode(c.exports.shareOutfitCode(json.encode(payload)))
+check(answer.ok == false and answer.message:find('15 seconds', 1, true), 'one new code every 15 seconds')
+c = newClient()
+c.generateWhy = 'You need to have Discord linked to generate outfit codes.'
+answer = json.decode(c.exports.shareOutfitCode(json.encode(payload)))
+check(answer.ok == false and answer.message:find('Discord', 1, true) and c.clipboard == nil, "the server's reason for refusing is passed on")
+c.generated = 43
+check(json.decode(c.exports.shareOutfitCode(json.encode(payload))).ok == true, 'a refusal does not start the 15 seconds')
+c = newClient()
+answer = json.decode(c.exports.shareOutfitCode('{'))
+check(answer.ok == false and c.sent == nil, 'a damaged payload is not sent')
+
+-- exports.vMenu:loadOutfitFromCode: straight on, through vMenu.
 c = newClient('{')
-check(c.exports.loadOutfitFromCode(7) == false and #c.calls == 0, 'a damaged code applied directly is refused')
+check(c.exports.loadOutfitFromCode(7) == false and #c.calls == 0 and c.lastNote().msg:find('damaged', 1, true), 'a damaged code applied directly is refused, with a message')
+c = newClient(false)
+check(c.exports.loadOutfitFromCode(7) == false and c.lastNote().msg == "There's no outfit code #7.", 'an unknown code applied directly says so')
 c = newClient(code, 5)
 check(c.exports.loadOutfitFromCode(7) == true and c.calls[1][1] == 'apply' and c.calls[1][2] == code and c.calls[1][3] == 5, 'a good code applied directly goes to vMenu with its creation time')
 c.applyReply = json.encode({ ok = false, message = "None of this outfit's pieces could be matched on this server." })
 check(c.exports.loadOutfitFromCode(7) == false and c.lastNote().msg:find('matched', 1, true), 'nothing matched: refused with a message')
+check(c.exports.loadOutfitFromCode('7') == false, 'the code must be a number')
 
--- Generating: vMenu builds the payload from the saved character.
-c = newClient()
-c.kvps.mp_ped_Main = character
-c.buildReply = json.encode({ ok = true, message = '', code = { v = 2, Model = 1885233650, Clothes = {}, Props = {}, Refs = { v = 2, model = 1885233650, clothes = {}, props = {} } } })
-c.handlers['vMenu:Outfits:GenerateCode']('mp_ped_Main')
-check(c.calls[1][1] == 'build' and c.calls[1][2] == 'mp_ped_Main' and c.sent and c.sent.v == 2 and c.sent.Model == 1885233650, 'the generated code is the payload vMenu built')
-c = newClient()
-c.kvps.mp_ped_Main = character
-c.buildReply = json.encode({ ok = false, message = 'Some pieces of this character need review before it can be shared.' })
-c.handlers['vMenu:Outfits:GenerateCode']('mp_ped_Main')
-check(c.sent == nil and c.lastNote().msg:find('review', 1, true), 'a character with unmatched pieces is not shared')
-print('PASS: client checks codes, hands them to vMenu, and reports refusals instead of erroring')
+check(c.exports.loadSharedOutfit == nil and c.handlers['vMenu:Outfits:GenerateCode'] == nil, 'the old character-copy load and the editor generate event are gone')
+print("PASS: client fetches and stores codes for Saved Outfits and passes the server's reasons on")

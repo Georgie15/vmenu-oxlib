@@ -1,3 +1,8 @@
+-- Outfit codes. Saved Outfits (vMenu's C#, MpPedCustomization.CreateSavedOutfitsMenu) loads a code
+-- as an outfit and makes codes from outfits; the exports below do its server side
+-- (server/oufitCodes.lua). exports.vMenu:loadOutfitFromCode(id) puts a code straight on, for other
+-- resources and /loadoutfitfromcode (config_client.lua).
+
 local Cooldown = false
 local GenerateCooldown = false
 local format = string.format
@@ -40,98 +45,130 @@ local function clothing(name, ...)
     return decoded
 end
 
----@class loadSharedOutfit
----@param name string
-exports("loadSharedOutfit", function(name)
-
-    if not name or type(name) ~= "string" then
-        return lib.print.error("export: Tried to load outfit failed, no name provided.")
-    end
-    
-    name = string.sub(name, 8)
-
-    if Cooldown then
-        Config.Notify("vMenu", "You must wait before loading another outfit!", "error", 6500)
-        return false
-    end
-
-    local Existing = GetResourceKvpString(format("mp_ped_%s", name))
-    if not Existing then
-        lib.print.debug("Outfit data does not exist somehow?")
-        Config.Notify("vMenu", "Error loading outfit, please try again!", "error", 6500)
-        return false
-    end
-
-    local input = lib.inputDialog("Enter Outfit Code", {
-        { type = 'number', label = 'Outfit Code', description = "The sharing code you were given.", icon = 'hashtag', required = true },
-        { type = 'input', label = 'Save Name', description = "What should we save this outfit as?", icon = 'tag', max = 30, min = 3, required = true },
-    })
-
-    if not input then
-        Config.Notify("vMenu", "You must enter a valid outfit code!", "error", 6500)
-        return false
-    end
-
-    local code = input[1]
-    local newName = input[2]
-
-    local nameExists = GetResourceKvpString(format("mp_ped_%s", newName))
-    if nameExists then
-        Config.Notify("vMenu", "You have an outfit saved with that name already!", "error", 6500)
-        return false
-    end
-
-    local Valid, created = lib.callback.await("vMenu:Outfits:Request", false, code)
+-- Fetches a code from the server: its JSON and creation time, or nil and why not. The server's
+-- own reason is passed on when it gives one (codes switched off, too quick, a database error).
+local function requestCode(id)
+    local data, created = lib.callback.await("vMenu:Outfits:Request", false, id)
     Cooldown = true
     SetTimeout(5000, function()
         Cooldown = false
         lib.print.debug("Outfit load cooldown expired.")
     end)
+    if not data then
+        return nil, type(created) == "string" and created or format("There's no outfit code #%s.", id)
+    end
+    if type(data) ~= "string" or not readOutfitCode(data) then
+        return nil, "This outfit code is damaged and can't be loaded."
+    end
+    return data, tonumber(created) or 0
+end
 
-    if not Valid then
-        Config.Notify("vMenu", "The outfit code you entered is invalid!", "error", 6500)
-        return false
+-- An outfit name as typed: trimmed, up to 30 characters, no | or ~. The same rules as vMenu's
+-- CharacterWardrobe.CleanName, which checks it again. Nil and why when it can't be used.
+local function cleanName(text)
+    local name = tostring(text or ""):match("^%s*(.-)%s*$")
+    if (utf8.len(name) or #name) > 30 then
+        return nil, "Names can be up to 30 characters."
+    end
+    if name:find("[|~%c]") then
+        return nil, "Names can't contain | or ~."
+    end
+    return name
+end
+
+---Saved Outfits > Load Outfit Code. Asks for the code and a name, refuses a name the list it goes
+---into already has, and fetches the code. vMenu's C# checks it and saves it as an outfit.
+---@param takenNamesJson string JSON list of the outfit names already in that list
+---@return string JSON { ok = true, id, code, created, name, wear } or { ok = false, message } (no message: the dialog was closed)
+exports("requestOutfitCode", function(takenNamesJson)
+    Wait(0) -- vMenu awaits this export, and only an export that yields gives it something to await
+    if Cooldown then
+        return json.encode({ ok = false, message = "Wait a few seconds before loading another outfit code." })
     end
 
-    if type(Valid) ~= "string" or not readOutfitCode(Valid) then
-        Config.Notify("vMenu", "This outfit code is damaged and can't be loaded.", "error", 6500)
-        return false
+    local input = lib.inputDialog("Load Outfit Code", {
+        { type = 'number', label = 'Outfit Code', description = "The number you were given, without the #.", icon = 'hashtag', required = true, min = 1 },
+        { type = 'input', label = 'Outfit Name', description = "Leave it empty to name it after the code.", icon = 'tag', max = 30 },
+        { type = 'checkbox', label = 'Wear it now', checked = true },
+    })
+    if not input then
+        return json.encode({ ok = false })
     end
 
-    -- Face, hair, tattoos and everything else come from this character; the code's clothes and
-    -- props replace its own. Saved under the new name (and SaveName), never over the source.
-    local reply = clothing("vMenuImportOutfitCode", Valid, tonumber(created) or 0, format("mp_ped_%s", name), format("mp_ped_%s", newName))
-    if not reply.ok then
-        Config.Notify("vMenu", reply.message or "Error loading outfit, please try again!", "error", 6500)
-        return false
+    local id = tonumber(input[1])
+    if not id or id < 1 or id ~= math.floor(id) then
+        return json.encode({ ok = false, message = "Outfit codes are whole numbers, like 1234." })
+    end
+    id = math.floor(id)
+
+    local name, why = cleanName(input[2])
+    if not name then
+        return json.encode({ ok = false, message = why })
+    end
+    if name == "" then
+        name = format("Code %d", id)
+    end
+    local read, taken = pcall(json.decode, takenNamesJson or "[]")
+    for _, used in ipairs(read and type(taken) == "table" and taken or {}) do
+        if used == name then
+            return json.encode({ ok = false, message = format("An outfit called %s is already saved there. Pick another name.", name) })
+        end
     end
 
-    Config.Notify("vMenu", reply.message or "Outfit has been successfully loaded!", "success", 6500)
-
-    return true
+    local code, created = requestCode(id)
+    if not code then
+        return json.encode({ ok = false, message = created })
+    end
+    return json.encode({ ok = true, id = id, code = code, created = created, name = name, wear = input[3] == true })
 end)
 
-exports("loadOutfitFromCode", function(outfitCode)
-    if not outfitCode then
-        return lib.print.error("export: Tried to load outfit failed, no code provided.")
-    end
-    if type(outfitCode) ~= "number" then
-        return lib.print.error("export: Tried to load outfit failed, invalid code provided. (not a number)")
+---Saved Outfits > Share, and Share What I'm Wearing. Stores the code vMenu built and copies its number.
+---@param codeJson string the code vMenu built (ClothingSaves.BuildCode)
+---@return string JSON { ok = true, id } or { ok = false, message }
+exports("shareOutfitCode", function(codeJson)
+    Wait(0) -- see requestOutfitCode
+    if GenerateCooldown then
+        return json.encode({ ok = false, message = "You can make one outfit code every 15 seconds. Try again in a moment." })
     end
 
-    local Valid, created = lib.callback.await("vMenu:Outfits:Request", false, outfitCode)
-    if not Valid then
-        lib.print.debug(format("export: Failed to load outfit with code: %s", outfitCode))
+    local read, code = pcall(json.decode, codeJson or "")
+    if not read or type(code) ~= "table" then
+        return json.encode({ ok = false, message = "This outfit can't be shared." })
+    end
+
+    local id, why = lib.callback.await("vMenu:Outfits:Generate", false, code)
+    if not id then
+        return json.encode({ ok = false, message = why or "The outfit code couldn't be made. Try again in a moment." })
+    end
+    GenerateCooldown = true
+    SetTimeout(15000, function()
+        GenerateCooldown = false
+        lib.print.debug("Outfit generate cooldown expired.")
+    end)
+
+    print(format("Outfit code created: %s", id))
+    lib.setClipboard(tostring(id))
+    return json.encode({ ok = true, id = id })
+end)
+
+---Puts an outfit code straight on the player, without saving it. For other resources and
+---/loadoutfitfromcode; players load codes in Saved Outfits.
+---@param outfitCode number
+---@return boolean
+exports("loadOutfitFromCode", function(outfitCode)
+    if type(outfitCode) ~= "number" then
+        lib.print.error("export: loadOutfitFromCode needs the outfit code as a number.")
         return false
     end
 
-    if type(Valid) ~= "string" or not readOutfitCode(Valid) then
-        lib.print.debug(format("export: Outfit code %s is damaged", outfitCode))
+    local code, created = requestCode(outfitCode)
+    if not code then
+        Config.Notify("vMenu", created, "error", 6500)
         return false
     end
 
     -- Resolved and validated before anything is changed; pieces that can't be matched are left off.
-    local reply = clothing("vMenuApplyOutfitCode", Valid, tonumber(created) or 0)
+    local reply = clothing("vMenuApplyOutfitCode", code, created)
     if not reply.ok then
         Config.Notify("vMenu", reply.message or "This outfit code can't be loaded.", "error", 6500)
         return false
@@ -156,42 +193,3 @@ if Config.OutfitSharing.CommandEnabled then
         exports[GetCurrentResourceName()]:loadOutfitFromCode(tonumber(args[1]))
     end, false)
 end
-
-AddEventHandler("vMenu:Outfits:GenerateCode", function(name)
-    name = string.sub(name, 8) -- this removes the prefix of mp_ped_ from the name used to store kvp data
-
-    if GenerateCooldown then
-        Config.Notify("vMenu", "You must wait before generating another outfit code!", "error", 6500)
-        return
-    end
-
-    local Existing = GetResourceKvpString(format("mp_ped_%s", name))
-    if not Existing then
-        Config.Notify("vMenu", "You do not have a MP ped saved with this name!", "error", 6500)
-        return
-    end
-
-    -- The character's clothes and props (no head or hair), with its model and collection references.
-    local reply = clothing("vMenuBuildOutfitCode", format("mp_ped_%s", name))
-    if not reply.ok or type(reply.code) ~= "table" then
-        Config.Notify("vMenu", reply.message or "Failed to generate outfit code!", "error", 6500)
-        return
-    end
-    local ToSave = reply.code
-
-    local Generated, errorMessage = lib.callback.await("vMenu:Outfits:Generate", false, ToSave)
-    GenerateCooldown = true
-    SetTimeout(15000, function()
-        GenerateCooldown = false
-        lib.print.debug("Outfit load cooldown expired.")
-    end)
-
-    if not Generated then
-        Config.Notify("vMenu", errorMessage or "Failed to generate outfit code!", "error", 6500)
-        return
-    end
-
-    print(format("Outfit code created: %s", Generated))
-    Config.Notify("vMenu", "Outfit code has been generated - id: #" .. Generated, "success", 10000)
-    lib.setClipboard(Generated)
-end)

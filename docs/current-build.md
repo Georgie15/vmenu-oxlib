@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 24, 2026 — `build-2026-11-24`: releases H to O on `main` (idle rests, MenuAPI 4.1.3 and the PSRP Neon skin, Enhanced's performance patterns, department outfits and the request guard, upstream fixes, loops off while idle, the Player Guide, and the dressing room guide). The owner runs them on the server; the dressing room was checked in game on November 24 |
-| `build/vMenu/vMenuClient.net.dll` | `0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9` |
+| Latest change | November 24, 2026 — `build-2026-11-24-2`: release P: one Saved Outfits menu (a character's own outfits and the shared ones), and outfit codes loaded and shared there as outfits, with the server's reasons shown. Not checked in game. Before it: `build-2026-11-24`, releases H to O, which the owner runs on the server |
+| `build/vMenu/vMenuClient.net.dll` | `08aebce8d93e5973388262928b0dd37085708e86b83b0686f554042aa58fd6c3` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,96 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 24, 2026 — `build-2026-11-24-2`: release P: one Saved Outfits menu, outfit codes as outfits (client DLL, `client/outfitCodes.lua`, `client/vehicleCodes.lua`, `config/player-guide.json`)
+
+**Status: on `main`, tagged `build-2026-11-24-2`; not checked in game.** Client DLL
+`08aebce8d93e5973388262928b0dd37085708e86b83b0686f554042aa58fd6c3`. The server
+DLL, MenuAPI, the server Lua and the database are unchanged.
+
+Why: outfit codes were loaded from inside the character editor. Load Shared
+Outfit copied the character being edited (its last saved version) under a new
+name with the code's clothes, closed the editor without the unsaved-changes
+prompt, and left you to find and spawn the copy. Generate Outfit Code shared
+the character's last saved clothes, not what was on screen. Every load failure
+said "The outfit code you entered is invalid!". And there were two outfit
+lists that did the same job: Saved Outfits (shared by every character of a body
+type) and Saved Characters > a character > Outfits (release K).
+
+- **One Saved Outfits menu.** While you play a saved character, its own outfits
+  are listed first (`<name>'s Outfits`), then the ones all your characters of
+  that body type share (`All Male Characters` / `All Female Characters`). Each
+  outfit has Wear, Update, Share, Rename and Delete; Update now asks first, as a
+  character's outfits always did, and shared outfits can now be renamed. Save
+  Current Outfit chooses with [←] [→] who an outfit is for: the character
+  (first) or all your characters of that body type. Both kinds keep their
+  storage (`vmenu_character_outfit_<character>|<name>` and
+  `vmenu_outfit_<name>`), so nothing is moved, and both follow the same name
+  rules (`CharacterWardrobe.CleanName`) and a character's 50-outfit limit. An
+  action for a character you're no longer playing is refused.
+- **Saved Characters > a character** no longer has its own Outfits page; Hair &
+  Makeup Styles stays (`CreateCharacterStylesMenu`, the old wardrobe menu
+  without its outfit half).
+- **Load Outfit Code** (Saved Outfits, also with [←] [→] for who it's for)
+  asks for the code, a name (empty: `Code <number>`) and **Wear it now**, refuses
+  a name that list already has before fetching anything, and saves the code as
+  an outfit (`ClothingSaves.OutfitFromCode`). A v2 code's references are copied
+  exactly; an old code's numbers are converted with the captured baseline, or,
+  with none, kept as pending pieces and put on as they always were. Props the
+  code doesn't mention are taken off, as wearing a code always did. A code for
+  the other body type is refused with the reason. No character is created.
+- **Share** on any outfit, and **Share What I'm Wearing**, build the code in C#
+  (`ClothingSaves.BuildCode`, now from an outfit, not a character) and copy its
+  number. A piece without a reference isn't shared as a guess: the message names
+  it. The old fallback that shared an unconverted character's raw numbers is
+  gone; what you wear is always captured with references.
+- **The server's reasons are shown.** Loading says "There's no outfit code
+  #1234." for an unknown code, and passes on the server's own message for codes
+  switched off, too quick, or a database error. Sharing passes on the Discord
+  requirement and the rest. Vehicle codes get the same fix. The client's 15 s
+  wait between new codes now starts only when a code is made.
+- **The character creator** loses Load Shared Outfit and Generate Outfit Code.
+  Editing a character now shows its saved facial expression: the row was looked
+  up by position 6, which the two buttons had pushed to 9.
+- `client/outfitCodes.lua`: `requestOutfitCode` and `shareOutfitCode` replace
+  `loadSharedOutfit` and the `vMenu:Outfits:GenerateCode` event. Both yield
+  first (`Wait(0)`), so the C# side can always await them.
+  `exports.vMenu:loadOutfitFromCode(id)` (and `/loadoutfitfromcode`, still off
+  in `config_client.lua`) still puts a code straight on, and now says why when it
+  can't. The C# exports `vMenuImportOutfitCode` and `vMenuBuildOutfitCode` are
+  gone; `vMenuApplyOutfitCode` stays.
+- The Player Guide's outfit card mentions who an outfit is for, and "How do I
+  share an outfit or a car?" points at Saved Outfits. Its `version` is
+  unchanged, so it isn't shown to everyone again. What's New is unchanged.
+
+Reviewed with `tools/ilcompare` against `build-2026-11-24`'s client DLL: only
+`ClothingSaves` (`BuildCode`, `OutfitFromCode` replacing `ImportCode`),
+`ClothingService` (exports, `OutfitFromCode`, `Reply`), the two outfit-code
+bridges in `CommonFunctions`/`ExternalFunctions`, and `MpPedCustomization`
+(`CreateMenu`, `CreateSavedOutfitsMenu`, `CreateSavedPedsMenu`,
+`MakeCreateCharacterMenu`, `CreateCharacterStylesMenu`, `OutfitEntry`). The
+two `CreateDepartmentOutfitsMenu` entries are compiler-numbered local functions
+renumbered by the new ones.
+
+Tests: `tests/clothing-refs` (145 checks) builds codes from outfits and from
+what you wear, checks only fields the server accepts are sent, and loads old,
+v2 and baseline-less codes as outfits; `tests/saved-outfits` checks the merged
+menu, codes and the creator; `tests/share-codes` runs the new exports and the
+server's reasons for outfits and vehicles; `tests/character-wardrobe` checks the
+styles page. All tests in AGENTS.md pass.
+
+Deploy: hash the installed `vMenuClient.net.dll`; it must be `0572ace7…`
+(`build-2026-11-24`). Copy `vMenuClient.net.dll`, `client/outfitCodes.lua`,
+`client/vehicleCodes.lua` and `config/player-guide.json`, then
+`restart vMenu`. The DLL and `outfitCodes.lua` go together: each calls exports
+only the other has.
+
+Not checked in game: Saved Outfits as a saved character and as a new one; Save,
+Load Outfit Code (an old code, a v2 code, one for the other body type, an
+unknown number, two loads in a row) and Share on male and female; the code on
+the clipboard; a character's existing outfits showing up; the facial
+expression when editing; and that the new exports are awaited like
+`inputDialog`.
 
 ## November 24, 2026 — `build-2026-11-24`: releases H to O on `main`
 

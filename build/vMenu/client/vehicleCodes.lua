@@ -28,7 +28,7 @@ exports("loadSharedVehicle", function()
         return false
     end
 
-    local Valid = lib.callback.await("vMenu:Vehicles:Request", false, code)
+    local Valid, why = lib.callback.await("vMenu:Vehicles:Request", false, code)
     Cooldown = true
     SetTimeout(5000, function()
         Cooldown = false
@@ -36,7 +36,8 @@ exports("loadSharedVehicle", function()
     end)
 
     if not Valid then
-        Config.Notify("vMenu", "The vehicle code you entered is invalid!", "error", 6500)
+        -- The server's own reason when it gives one (codes switched off, too quick, a database error).
+        Config.Notify("vMenu", type(why) == "string" and why or format("There's no vehicle code #%s.", code), "error", 6500)
         return false
     end
 

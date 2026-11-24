@@ -352,49 +352,56 @@ namespace vMenuClient
         // ---- Outfit codes ---------------------------------------------------------------------
 
         /// <summary>
-        /// The outfit-code payload of a saved MP character: the old Clothes/Props numbers (kept for
-        /// anything that still reads them) plus the model and collection references. Null, with a
-        /// reason, when a piece still needs review: a code never shares a guess.
+        /// The outfit-code payload of an outfit (a Saved Outfits entry, or what the ped wears now
+        /// captured the same way): the old Clothes/Props numbers, kept for anything that still reads
+        /// them, plus the model and collection references. Null when a piece has no reference yet;
+        /// <paramref name="unshareable"/> lists those pieces. A code never shares a guess.
         /// </summary>
-        internal static JObject BuildCode(string characterJson, ClothingLayouts layouts, out string error)
+        internal static JObject BuildCode(ClothingSave outfit, ClothingLayouts layouts, out List<ClothingSlot> unshareable)
         {
-            error = null;
-            var save = Read(Kind.Character, characterJson);
-            if (save == null)
+            unshareable = new List<ClothingSlot>();
+            if (outfit == null || outfit.Model == 0)
             {
-                error = "This character can't be read.";
                 return null;
             }
-            var slots = CharacterSlots(save).ToList();
-            var refs = CompleteRefs(save, slots, layouts);
-            if (refs.HasPending)
+            var slots = ClothingResolver.OutfitSlots.Where(s => outfit.TryGetGlobal(s, out _, out _) || outfit.Refs?.Get(s) != null).ToList();
+            var all = CompleteRefs(outfit, slots, layouts);
+            var refs = new ClothingRefSet { Model = outfit.Model };
+            foreach (var slot in slots)
             {
-                error = "Some pieces of this character need review before it can be shared. Wear and save the character first.";
+                var item = all.Get(slot);
+                if (item == null || item.IsPending)
+                {
+                    unshareable.Add(slot);
+                }
+                refs.Set(slot, item);
+            }
+            if (unshareable.Count > 0)
+            {
                 return null;
             }
             var code = new JObject
             {
                 ["v"] = ClothingRefSet.FormatVersion,
-                ["Model"] = save.Model,
+                ["Model"] = outfit.Model,
                 ["Clothes"] = new JObject(),
                 ["Props"] = new JObject(),
             };
             foreach (var slot in slots)
             {
-                if (save.TryGetGlobal(slot, out var drawable, out var texture))
+                if (outfit.TryGetGlobal(slot, out var drawable, out var texture))
                 {
                     ((JObject)code[slot.Prop ? "Props" : "Clothes"])[slot.Index.ToString(CultureInfo.InvariantCulture)] = new JObject { ["Item"] = drawable, ["Texture"] = texture };
                 }
             }
-            if (save.GlobalsLayout != null)
+            if (outfit.GlobalsLayout != null)
             {
-                code["Layout"] = save.GlobalsLayout;
+                code["Layout"] = outfit.GlobalsLayout;
             }
-            else if (layouts.LegacyFor(save.Model) is ModelLayout baseline)
+            else if (layouts.LegacyFor(outfit.Model) is ModelLayout baseline)
             {
                 code["Layout"] = baseline.Print();
             }
-            refs.Clothes = refs.Clothes.Where(p => p.Key is not 0 and not 2).ToDictionary(p => p.Key, p => p.Value);
             code["Refs"] = JObject.FromObject(refs);
             return code;
         }
@@ -460,57 +467,48 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// A new MP character from an existing one with an outfit code's clothes, as the import has
-        /// always done: face, hair, tattoos and everything else come from the existing character;
-        /// slots the code has replace the character's. Stores references for every slot.
+        /// A Saved Outfits entry from an outfit code read with <see cref="ReadCode"/> (Saved Outfits >
+        /// Load Outfit Code). Every clothing slot and prop the code has gets a reference: the code's
+        /// own, or, for a code made before references, its numbers converted with the captured
+        /// baseline, else kept exactly as they are (<paramref name="pending"/>) and checked each time
+        /// the outfit is worn. Props the code doesn't mention are taken off, as wearing a code
+        /// always did. Face and hair are never part of it.
         /// </summary>
-        internal static string ImportCode(string characterJson, string newKey, ClothingSave code, ClothingLayouts layouts, out List<ClothingIssue> pending)
+        internal static SavedOutfit OutfitFromCode(ClothingSave code, ClothingLayouts layouts, out List<ClothingIssue> pending)
         {
             pending = new List<ClothingIssue>();
-            var root = Object(characterJson);
-            var character = Read(Kind.Character, root);
-            if (root == null || character == null)
+            var outfit = new SavedOutfit
             {
-                return null;
-            }
-
-            var characterSlots = CharacterSlots(character).ToList();
-            var refs = CompleteRefs(character, characterSlots, layouts);
-            var codeSlots = CharacterSlots(code).ToList();
-            var codeRefs = CompleteRefs(code, codeSlots, layouts);
-
-            root["DrawableVariations"] ??= new JObject();
-            root["DrawableVariations"]["clothes"] ??= new JObject();
-            root["PropVariations"] ??= new JObject();
-            root["PropVariations"]["props"] ??= new JObject();
-            var clothes = (JObject)root["DrawableVariations"]["clothes"];
-            var props = (JObject)root["PropVariations"]["props"];
-            foreach (var slot in codeSlots)
+                Model = code.Model,
+                // A code made before references has numbers from an unknown layout: don't claim one.
+                Layout = code.Refs != null ? code.GlobalsLayout : null,
+                Refs = new ClothingRefSet { Model = code.Model },
+            };
+            var refs = CompleteRefs(code, ClothingResolver.OutfitSlots, layouts);
+            foreach (var slot in ClothingResolver.OutfitSlots)
             {
-                var target = slot.Prop ? props : clothes;
-                if (code.TryGetGlobal(slot, out var d, out var t))
+                var map = slot.Prop ? outfit.Props : outfit.Clothes;
+                var item = refs.Get(slot);
+                if (code.TryGetGlobal(slot, out var drawable, out var texture))
                 {
-                    target[slot.Index.ToString(CultureInfo.InvariantCulture)] = new JObject { ["Key"] = d, ["Value"] = t };
+                    map[slot.Index] = new[] { drawable, texture };
                 }
-                refs.Set(slot, codeRefs.Get(slot)?.Clone());
-                if (codeRefs.Get(slot)?.IsPending == true)
+                else if (slot.Prop && item == null)
+                {
+                    map[slot.Index] = new[] { -1, -1 };
+                    item = ClothingRef.EmptyProp();
+                }
+                if (item == null)
+                {
+                    continue;
+                }
+                outfit.Refs.Set(slot, item.Clone());
+                if (item.IsPending)
                 {
                     pending.Add(new ClothingIssue { Slot = slot, Reason = ClothingIssue.NoBaseline, Detail = "kept as the code's original numbers" });
                 }
             }
-            // Head and hair are appearance data, including in older saved characters.
-            clothes.Remove("0");
-            clothes.Remove("2");
-            refs.Clothes.Remove(0);
-            refs.Clothes.Remove(2);
-
-            // Every slot has a reference (or its kept original numbers), so the global numbers are
-            // only a cache from mixed layouts: don't claim one.
-            WriteRefs(Kind.Character, root, refs, null);
-            // The copied data still carries the source character's SaveName; if left stale,
-            // editing this character later saves over the source character.
-            root["SaveName"] = newKey;
-            return root.ToString(Formatting.None);
+            return outfit;
         }
 
         // ---- Review log -----------------------------------------------------------------------

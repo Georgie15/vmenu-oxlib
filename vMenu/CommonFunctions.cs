@@ -56,9 +56,17 @@ namespace vMenuClient
             try { return Exports["PSRP_Framework"].blocksPersonalVehicleLock(inputFrame); }
             catch { return false; } // Older Framework versions lack this optional export.
         }
-        public async Task<bool> LoadSharedOutfit(string outfitName)
+        // Saved Outfits' outfit codes (client/outfitCodes.lua). Both answer with JSON; null when the
+        // Lua side failed.
+        public async Task<string> RequestOutfitCode(string takenNamesJson)
         {
-            return await Exports["vMenu"].loadSharedOutfit(outfitName);
+            try { return await Exports["vMenu"].requestOutfitCode(takenNamesJson); }
+            catch (Exception e) { Debug.WriteLine($"[vMenu] requestOutfitCode failed: {e.Message}"); return null; }
+        }
+        public async Task<string> ShareOutfitCode(string codeJson)
+        {
+            try { return await Exports["vMenu"].shareOutfitCode(codeJson); }
+            catch (Exception e) { Debug.WriteLine($"[vMenu] shareOutfitCode failed: {e.Message}"); return null; }
         }
         public async Task<bool> LoadSharedVehicle()
         {
@@ -1996,9 +2004,13 @@ namespace vMenuClient
         {
             return External.CanDoInteraction(type);
         }
-        public static async Task<bool> LoadSharedOutfit(string outfitName)
+        public static async Task<string> RequestOutfitCode(string takenNamesJson)
         {
-            return await External.LoadSharedOutfit(outfitName);
+            return await External.RequestOutfitCode(takenNamesJson);
+        }
+        public static async Task<string> ShareOutfitCode(string codeJson)
+        {
+            return await External.ShareOutfitCode(codeJson);
         }
         public static async Task<bool> LoadSharedVehicle()
         {

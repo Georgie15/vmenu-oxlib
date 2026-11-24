@@ -140,9 +140,9 @@ namespace vMenuClient
 
         public ClothingService()
         {
-            Exports.Add("vMenuBuildOutfitCode", new Func<string, string>(BuildOutfitCode));
+            // exports.vMenu:loadOutfitFromCode puts a code straight on (client/outfitCodes.lua).
+            // Saved Outfits loads and makes codes itself (MpPedCustomization.CreateSavedOutfitsMenu).
             Exports.Add("vMenuApplyOutfitCode", new Func<string, object, string>(ApplyOutfitCode));
-            Exports.Add("vMenuImportOutfitCode", new Func<string, object, string, string, string>(ImportOutfitCode));
 
             // Another resource streaming clothes starting or stopping changes the layout.
             EventHandlers["onClientResourceStart"] += new Action<string>(_ => memo.Clear());
@@ -360,13 +360,9 @@ namespace vMenuClient
 
         // ---- Outfit codes (client/outfitCodes.lua) ---------------------------------------------
 
-        private static string Reply(bool ok, string message, JToken extra = null, IEnumerable<ClothingIssue> issues = null)
+        private static string Reply(bool ok, string message, IEnumerable<ClothingIssue> issues = null)
         {
             var reply = new JObject { ["ok"] = ok, ["message"] = message };
-            if (extra != null)
-            {
-                reply["code"] = extra;
-            }
             if (issues != null)
             {
                 reply["issues"] = new JArray(issues.Select(i => i.ToString()));
@@ -386,39 +382,24 @@ namespace vMenuClient
             }
         }
 
-        private static string CharacterKey(string name) =>
-            string.IsNullOrEmpty(name) ? "" : name.StartsWith("mp_ped_") ? name : "mp_ped_" + name;
-
-        private static string BuildOutfitCode(string characterKey)
+        /// <summary>
+        /// An outfit code fetched by client/outfitCodes.lua, as a Saved Outfits entry for the body
+        /// <paramref name="ped"/> has. Null, with the reason, when the code is damaged or is for the
+        /// other body type.
+        /// </summary>
+        internal static SavedOutfit OutfitFromCode(string codeJson, object created, int ped, out string error)
         {
-            var json = GetResourceKvpString(CharacterKey(characterKey));
-            if (string.IsNullOrEmpty(json))
-            {
-                return Reply(false, "You do not have a MP ped saved with this name!");
-            }
-            var code = ClothingSaves.BuildCode(json, Layouts, out var error);
+            var code = ClothingSaves.ReadCode(codeJson, (uint)GetEntityModel(ped), Unix(created), out error);
             if (code == null)
             {
-                // Until a pre-change layout is captured, an old character can still be shared the old
-                // way while the pack its numbers were made with is the one running.
-                var save = ClothingSaves.Read(ClothingSaves.Kind.Character, json);
-                var player = Game.PlayerPed.Handle;
-                if (save != null && Layouts.LegacyFor(save.Model) == null && (uint)GetEntityModel(player) == save.Model
-                    && (Layouts.LegacyRevision == null || ClothingResolver.Pack(Layouts, Runtime(player)).Revision == Layouts.LegacyRevision))
-                {
-                    var legacy = new JObject { ["Clothes"] = new JObject(), ["Props"] = new JObject() };
-                    foreach (var slot in ClothingSaves.CharacterSlots(save))
-                    {
-                        if (save.TryGetGlobal(slot, out var d, out var t))
-                        {
-                            ((JObject)legacy[slot.Prop ? "Props" : "Clothes"])[slot.Index.ToString(CultureInfo.InvariantCulture)] = new JObject { ["Item"] = d, ["Texture"] = t };
-                        }
-                    }
-                    return Reply(true, "", legacy);
-                }
-                return Reply(false, error);
+                return null;
             }
-            return Reply(true, "", code);
+            var outfit = ClothingSaves.OutfitFromCode(code, Layouts, out var pending);
+            foreach (var issue in pending)
+            {
+                Debug.WriteLine($"[vMenu] [clothing] outfit code: {issue}");
+            }
+            return outfit;
         }
 
         private static string ApplyOutfitCode(string codeJson, object created)
@@ -452,44 +433,6 @@ namespace vMenuClient
             Report("Outfit code", resolution, true);
             ReportNotes("This outfit code", resolution);
             return Reply(true, "", issues: resolution.Issues);
-        }
-
-        private static string ImportOutfitCode(string codeJson, object created, string sourceKey, string newKey)
-        {
-            sourceKey = CharacterKey(sourceKey);
-            newKey = CharacterKey(newKey);
-            var source = GetResourceKvpString(sourceKey);
-            var character = ClothingSaves.Read(ClothingSaves.Kind.Character, source);
-            if (character == null)
-            {
-                return Reply(false, "Error loading outfit, please try again!");
-            }
-            if (!string.IsNullOrEmpty(GetResourceKvpString(newKey)))
-            {
-                return Reply(false, "You have an outfit saved with that name already!");
-            }
-            var code = ClothingSaves.ReadCode(codeJson, character.Model, Unix(created), out var error);
-            if (code == null)
-            {
-                return Reply(false, error);
-            }
-            var json = ClothingSaves.ImportCode(source, newKey, code, Layouts, out var pending);
-            if (json == null)
-            {
-                return Reply(false, "Error loading outfit, please try again!");
-            }
-            SetResourceKvp(newKey, json);
-            if (GetResourceKvpString(newKey) != json)
-            {
-                return Reply(false, "The outfit couldn't be saved.");
-            }
-            foreach (var issue in pending)
-            {
-                Debug.WriteLine($"[vMenu] [clothing] imported code into {newKey}: {issue}");
-            }
-            return Reply(true, pending.Count == 0
-                ? "Outfit has been successfully loaded!"
-                : "Outfit loaded. Some pieces are kept as the code's original numbers and are checked each time you wear it.", issues: pending);
         }
 
         // ---- Upgrading old saves on join -------------------------------------------------------

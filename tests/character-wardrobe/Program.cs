@@ -286,14 +286,19 @@ static class Program
         Check(lua.Contains("VMenuGuard.netEvent('vMenu:DeptOutfits:Request'") && lua.Contains("'vMenu:DeptOutfits:Reply'") && lua.Contains("GetConvarBool('vmenu_dept_outfits', false)"), "the server uses the same events and convar");
         Check(!dept.Contains("IsAllowed(") && !Regex.IsMatch(dept, @"\[""org""\] = listing\.Duty"), "the client never decides access or claims its duty org");
 
-        // A character's own outfits and styles.
-        Check(mp.Contains("CreateCharacterWardrobeMenu(characterOutfitsMenu, CharacterWardrobe.Kind.Outfit);") && mp.Contains("CreateCharacterWardrobeMenu(characterStylesMenu, CharacterWardrobe.Kind.Style);"), "both submenus are in the manage character menu");
-        var wardrobe = Member(mp, @"^        private void CreateCharacterWardrobeMenu\(Menu wardrobeMenu, CharacterWardrobe\.Kind kind\).*?^        }$");
-        Check(wardrobe.Contains("wardrobeMenu.OnMenuOpen += (m) => Rebuild();") && wardrobe.Contains("CharacterWardrobe.KeyFor(kind, CharacterKey(), name)"), "rebuilt for the selected character each time it opens");
-        Check(wardrobe.Contains("ClothingSaves.Read(ClothingSaves.Kind.Outfit, json)") && wardrobe.Contains("WearOutfit(save, $\"{Who()}: {name}\")") && wardrobe.Contains("await EnsureWearingCharacter(characterKey)"), "outfits are worn through the shared path, as that character");
-        Check(wardrobe.Contains("ApplyHairMakeupStyle(style, out var problem)") && wardrobe.Contains("CaptureHairMakeupStyle(character)"), "styles are captured and applied");
-        Check(wardrobe.Contains("GetUserConfirmation($\"Delete {What}\"") && wardrobe.Contains("GetUserConfirmation($\"Update {What}\""), "delete and update ask first");
-        Check(Regex.Matches(wardrobe, @"SetResourceKvp\(").Count == 3 && !wardrobe.Contains("SetResourceKvp(characterKey") && !wardrobe.Contains("SetResourceKvp(\"mp_ped_"), "entries are written to their own keys, never into the character's");
+        // A character's own styles (Saved Characters > a character), and its own outfits (in Saved
+        // Outfits, next to the shared ones: tests/saved-outfits checks that menu).
+        Check(mp.Contains("CreateCharacterStylesMenu(characterStylesMenu);") && !mp.Contains("characterOutfitsMenu"), "the manage character menu has the styles page; outfits are in Saved Outfits");
+        var wardrobe = Member(mp, @"^        private void CreateCharacterStylesMenu\(Menu stylesMenu\).*?^        }$");
+        Check(wardrobe.Contains("stylesMenu.OnMenuOpen += (m) => Rebuild();") && wardrobe.Contains("CharacterWardrobe.KeyFor(kind, CharacterKey(), name)") && wardrobe.Contains("const CharacterWardrobe.Kind kind = CharacterWardrobe.Kind.Style;"),
+            "rebuilt for the selected character each time it opens");
+        var outfits = Member(mp, @"^        private void CreateSavedOutfitsMenu\(Menu outfitsMenu\).*?^        }$");
+        Check(outfits.Contains("const CharacterWardrobe.Kind kind = CharacterWardrobe.Kind.Outfit;") && outfits.Contains("ClothingSaves.Read(ClothingSaves.Kind.Outfit, json)")
+            && outfits.Contains("WearOutfit(save, $\"Outfit {name}\")") && outfits.Contains("StillPlaying(entry.CharacterKey)"), "a character's outfits are worn through the shared path, while you play that character");
+        Check(wardrobe.Contains("ApplyHairMakeupStyle(style, out var problem)") && wardrobe.Contains("CaptureHairMakeupStyle(character)") && wardrobe.Contains("await EnsureWearingCharacter(characterKey)"), "styles are captured and applied, as that character");
+        Check(wardrobe.Contains("GetUserConfirmation(\"Delete Style\"") && wardrobe.Contains("GetUserConfirmation(\"Update Style\""), "delete and update ask first");
+        Check(Regex.Matches(wardrobe, @"SetResourceKvp\(").Count == 3 && !wardrobe.Contains("SetResourceKvp(characterKey") && !wardrobe.Contains("SetResourceKvp(\"mp_ped_")
+            && Regex.Matches(outfits, @"SetResourceKvp\(").Count == 1 && outfits.Contains("SetResourceKvp(entry.Key, json);"), "entries are written to their own keys, never into the character's");
         var rename = Member(mp, @"^        private void RenameMpCharacterReferences\(string oldPedKey, string newPedKey\).*?^        }$");
         Check(rename.Contains("CharacterWardrobe.Transfer(oldPedKey, newPedKey, keepSource: false,"), "renaming a character carries its outfits and styles");
         var clear = Member(mp, @"^        private void ClearMpCharacterReferences\(string pedKey\).*?^        }$");

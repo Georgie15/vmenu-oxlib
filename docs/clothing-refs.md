@@ -23,14 +23,14 @@ clothing:
 
 | Feature | Storage | Notes |
 | --- | --- | --- |
-| Saved Outfits | `vmenu_outfit_*` | `refs`, `layout` |
+| Saved Outfits (shared by a body type) | `vmenu_outfit_*` | `refs`, `layout` |
 | MP characters: spawn, edit, default and last character | `mp_ped_*` | `ClothingRefs`, `ClothingLayout`. Head, hair, face, tattoos unchanged |
 | Last-appearance snapshot (after death) | `vmenu_last_mp_character_snapshot` | keeps unmatched pieces as saved |
 | Character editor | in memory, then `mp_ped_*` | each edited slot is re-captured; untouched unmatched pieces are kept |
 | Saved Peds (generic) | `ped_*` | **needed the fix** for freemode peds: it saved global numbers for all 12 components and props. Now `clothingRefs`, `clothingLayout`; head and hair included as that feature always did |
 | Death restore `vMenu_tmp_saved_ped` | temporary | stamped with the layout at death; dpclothing's death patch still wins |
-| Outfit codes: generate, import into a character, apply directly | `vmenu_outfits.data` | v2 payload; old codes still load |
-| A character's own Outfits (Saved Characters > a character) | `vmenu_character_outfit_<character>\|<name>` | Saved Outfits format; always saved with `refs` |
+| Outfit codes: made from an outfit or what you wear, loaded as a Saved Outfit, applied directly | `vmenu_outfits.data` | v2 payload; old codes still load |
+| A character's own outfits (Saved Outfits, while you play it) | `vmenu_character_outfit_<character>\|<name>` | Saved Outfits format; always saved with `refs` |
 | Department Outfits | `vmenu_dept_outfits.payload` | Saved Outfits format; the server refuses pieces without a reference |
 
 The global numbers stay in every save (and in codes) next to the references, so

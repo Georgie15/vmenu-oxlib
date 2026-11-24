@@ -471,18 +471,43 @@ static class Program
     static void OutfitCodes()
     {
         var layouts = Layouts(validFrom: "2026-11-06T00:00:00Z");
-        var migrated = ClothingSaves.Migrate("mp_ped_Main", CharacterJson(LegacyMale()), layouts).NewJson;
-        var code = ClothingSaves.BuildCode(migrated, layouts, out var error);
-        Check(code != null && error == null, "a code is built from an upgraded character");
+        // Saved Outfits > Share: a code is built from an outfit. Here, one saved before references,
+        // upgraded with the baseline.
+        var legacy = LegacyMale();
+        var outfitJson = new SavedOutfit { Model = Male, Clothes = legacy.Components, Props = legacy.Props }.ToJson();
+        var outfit = ClothingSaves.Read(ClothingSaves.Kind.Outfit, ClothingSaves.Migrate(SavedOutfit.KeyFor("Work"), outfitJson, layouts).NewJson);
+        var code = ClothingSaves.BuildCode(outfit, layouts, out var unshareable);
+        Check(code != null && unshareable.Count == 0, "a code is built from an upgraded outfit");
         Check((int)code["v"] == 2 && (uint)code["Model"] == Male && code["Refs"]["clothes"]["2"] == null && code["Clothes"]["2"] == null && code["Clothes"]["11"]["Item"].Value<int>() == 44,
             "v2 code: model, references, no hair, old numbers kept");
+        Check(code["Refs"]["props"]["1"]["empty"].Value<bool>() && (string)code["Layout"] == layouts.LegacyFor(Male).Print(), "an empty prop is shared as empty, and the numbers' layout is named");
         Check(code.ToString(Formatting.None).Length < 8192, "fits the server's size limit");
+        // Only what server/oufitCodes.lua accepts (its REF_FIELDS and validRefs).
+        var allowed = new HashSet<string> { "col", "drw", "tex", "empty", "rev", "pp", "lp" };
+        var refs = (JObject)code["Refs"];
+        Check(refs.Properties().Select(p => p.Name).OrderBy(n => n).SequenceEqual(new[] { "clothes", "model", "props", "v" })
+            && ((JObject)refs["clothes"]).Properties().Concat(((JObject)refs["props"]).Properties()).All(p => ((JObject)p.Value).Properties().All(f => allowed.Contains(f.Name))),
+            "only the fields the server accepts");
+
+        // Share What I'm Wearing: what the ped wears now, captured live.
+        var rt = MaleShifted();
+        SavedOutfit Wearing(Func<ClothingSlot, int, int, ClothingRef> reference) => SavedOutfit.Capture(Male,
+            s => s == 11 ? 51 : 0, s => s == 11 ? 2 : 0, p => p == 0 ? 24 : -1, p => p == 0 ? 0 : -1, reference, rt.LayoutPrint);
+        var worn = ClothingSaves.BuildCode(ClothingSaves.Read(ClothingSaves.Kind.Outfit, Wearing((slot, g, t) => ClothingResolver.Capture(slot, g, t, layouts, rt)).ToJson()), layouts, out unshareable);
+        Check(worn != null && (string)worn["Refs"]["clothes"]["11"]["col"] == Dept && (int)worn["Refs"]["clothes"]["11"]["drw"] == 1 && (string)worn["Layout"] == rt.LayoutPrint,
+            "what you're wearing is shared by collection");
+        worn = ClothingSaves.BuildCode(ClothingSaves.Read(ClothingSaves.Kind.Outfit,
+            Wearing((slot, g, t) => slot.Equals(C(11)) ? null : ClothingResolver.Capture(slot, g, t, layouts, rt)).ToJson()), layouts, out unshareable);
+        Check(worn == null && unshareable.Single().Equals(C(11)), "a piece the game can't place blocks the code, and is named");
+        var noBaseline = Layouts(baseline: false);
+        Check(ClothingSaves.BuildCode(ClothingSaves.Read(ClothingSaves.Kind.Outfit, outfitJson), noBaseline, out unshareable) == null
+            && unshareable.Contains(C(11)) && !unshareable.Contains(P(1)), "an old outfit with no baseline isn't shared as a guess");
 
         // Through Lua and the database: empty sections come back as [].
         var stored = code.DeepClone();
         stored["Refs"]["props"] = new JArray();
         stored["Props"] = new JArray();
-        var read = ClothingSaves.ReadCode(stored.ToString(), Male, 0, out error);
+        var read = ClothingSaves.ReadCode(stored.ToString(), Male, 0, out var error);
         Check(read != null && read.Refs.Props.Count == 0, "empty lists from Lua read as empty sections");
 
         Check(ClothingSaves.ReadCode(code.ToString(), Female, 0, out error) == null && error.Contains("male character"), "a male code is refused on a female character");
@@ -494,43 +519,41 @@ static class Program
         var oldCode = new JObject { ["Clothes"] = new JObject { ["11"] = new JObject { ["Item"] = 44, ["Texture"] = 2 }, ["2"] = new JObject { ["Item"] = 9, ["Texture"] = 0 } }, ["Props"] = new JObject { ["0"] = new JObject { ["Item"] = 17, ["Texture"] = 0 } } };
         var created = DateTimeOffset.Parse("2026-11-08T10:00:00Z").ToUnixTimeSeconds();
         read = ClothingSaves.ReadCode(oldCode.ToString(), Male, created, out _);
-        Check(read.Model == Male && read.Refs == null && !read.Components.ContainsKey(2), "an old code is read for the character it is used on, without hair");
+        Check(read.Model == Male && read.Refs == null && !read.Components.ContainsKey(2), "an old code is read for the body it is used on, without hair");
         r = ClothingResolver.Resolve(read, ClothingSaves.CharacterSlots(read), layouts, MaleShifted());
         Check(Piece(r, C(11)) is { Collection: Dept, Drawable: 1, Global: 51 } && Piece(r, P(0)).Global == 24 && r.Notes.Count == 0, "an old code made after the baseline was valid resolves cleanly");
         read = ClothingSaves.ReadCode(oldCode.ToString(), Male, created - 30 * 86400, out _);
         r = ClothingResolver.Resolve(read, ClothingSaves.CharacterSlots(read), layouts, MaleShifted());
         Check(r.Notes.Count == 1 && r.Notes[0].Contains("made before"), "an older code is flagged: it may predate the captured layout");
 
-        // Importing into a saved character (loadSharedOutfit).
-        var character = CharacterJson(LegacyMale());
+        // Saved Outfits > Load Outfit Code: a code becomes a Saved Outfit.
         read = ClothingSaves.ReadCode(oldCode.ToString(), Male, created, out _);
-        var json = ClothingSaves.ImportCode(character, "mp_ped_Imported", read, layouts, out var pending);
-        var imported = JObject.Parse(json);
-        var source = JObject.Parse(character);
-        Check(pending.Count == 0 && (string)imported["SaveName"] == "mp_ped_Imported", "imported under its own name");
-        foreach (var field in new[] { "PedHeadBlendData", "FaceShapeFeatures", "PedAppearance", "PedTatttoos", "Category", "ModelHash" })
-        {
-            Check(JToken.DeepEquals(imported[field], source[field]), "import keeps the character's " + field);
-        }
-        Check(imported["DrawableVariations"]["clothes"]["2"] == null && imported["DrawableVariations"]["clothes"]["11"]["Key"].Value<int>() == 44 && imported["DrawableVariations"]["clothes"]["4"]["Key"].Value<int>() == 31,
-            "code slots replace the character's; others stay; hair is appearance data");
-        var importedSave = ClothingSaves.Read(ClothingSaves.Kind.Character, json);
-        Check(importedSave.Refs.Get(C(11)) is { Collection: Dept, Drawable: 1 } && importedSave.Refs.Get(C(4)) is { Collection: Dept } && !importedSave.Refs.HasPending, "every slot has a reference");
-        r = ClothingResolver.Resolve(importedSave, ClothingSaves.CharacterSlots(importedSave), layouts, MaleRepacked());
-        Check(r.Issues.Count == 0 && Piece(r, C(11)).Texture == 0 && Piece(r, C(4)).Drawable == 1, "an imported outfit resolves like any save");
+        var loaded = ClothingSaves.OutfitFromCode(read, layouts, out var pending);
+        Check(pending.Count == 0 && loaded.Model == Male && loaded.Layout == null, "an old code becomes an outfit for this body, without claiming a layout for its numbers");
+        Check(loaded.Clothes[11].SequenceEqual(new[] { 44, 2 }) && !loaded.Clothes.ContainsKey(2) && loaded.Refs.Get(C(11)) is { Collection: Dept, Drawable: 1 } && loaded.Refs.Get(C(2)) == null,
+            "the code's pieces are kept, each with a reference; hair never");
+        Check(loaded.Props[1].SequenceEqual(new[] { -1, -1 }) && loaded.Refs.Get(P(1)).Empty && loaded.Refs.Get(P(0)) is { Collection: Dept },
+            "props the code doesn't mention are taken off, as wearing a code always did");
+        r = ClothingResolver.Resolve(ClothingSaves.Read(ClothingSaves.Kind.Outfit, loaded.ToJson()), ClothingResolver.OutfitSlots, layouts, MaleRepacked());
+        Check(r.Issues.Count == 0 && Piece(r, C(11)).Texture == 0 && Piece(r, P(1)).Clear, "the loaded outfit is worn like any Saved Outfit, following the pack map");
 
         // No baseline yet: an old code keeps its numbers as pending pieces, never guessed.
-        var noBaseline = Layouts(baseline: false);
-        json = ClothingSaves.ImportCode(character, "mp_ped_Imported", ClothingSaves.ReadCode(oldCode.ToString(), Male, created, out _), noBaseline, out pending);
-        importedSave = ClothingSaves.Read(ClothingSaves.Kind.Character, json);
-        Check(pending.Count == 2 && importedSave.Refs.Get(C(11)).IsPending && importedSave.Refs.Get(C(11)).Legacy.SequenceEqual(new[] { 44, 2 }), "without a baseline, the code's numbers are kept as they are");
-        Check(ClothingSaves.BuildCode(CharacterJson(LegacyMale()), noBaseline, out error) == null && error.Contains("review"), "an unconverted old character isn't shared as a guess");
+        loaded = ClothingSaves.OutfitFromCode(ClothingSaves.ReadCode(oldCode.ToString(), Male, created, out _), noBaseline, out pending);
+        Check(pending.Count == 2 && loaded.Refs.Get(C(11)).IsPending && loaded.Refs.Get(C(11)).Legacy.SequenceEqual(new[] { 44, 2 }) && loaded.Refs.Get(P(1)).Empty,
+            "without a baseline, the code's numbers are kept as they are");
+        r = ClothingResolver.Resolve(ClothingSaves.Read(ClothingSaves.Kind.Outfit, loaded.ToJson()), ClothingResolver.OutfitSlots, noBaseline, MaleBefore());
+        Check(Piece(r, C(11)) is { Raw: true, Global: 44 } && r.Issues.Count == 0, "and are put on as they always were");
+        Check(ClothingSaves.BuildCode(ClothingSaves.Read(ClothingSaves.Kind.Outfit, loaded.ToJson()), noBaseline, out unshareable) == null && unshareable.Count == 2,
+            "an outfit with unmatched pieces isn't shared again as a guess");
 
-        // Importing a v2 code copies its references.
-        json = ClothingSaves.ImportCode(character, "mp_ped_Copy", ClothingSaves.ReadCode(code.ToString(), Male, 0, out _), layouts, out pending);
-        importedSave = ClothingSaves.Read(ClothingSaves.Kind.Character, json);
-        Check(importedSave.Refs.Get(C(11)).PackPrint == (string)code["Refs"]["clothes"]["11"]["pp"], "a v2 code's references are copied exactly");
-        Console.WriteLine("PASS: outfit codes (build, both load paths, old codes, model check)");
+        // A v2 code's references are copied exactly, so sharing it on gives the same code.
+        loaded = ClothingSaves.OutfitFromCode(ClothingSaves.ReadCode(code.ToString(), Male, 0, out _), layouts, out pending);
+        Check(pending.Count == 0 && loaded.Refs.Get(C(11)).PackPrint == (string)code["Refs"]["clothes"]["11"]["pp"] && loaded.Layout == (string)code["Layout"],
+            "a v2 code's references are copied exactly");
+        var again = ClothingSaves.BuildCode(ClothingSaves.Read(ClothingSaves.Kind.Outfit, loaded.ToJson()), layouts, out _);
+        Check(JToken.DeepEquals(again["Refs"]["clothes"], code["Refs"]["clothes"]) && JToken.DeepEquals(again["Clothes"], code["Clothes"])
+            && ((JObject)code["Refs"]["props"]).Properties().All(p => JToken.DeepEquals(again["Refs"]["props"][p.Name], p.Value)), "a loaded code shares on unchanged");
+        Console.WriteLine("PASS: outfit codes (outfit to code, code to outfit, the direct load, old codes, model check)");
     }
 
     static void SavedOutfits()
@@ -600,7 +623,10 @@ static class Program
         Check(common.Contains("pedInfo.clothingRefs?.Set(ClothingSlot.Component(componentId), null);"), "dpclothing's death patch wins over saved references");
         Check(service.Contains("SetPedCollectionComponentVariation(") && service.Contains("SetPedCollectionPropIndex("), "pieces go on with the collection natives");
         var lua = Read("build", "vMenu", "client", "outfitCodes.lua");
-        Check(lua.Contains("vMenuImportOutfitCode") && lua.Contains("vMenuApplyOutfitCode") && lua.Contains("vMenuBuildOutfitCode") && !lua.Contains("SetPedComponentVariation"), "both outfit-code load paths and generation go through C#");
+        Check(lua.Contains("vMenuApplyOutfitCode") && !lua.Contains("vMenuImportOutfitCode") && !lua.Contains("vMenuBuildOutfitCode") && !lua.Contains("SetPedComponentVariation")
+            && mp.Contains("ClothingService.OutfitFromCode((string)reply[\"code\"]") && mp.Contains("ClothingSaves.BuildCode(save, ClothingService.Layouts, out var unshareable)")
+            && service.Contains("ClothingSaves.OutfitFromCode(code, Layouts, out var pending)"),
+            "codes are loaded as outfits and made from outfits in C#; the direct load goes through C# too");
         foreach (var side in new[] { "client", "server" })
         {
             Check(Read("build", "vMenu", side, "backups.lua").Contains("'vmenu_clothing_backup_'"), side + " backups include upgrade originals");

@@ -38,7 +38,8 @@
       "highlight": ["Saved Outfits"],
       "title": "Change clothes and save outfits",
       "body": [
-        "Dress up, open **Saved Outfits** and pick **Save Current Outfit**. Change into it later without touching your face or hair."
+        "Dress up, open **Saved Outfits** and pick **Save Current Outfit**. Change into it later without touching your face or hair.",
+        "[←] [→] on **Save Current Outfit** choose who it's for: the character you're playing, or all your characters of that body type."
       ],
       "tip": "**Player Appearance → Clothing Quick Toggles** takes off your hat, glasses or mask, and puts back exactly what you had."
     },
@@ -128,10 +129,10 @@
     {
       "question": "How do I share an outfit or a car?",
       "menu": "mpPed",
-      "highlight": ["Saved Characters"],
+      "highlight": ["Saved Outfits"],
       "requiresConvar": "vmenu_outfitcodes",
       "body": [
-        "Open your character from **Saved Characters** and pick **Edit Saved Character**. In there, **Generate Outfit Code** gives you a code for what you're wearing, and your friend types it into **Load Shared Outfit**.",
+        "Open **Saved Outfits**. **Share What I'm Wearing** gives you a code for what you have on, or pick **Share** on a saved outfit. Your friend picks **Load Outfit Code** in Saved Outfits and types the code in.",
         "Cars work the same way: **Generate Vehicle Code** on a saved car, and **Load Vehicle Code** in Saved Vehicles."
       ]
     },
