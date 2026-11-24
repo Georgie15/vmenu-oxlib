@@ -241,8 +241,30 @@ check('MenuController.DisableMenuButtons = true;' in finish_keys and 'left: fals
       'the finish card keeps the menu\'s buttons off every frame, and the arrows don\'t send anyone off')
 saved = method_body(dressing_cs, 'internal static void CharacterSaved()')
 check('hold.Start(buttonsAtStart);' in saved, 'the buttons go back to what they were before the dressing room, not what a keyboard left')
-check('MenuController.DisableMenuButtons' not in method_body(dressing_cs, 'private static void Start(string destination)').replace('buttonsAtStart = MenuController.DisableMenuButtons;', ''),
+start = method_body(dressing_cs, 'private static void Start(string destination, string body)')
+check('MenuController.DisableMenuButtons' not in start.replace('buttonsAtStart = MenuController.DisableMenuButtons;', ''),
       'during the steps the menu is the player\'s: Start never turns its buttons off')
+check('new Action<string, string>(Start)' in dressing_cs and 'startMale = DressingRoomFlow.BodyFrom(body);' in start,
+      'Start takes the body psrp_dressing_room sends (the gender picked in the spawn selector)')
+check(re.search(r'var why = Unavailable\(\);\s*if \(why != null\)\s*\{\s*Debug\.WriteLine\(\$"\[vMenu\] \[Dressing Room\] not starting: \{why\}\."\);\s*TriggerEvent\("vMenu:DressingRoom:Unavailable"\);', start),
+      'when it can\'t start, F8 says why before psrp_dressing_room falls back to its prompt')
+check('has no \\"dressingRoom\\" section' in method_body(dressing_cs, 'private static string Unavailable()'),
+      'a player-guide.json without the dressing room is named as the reason')
+# A known body: the creator opens on it, the way the Create Male / Female rows start one.
+check('await StartNewCharacter(male: true);' in mp_ped_cs and 'await StartNewCharacter(male: false);' in mp_ped_cs,
+      'Create Male / Female Character both go through StartNewCharacter')
+new_character = method_body(mp_ped_cs, 'internal async Task<bool> StartNewCharacter(bool male)')
+check('SetPlayerModel(Game.Player.Handle, model);' in new_character and 'MakeCreateCharacterMenu(male);' in new_character,
+      'StartNewCharacter changes the model and sets the creator up for a new character')
+open_creator = method_body(dressing_cs, 'private static async Task OpenCreator(bool male)')
+check('await MainMenu.MpPedCustomizationMenu.StartNewCharacter(male);' in open_creator and 'creator.OpenMenu();' in open_creator,
+      'the dressing room starts the character the same way, then opens the creator')
+check('if (!Active)' in open_creator and open_creator.index('if (!Active)') < open_creator.index('creator.OpenMenu();'),
+      'a dressing room stopped while the model loads opens nothing')
+check(re.search(r'if \(startMale\.HasValue && DressingRoomFlow\.StartsInCreator\(flow\.CurrentStep\)\)', frame),
+      'only a known body, on the pick-a-body step, skips to the creator')
+check(re.search(r'if \(openingCreator\)\s*\{\s*return;\s*\}\s*var page = PageOf', frame),
+      'pages aren\'t tracked while the model loads')
 check('"dressing"' in script and '"dressingDone"' in script, 'the page draws the dressing room card')
 check('el("span", "g-text", String(c.title || ""))' in script, 'checklist text has its own span (the text filter is for text-only elements)')
 

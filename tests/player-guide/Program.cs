@@ -281,6 +281,23 @@ static class Program
         var without = ParseOk(Mutate(packaged, o => o["dressingRoom"].Parent.Remove()), "a guide with no dressing room");
         Check(without.DressingRoom == null, "no dressing room: none (vMenu answers Unavailable)");
 
+        // ---- A body from the spawn selector: the guide opens the creator itself ----
+        Check(DressingRoomFlow.BodyFrom("male") == true && DressingRoomFlow.BodyFrom("Male") == true && DressingRoomFlow.BodyFrom(" FEMALE ") == false,
+            "the selector's gender, in any case: the body");
+        Check(DressingRoomFlow.BodyFrom(null) == null && DressingRoomFlow.BodyFrom("") == null && DressingRoomFlow.BodyFrom("other") == null,
+            "no gender, or another word: the player picks");
+        Check(DressingRoomFlow.StartsInCreator(room.Steps[0]), "the packaged first step is the one a known body does for them");
+        Check(room.Steps.Skip(1).All(s => !DressingRoomFlow.StartsInCreator(s)) && !DressingRoomFlow.StartsInCreator(null), "no other step is");
+        var direct = new DressingRoomFlow(room);
+        direct.Start("Legion Square");
+        direct.Update("mpCreator");
+        var directView = direct.View();
+        Check(direct.IsDone(0) && direct.CurrentIndex == 1, "opened straight on the creator: picking a body is ticked");
+        Check(directView.Number == 2 && directView.Checklist[0].Done && directView.Checklist[1].Current
+            && directView.Highlight.SequenceEqual(room.Steps[1].Card.Highlight), "the card starts on step 2, its row lit");
+        direct.Update("mpPed");
+        Check(!direct.IsDone(0) && direct.CurrentIndex == 0, "Exit Without Saving: back to picking a body themselves");
+
         // ---- The steps, the way MP Ped Customization moves between pages ----
         var flow = new DressingRoomFlow(room);
         var visits = room.Steps.Where(s => s.Done == DressingDone.Visit).ToList();

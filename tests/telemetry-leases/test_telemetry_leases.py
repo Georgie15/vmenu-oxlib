@@ -78,7 +78,12 @@ for path in sorted((root / 'vMenu').rglob('*.cs')):
         ends = [i for i in (rest.find('SetPlayerModel('), rest.find('\n        }\n')) if i >= 0]
         window = rest[:min(ends)]
         assert all(window.count(line) == 1 for line in vitals), f'{where}: vitals restored once, not again after the await'
-assert sites == 4, f'expected 4 SetPlayerModel call sites in vMenu/, found {sites}'
+# Create Male and Create Female Character share one site, MpPedCustomization.StartNewCharacter
+# (release O, second build: the dressing room starts a character the same way).
+assert sites == 3, f'expected 3 SetPlayerModel call sites in vMenu/, found {sites}'
+assert 'await StartNewCharacter(male: true);' in read('vMenu/menus/MpPedCustomization.cs') \
+    and 'await StartNewCharacter(male: false);' in read('vMenu/menus/MpPedCustomization.cs'), \
+    'both Create rows swap the model through StartNewCharacter'
 mp = read('vMenu/menus/MpPedCustomization.cs')
 saved = member(mp, r'^        private async Task SpawnSavedPed\(bool restoreWeapons\).*?^        }$')
 order = [saved.index(s) for s in ('TriggerEvent("vMenu:PedChange:Before");', 'SaveWeaponLoadout(', 'SetPlayerModel(',

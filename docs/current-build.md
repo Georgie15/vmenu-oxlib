@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 23, 2026 — release O: the dressing room guide for PSRP's psrp_dressing_room (client DLL, page, guide text), on top of releases N, M, L, K, J, I and H. **Testing on branch `feature/release-o-dressing-room`; `main` keeps `build-2026-11-17-3`** |
-| `build/vMenu/vMenuClient.net.dll` | `5464a38a4001676fec458e65ec63ae17529704abb25dc9693970afe912cba1a2` |
+| Latest change | November 24, 2026 — release O, second build: the dressing room guide opens the creator on the character's body and says in F8 why it can't start (client DLL), on top of release O's first build and releases N, M, L, K, J, I and H. **Testing on branch `feature/release-o-dressing-room`; `main` keeps `build-2026-11-17-3`** |
+| `build/vMenu/vMenuClient.net.dll` | `0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,56 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 24, 2026 — release O, second build: the creator on the character's body (client DLL) — TESTING, branch `feature/release-o-dressing-room`
+
+**Status: test build, not verified in game, not on `main`.** Client DLL
+`0572ace734e6b5f61adeb3bfc1cb69486411fe56d22d489eb32361d00868d9e9`
+(first build: `5464a38a…`). `storage.html` and `config/player-guide.json` are
+the first build's.
+
+- **The first try in game** (testing mode, November 23) fell back to
+  psrp_dressing_room's text prompt: vMenu answered Unavailable. Release O's DLL
+  was loaded (F8 listed `DressingRoomGuide`), and the F8 log gave no reason.
+  The likely one is a `config/player-guide.json` on the server without the
+  `"dressingRoom"` section (release N's copy), since an invalid file would have
+  logged a `[Player Guide]` line. vMenu now prints the reason,
+  `[vMenu] [Dressing Room] not starting: …`, and psrp_dressing_room prints
+  which answer it got.
+- **The creator on the character's body.** The owner wants the menu to open on
+  the creator for the gender picked in the spawn selector. `Start` now takes
+  `(destination, body)`; psrp_dressing_room sends `male`/`female` from the
+  selector's `gender` state bag. With a body, the guide does what Create
+  Male / Female Character does (`MpPedCustomization.StartNewCharacter`, now
+  shared by both rows) and opens the creator; the pick-a-body step ticks as it
+  opens, so the card starts on Face & Skin. Exit Without Saving still goes back
+  to picking a body. With no body it opens MP Ped Customization as before.
+- psrp_dressing_room's side (PSRP-Development, November 24): the body, the F8
+  reasons, and a fade into the store instead of the cloud (the selector's
+  client and testing mode's "now").
+
+Reviewed with `tools/ilcompare` against the first build's DLL: `DressingRoomGuide`
+(`Start(String, String)`, `Unavailable()` replacing `Available()`, `Frame`,
+`OpenCreator`), `DressingRoomFlow` (`BodyFrom`, `StartsInCreator`) and
+`MpPedCustomization` (`StartNewCharacter`, the two Create rows calling it). The
+other `MpPedCustomization` entries are compiler-numbered local functions
+renumbered by the new method.
+
+Tests: `tests/player-guide` adds the body (`BodyFrom`, `StartsInCreator`,
+opening straight on the creator, Exit Without Saving after it) and the wiring
+(both Create rows and the guide share `StartNewCharacter`, the F8 reason, no
+page tracking while the model loads). `tests/telemetry-leases` now expects 3
+`SetPlayerModel` sites, not 4 (the two Create rows share one), and still
+checks the vitals after each. All 47 tests in AGENTS.md pass.
+
+Deploy: on a server with release O's first build, copy `vMenuClient.net.dll`
+from `deploy/release-o-test-build/`, **check that `config/player-guide.json`
+contains `"dressingRoom"`** (or copy it from there too), then `restart vMenu`.
+With psrp_dressing_room's `client/main.lua` and character-spawn-selector's
+`client/main.lua` from PSRP-Development.
+
+Not checked in game: the creator opening on the body, the cursor on Face &
+Skin after it opens, and everything in the first build's list below.
 
 ## November 23, 2026 — release O: the dressing room guide (client DLL, `storage.html`, `config/player-guide.json`) — TESTING, branch `feature/release-o-dressing-room`
 

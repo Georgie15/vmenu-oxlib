@@ -2018,73 +2018,56 @@ namespace vMenuClient.menus
             {
                 if (item == createMaleBtn)
                 {
-                    var model = (uint)GetHashKey("mp_m_freemode_01");
-
-                    if (!await LoadModelAsync(model))
-                    {
-                        Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
-                        return;
-                    }
-
-                    var maxHealth = Game.PlayerPed.MaxHealth;
-                    var maxArmour = Game.Player.MaxArmor;
-                    var health = Game.PlayerPed.Health;
-                    var armour = Game.PlayerPed.Armor;
-
-                    SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
-                    SetPlayerModel(Game.Player.Handle, model);
-                    // Restore vitals before awaiting: the new ped spawns at full health.
-                    Game.Player.MaxArmor = maxArmour;
-                    Game.PlayerPed.MaxHealth = maxHealth;
-                    Game.PlayerPed.Health = health;
-                    Game.PlayerPed.Armor = armour;
-                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
-
-                    ClearPedDecorations(Game.PlayerPed.Handle);
-                    ClearPedFacialDecorations(Game.PlayerPed.Handle);
-                    SetPedDefaultComponentVariation(Game.PlayerPed.Handle);
-                    ClearAllPedProps(Game.PlayerPed.Handle);
-                    DefaultPlayerColors();
-
-                    MakeCreateCharacterMenu(male: true);
+                    await StartNewCharacter(male: true);
                 }
                 else if (item == createFemaleBtn)
                 {
-                    var model = (uint)GetHashKey("mp_f_freemode_01");
-
-                    if (!await LoadModelAsync(model))
-                    {
-                        Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
-                        return;
-                    }
-
-                    var maxHealth = Game.PlayerPed.MaxHealth;
-                    var maxArmour = Game.Player.MaxArmor;
-                    var health = Game.PlayerPed.Health;
-                    var armour = Game.PlayerPed.Armor;
-
-                    SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
-                    SetPlayerModel(Game.Player.Handle, model);
-                    // Restore vitals before awaiting: the new ped spawns at full health.
-                    Game.Player.MaxArmor = maxArmour;
-                    Game.PlayerPed.MaxHealth = maxHealth;
-                    Game.PlayerPed.Health = health;
-                    Game.PlayerPed.Armor = armour;
-                    await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
-
-                    ClearPedDecorations(Game.PlayerPed.Handle);
-                    ClearPedFacialDecorations(Game.PlayerPed.Handle);
-                    SetPedDefaultComponentVariation(Game.PlayerPed.Handle);
-                    ClearAllPedProps(Game.PlayerPed.Handle);
-                    DefaultPlayerColors();
-
-                    MakeCreateCharacterMenu(male: false);
+                    await StartNewCharacter(male: false);
                 }
                 else if (item == savedCharacters)
                 {
                     UpdateSavedPedsMenu();
                 }
             };
+        }
+
+        /// <summary>
+        /// What Create Male / Female Character does: the player becomes a plain freemode ped and the
+        /// character creator is set up for a new character. The creator menu itself is opened by the
+        /// row (or by the dressing room). False when the model can't be loaded.
+        /// </summary>
+        internal async Task<bool> StartNewCharacter(bool male)
+        {
+            var model = (uint)GetHashKey(male ? "mp_m_freemode_01" : "mp_f_freemode_01");
+
+            if (!await LoadModelAsync(model))
+            {
+                Notify.Error(CommonErrors.CouldNotLoad, placeholderValue: "the character model");
+                return false;
+            }
+
+            var maxHealth = Game.PlayerPed.MaxHealth;
+            var maxArmour = Game.Player.MaxArmor;
+            var health = Game.PlayerPed.Health;
+            var armour = Game.PlayerPed.Armor;
+
+            SaveWeaponLoadout("vmenu_temp_weapons_loadout_before_respawn");
+            SetPlayerModel(Game.Player.Handle, model);
+            // Restore vitals before awaiting: the new ped spawns at full health.
+            Game.Player.MaxArmor = maxArmour;
+            Game.PlayerPed.MaxHealth = maxHealth;
+            Game.PlayerPed.Health = health;
+            Game.PlayerPed.Armor = armour;
+            await SpawnWeaponLoadoutAsync("vmenu_temp_weapons_loadout_before_respawn", false, true, true);
+
+            ClearPedDecorations(Game.PlayerPed.Handle);
+            ClearPedFacialDecorations(Game.PlayerPed.Handle);
+            SetPedDefaultComponentVariation(Game.PlayerPed.Handle);
+            ClearAllPedProps(Game.PlayerPed.Handle);
+            DefaultPlayerColors();
+
+            MakeCreateCharacterMenu(male);
+            return true;
         }
 
         /// <summary>

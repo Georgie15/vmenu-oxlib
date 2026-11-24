@@ -67,6 +67,28 @@ namespace vMenuClient
         /// <summary>A page the dressing room happens on: MP Ped Customization or the creator.</summary>
         public static bool IsDressingPage(string page) => page == "mpPed" || IsCreator(page);
 
+        /// <summary>
+        /// The body psrp_dressing_room sends with Start, from the character picked in the spawn
+        /// selector: true for "male", false for "female" (any case), null otherwise (the player picks).
+        /// </summary>
+        public static bool? BodyFrom(string body)
+        {
+            switch (body?.Trim().ToLowerInvariant())
+            {
+                case "male": return true;
+                case "female": return false;
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// The step whose job is opening the creator from MP Ped Customization (Create Male / Female
+        /// Character). With a known body the guide does that itself, and the step ticks off as the
+        /// creator opens.
+        /// </summary>
+        public static bool StartsInCreator(DressingStep step) =>
+            step != null && step.Done == DressingDone.Open && step.Card.Menu == "mpPed" && step.Opens == "mpCreator";
+
         public void Start(string destination)
         {
             Array.Clear(done, 0, done.Length);

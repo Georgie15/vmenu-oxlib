@@ -17,9 +17,11 @@ namespace vMenuClient
     /// <summary>
     /// The dressing room's guide (PSRP's psrp_dressing_room resource): a new player makes their first
     /// character with the Player Guide's card beside the menu. psrp_dressing_room starts it with the
-    /// local event vMenu:DressingRoom:Start (where the player goes next) once the welcome is closed.
-    /// It opens MP Ped Customization, and each step is ticked off as the player does it
-    /// (DressingRoomFlow); the menu stays theirs. After Save Character one card with its own keys
+    /// local event vMenu:DressingRoom:Start (where the player goes next, and "male" or "female" from
+    /// the character they picked) once the welcome is closed. With a body it starts a new character
+    /// of it and opens the character creator; without one it opens MP Ped Customization on Create
+    /// Male / Female Character. Each step is ticked off as the player does it (DressingRoomFlow); the
+    /// menu stays theirs. After Save Character one card with its own keys
     /// sends them on: Enter fires vMenu:DressingRoom:Leave, Backspace (or closing the menu) keeps the
     /// menu and fires vMenu:DressingRoom:Ended. Steps live in config/player-guide.json, "dressingRoom".
     ///
@@ -37,6 +39,10 @@ namespace vMenuClient
         private static readonly GuideButtonHold hold = new();
         private static bool buttonsAtStart;
         private static bool startPending;
+        /// <summary>The body to start the character with (from the spawn selector), or null to let the player pick.</summary>
+        private static bool? startMale;
+        /// <summary>The new character's model is loading; the creator opens when it's done.</summary>
+        private static bool openingCreator;
         private static bool dirty;
         private static string shown;
         private static bool? shownForPad;
@@ -52,20 +58,45 @@ namespace vMenuClient
         {
             sleeper = new TickSleeper(FrameTick, t => Tick += t, t => Tick -= t);
             Tick += FrameTick;
-            EventHandlers.Add("vMenu:DressingRoom:Start", new Action<string>(Start));
+            EventHandlers.Add("vMenu:DressingRoom:Start", new Action<string, string>(Start));
             EventHandlers.Add("vMenu:DressingRoom:Stop", new Action(StopFromOutside));
         }
 
         #region Starting and stopping
-        private static bool Available() =>
-            PlayerGuide.Content?.DressingRoom != null && MainMenu.Menu != null && PlayerGuide.MenuFor("mpPed") != null;
+        /// <summary>Why the guide can't run for this player, or null when it can. Printed to F8 when it says no.</summary>
+        private static string Unavailable()
+        {
+            if (broken)
+            {
+                return "it stopped after an error earlier this session (see the line above)";
+            }
+            if (MainMenu.Menu == null)
+            {
+                return "the menu isn't set up yet (permissions not received, or vmenu_menu_staff_only)";
+            }
+            if (PlayerGuide.Content == null)
+            {
+                return $"{PlayerGuide.ContentFile} can't be used (see the [Player Guide] line)";
+            }
+            if (PlayerGuide.Content.DressingRoom == null)
+            {
+                return $"{PlayerGuide.ContentFile} has no \"dressingRoom\" section: upload release O's copy of that file";
+            }
+            if (PlayerGuide.MenuFor("mpPed") == null)
+            {
+                return "this player has no MP Ped Customization (permissions)";
+            }
+            return null;
+        }
 
-        private static void Start(string destination)
+        private static void Start(string destination, string body)
         {
             try
             {
-                if (broken || !Available())
+                var why = Unavailable();
+                if (why != null)
                 {
+                    Debug.WriteLine($"[vMenu] [Dressing Room] not starting: {why}.");
                     TriggerEvent("vMenu:DressingRoom:Unavailable");
                     return;
                 }
@@ -75,6 +106,7 @@ namespace vMenuClient
                     buttonsAtStart = MenuController.DisableMenuButtons;
                 }
                 flow.Start(destination);
+                startMale = DressingRoomFlow.BodyFrom(body);
                 startPending = true;
                 dirty = true;
                 shown = null;
@@ -219,7 +251,20 @@ namespace vMenuClient
                     return;
                 }
                 startPending = false;
-                OpenStepPage();
+                if (startMale.HasValue && DressingRoomFlow.StartsInCreator(flow.CurrentStep))
+                {
+                    // The spawn selector already knows the body: skip the pick and open the creator on it.
+                    _ = OpenCreator(startMale.Value);
+                }
+                else
+                {
+                    OpenStepPage();
+                }
+                return;
+            }
+
+            if (openingCreator)
+            {
                 return;
             }
 
@@ -325,6 +370,42 @@ namespace vMenuClient
                 }
             }
             return DressingRoomFlow.Elsewhere;
+        }
+
+        /// <summary>
+        /// Does what Create Male / Female Character does, then opens the creator. Its step is ticked when
+        /// the creator opens, as if the player had picked the row. If the model won't load, MP Ped
+        /// Customization opens on the step instead.
+        /// </summary>
+        private static async Task OpenCreator(bool male)
+        {
+            openingCreator = true;
+            try
+            {
+                var started = await MainMenu.MpPedCustomizationMenu.StartNewCharacter(male);
+                if (!Active)
+                {
+                    return;
+                }
+                if (!started)
+                {
+                    OpenStepPage();
+                    return;
+                }
+                var creator = PlayerGuide.MenuFor("mpCreator");
+                MenuController.CloseAllMenus();
+                creator.OpenMenu();
+                dirty = true;
+            }
+            catch (Exception e)
+            {
+                Fail(e);
+            }
+            finally
+            {
+                openingCreator = false;
+                sleeper?.Wake();
+            }
         }
 
         private static void OpenStepPage()
