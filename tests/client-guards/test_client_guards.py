@@ -171,3 +171,18 @@ for path in client_files:
     code = re.sub(r'//[^\n]*', '', path.read_text(encoding='utf-8-sig'))
     assert not regex_use.search(code), f"{path.relative_to(root)} uses Regex, which FiveM's client runtime rejects"
 print('PASS: nothing in the client uses Regex (FiveM rejects it)')
+
+
+# --- ...and ExceptionDispatchInfo, which the compiler adds itself ------------------------------------
+# build-2026-11-25's first DLL never opened the copy box: an await inside a finally block compiles to
+# ExceptionDispatchInfo.Capture(...).Throw(), and FiveM's Mono refused the whole method
+# (MethodAccessException "Error verifying ...<CopyToClipboard>d__73:MoveNext"). An await inside a
+# catch does the same. No source pattern shows it reliably, so check the packaged DLL's metadata for
+# every name FiveM's client runtime is known to refuse.
+REFUSED = ['ExceptionDispatchInfo', 'System.Text.RegularExpressions']
+dll = (root / 'build' / 'vMenu' / 'vMenuClient.net.dll').read_bytes()
+for name in REFUSED:
+    assert name.encode('ascii') not in dll, (
+        f"build/vMenu/vMenuClient.net.dll references {name}, which FiveM's client runtime refuses"
+        + (' (an await inside a catch or finally?)' if name == 'ExceptionDispatchInfo' else ''))
+print("PASS: the packaged client DLL references nothing FiveM's client runtime refuses")

@@ -1986,22 +1986,23 @@ namespace vMenuClient
         /// </summary>
         public static async Task<bool> CopyToClipboard(string text, string title = null)
         {
+            // No await inside a catch or finally: the compiler rethrows there through
+            // ExceptionDispatchInfo, which FiveM's client Mono refuses (MethodAccessException:
+            // the whole method failed to load on 2026-11-25). tests/client-guards checks the DLL.
             var buttonsBefore = MenuController.DisableMenuButtons;
             MenuController.DisableMenuButtons = true;
+            var copied = false;
             try
             {
-                return await External.SetPlayerClipboard(text, title);
+                copied = await External.SetPlayerClipboard(text, title);
             }
             catch (Exception e)
             {
                 Debug.WriteLine($"[vMenu] copyToClipboard failed: {e.Message}");
-                return false;
             }
-            finally
-            {
-                await BaseScript.Delay(300);
-                MenuController.DisableMenuButtons = buttonsBefore;
-            }
+            await BaseScript.Delay(300);
+            MenuController.DisableMenuButtons = buttonsBefore;
+            return copied;
         }
         public static void SendNotification(string message, string ntype = "warning")
         {

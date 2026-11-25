@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 25, 2026 — `build-2026-11-25`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. Not checked in game. Before it: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
-| `build/vMenu/vMenuClient.net.dll` | `22767c3fef42761bed843988bfa5e7236e92849524e12a7e793729d5acaab55d` |
+| Latest change | November 25, 2026 — `build-2026-11-25-2`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. The first build (`build-2026-11-25`) failed in game: FiveM's Mono refused its copy method. Fix not yet checked in game. Before it: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
+| `build/vMenu/vMenuClient.net.dll` | `82844471c3bc3750066466fac75a6a6887aff346d3304ae6f9e305824e955311` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -21,11 +21,30 @@ the commit `build-YYYY-MM-DD`.
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
 
-## November 25, 2026 — `build-2026-11-25`: copying through psrp_notify's copy box (client DLL, `client/exports.lua`, `client/outfitCodes.lua`)
+## November 25, 2026 — `build-2026-11-25-2`: copying through psrp_notify's copy box (client DLL, `client/exports.lua`, `client/outfitCodes.lua`)
 
-**Status: on `main`, tagged `build-2026-11-25`; not checked in game.** Client DLL
-`22767c3fef42761bed843988bfa5e7236e92849524e12a7e793729d5acaab55d`. The server
-DLL, MenuAPI, the server Lua and the database are unchanged.
+**Status: on `main`, tagged `build-2026-11-25-2`; the fix is not checked in game.**
+Client DLL `82844471c3bc3750066466fac75a6a6887aff346d3304ae6f9e305824e955311`
+(first build `build-2026-11-25`: `22767c3f…`, broken in game, below). The
+server DLL, MenuAPI, the server Lua and the database are unchanged.
+
+**Fixed after the first in-game try (same day).** Copy Coordinates did
+nothing. F8 showed `System.MethodAccessException: Error verifying
+vMenuClient.CommonFunctions/<CopyToClipboard>d__73:MoveNext (): Method
+System.Runtime.E…`.
+- **Cause:** `CopyToClipboard` awaited `BaseScript.Delay` inside a `finally`.
+  The compiler rethrows there through
+  `System.Runtime.ExceptionServices.ExceptionDispatchInfo`, which FiveM's client
+  Mono refuses, so the whole method failed to load. No key was paused and no box
+  opened. An `await` inside a `catch` does the same. The .NET 9 tests can't see
+  this, as with release N's Regex.
+- **Fix:** the delay and the restore come after the `try`/`catch`, so the DLL
+  no longer references `ExceptionDispatchInfo`. The names new to the DLL since
+  release P are only the copy state machines' own.
+- **Guard:** `tests/client-guards` now reads the packaged
+  `vMenuClient.net.dll` and fails if it references `ExceptionDispatchInfo` or
+  `System.Text.RegularExpressions`. It failed on the first build's DLL and
+  passes on this one.
 
 Since a FiveM update (about November 24), the game's browser writes to the
 clipboard only during the player's own click or key press. vMenu chooses rows
@@ -63,6 +82,8 @@ title, returns false on Esc or an old psrp_notify, falls back without it), and
 
 Deploy: hash the installed `vMenuClient.net.dll`, then `restart vMenu` after
 copying:
+- From the first build `build-2026-11-25` (`22767c3f…`): only
+  `vMenuClient.net.dll`.
 - From `build-2026-11-24-3` (`a1219c91…`, release P): `vMenuClient.net.dll`,
   `client/exports.lua` and `client/outfitCodes.lua`.
 - From `build-2026-11-24` (`0572ace7…`, releases H to O): those three plus
