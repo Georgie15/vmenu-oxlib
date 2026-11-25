@@ -71,7 +71,8 @@ assert 'TakeLegacyVehicleDefaultRadio()' in initialize
 assert 'VehicleRadio.Initialize();' in options
 
 # --- Menu wiring ----------------------------------------------------------------------------------
-# HandleListIndexChanges picks the paint list by position, so the hex item must come after them.
+# The hex item stays last in both colour menus (HandleListIndexChanges knows the paint rows by name,
+# see tests/vehicle-pearlescent), and Secondary Colors still opens with Custom Colour and Pearlescent.
 primary_adds = re.findall(r'primaryColorsMenu\.AddMenuItem\((\w+)\)', options)
 secondary_adds = re.findall(r'secondaryColorsMenu\.AddMenuItem\((\w+)\)', options)
 assert primary_adds[-1] == 'hexColour' and primary_adds.index('hexColour') > primary_adds.index('chameleonList'), primary_adds

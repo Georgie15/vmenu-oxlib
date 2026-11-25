@@ -38,6 +38,13 @@ namespace vMenuClient.menus
         // For each upgrade list in the mod menu, the upgrade each row after Stock fits (UpdateMods).
         private readonly Dictionary<MenuListItem, List<int>> modListUpgrades = new();
 
+        // The paint lists in Primary and Secondary Colors. HandleListIndexChanges knows each row by
+        // this rather than by its position, so rows can be added without breaking the others.
+        private enum PaintRow { Pearlescent, Classic, Metallic, Matte, Metals, Util, Worn, Chameleon }
+
+        // The pearlescent the player picked (or a saved vehicle came with), kept when the paint changes.
+        internal static readonly PaintPearl KeptPearlescent = new();
+
         // Public variables (getters only), return the private variables.
         // The vehicle "Toggle Vehicle Visibility" hid; made visible again when the player leaves it.
         internal static int HiddenVehicle { get; set; } = 0;
@@ -1322,6 +1329,23 @@ namespace vMenuClient.menus
                 wheelColors.AddRange(classic);
             }
 
+            // The colour ids behind each paint list, row by row.
+            var classicIds = VehicleData.ClassicColors.Select(c => c.id).ToList();
+            var paintIds = new Dictionary<PaintRow, List<int>>
+            {
+                [PaintRow.Pearlescent] = classicIds,
+                [PaintRow.Classic] = classicIds,
+                [PaintRow.Metallic] = classicIds,
+                [PaintRow.Matte] = VehicleData.MatteColors.Select(c => c.id).ToList(),
+                [PaintRow.Metals] = VehicleData.MetalColors.Select(c => c.id).ToList(),
+                [PaintRow.Util] = VehicleData.UtilColors.Select(c => c.id).ToList(),
+                [PaintRow.Worn] = VehicleData.WornColors.Select(c => c.id).ToList(),
+                [PaintRow.Chameleon] = VehicleData.ChameleonColors.Select(c => c.id).ToList(),
+            };
+            // Which paint list each row of Primary and Secondary Colors is (filled where they're added).
+            var primaryPaintRows = new Dictionary<MenuListItem, PaintRow>();
+            var secondaryPaintRows = new Dictionary<MenuListItem, PaintRow>();
+
             var wheelColorsList = new MenuListItem("Wheel Color", wheelColors, 0);
             var dashColorList = new MenuListItem("Dashboard Color", classic, 0);
             var intColorList = new MenuListItem("Interior / Trim Color", classic, 0);
@@ -1332,13 +1356,25 @@ namespace vMenuClient.menus
             var chrome = new MenuItem("Chrome");
             customizeColorMenu.AddMenuItem(chrome);
             VehicleColorsMenu.AddMenuItem(vehicleEnveffScale);
-            // Start the slider where this vehicle's paint is (it always started in the middle).
+            // Start the slider where this vehicle's paint is (it always started in the middle), and the
+            // wheel, dashboard and interior lists on the vehicle's own colours.
             VehicleColorsMenu.OnMenuOpen += (_) =>
             {
                 var veh = GetVehicle();
                 if (veh != null && veh.Exists())
                 {
                     vehicleEnveffScale.Position = MathUtil.Clamp((int)Math.Round(GetVehicleEnveffScale(veh.Handle) * 20f), 0, 20);
+
+                    int pearlColor = 0, wheelColor = 0, dashColor = 0, intColor = 0;
+                    GetVehicleExtraColours(veh.Handle, ref pearlColor, ref wheelColor);
+                    // The lists set these with the swapped natives (see HandleListIndexChanges), so read them back the same way.
+                    GetVehicleInteriorColour(veh.Handle, ref dashColor);
+                    GetVehicleDashboardColour(veh.Handle, ref intColor);
+
+                    var wheelRow = classicIds.IndexOf(wheelColor);
+                    wheelColorsList.ListIndex = wheelColor == 156 || wheelRow < 0 ? 0 : wheelRow + 1;
+                    dashColorList.ListIndex = PaintPearl.RowOf(classicIds, dashColor);
+                    intColorList.ListIndex = PaintPearl.RowOf(classicIds, intColor);
                 }
             };
 
@@ -1448,80 +1484,42 @@ namespace vMenuClient.menus
                     GetVehicleDashboardColour(veh.Handle, ref dashColor);
                     GetVehicleInteriorColour(veh.Handle, ref intColor);
 
-                    if (sender == primaryColorsMenu)
+                    if (sender == primaryColorsMenu || sender == secondaryColorsMenu)
                     {
-                        if (itemIndex == 2)
+                        var primary = sender == primaryColorsMenu;
+                        if (!(primary ? primaryPaintRows : secondaryPaintRows).TryGetValue(listItem, out var row)
+                            || newIndex < 0 || newIndex >= paintIds[row].Count)
                         {
-                            pearlColor = VehicleData.ClassicColors[newIndex].id;
+                            return;
+                        }
+                        var colour = paintIds[row][newIndex];
+
+                        if (row == PaintRow.Pearlescent)
+                        {
+                            // Both menus have this row. The pick stays when the paint changes.
+                            pearlColor = colour;
+                            KeptPearlescent.Keep(veh.Handle, pearlColor);
+                        }
+                        else if (primary)
+                        {
+                            primaryColor = colour;
+                            if (row == PaintRow.Chameleon)
+                            {
+                                secondaryColor = colour;
+                                SetVehicleModKit(veh.Handle, 0);
+                            }
+                            pearlColor = KeptPearlescent.AfterPrimaryChange(veh.Handle, pearlColor, primaryColor,
+                                row == PaintRow.Metallic, row == PaintRow.Chameleon);
+
+                            ClearVehicleCustomPrimaryColour(veh.Handle);
+                            SetVehicleColours(veh.Handle, primaryColor, secondaryColor);
                         }
                         else
                         {
-                            pearlColor = 0;
+                            secondaryColor = colour;
+                            ClearVehicleCustomSecondaryColour(veh.Handle);
+                            SetVehicleColours(veh.Handle, primaryColor, secondaryColor);
                         }
-
-                        switch (itemIndex)
-                        {
-                            case 0:
-                            case 1:
-                            case 2:
-                                primaryColor = VehicleData.ClassicColors[newIndex].id;
-                                break;
-                            case 3:
-                                primaryColor = VehicleData.MatteColors[newIndex].id;
-                                break;
-                            case 4:
-                                primaryColor = VehicleData.MetalColors[newIndex].id;
-                                break;
-                            case 5:
-                                primaryColor = VehicleData.UtilColors[newIndex].id;
-                                break;
-                            case 6:
-                                primaryColor = VehicleData.WornColors[newIndex].id;
-                                break;
-                        }
-
-                        if (GetSettingsBool(Setting.vmenu_using_chameleon_colours))
-                        {
-                            if (itemIndex == 7)
-                            {
-                                primaryColor = VehicleData.ChameleonColors[newIndex].id;
-                                secondaryColor = VehicleData.ChameleonColors[newIndex].id;
-
-                                SetVehicleModKit(veh.Handle, 0);
-                            }
-                        }
-
-                        ClearVehicleCustomPrimaryColour(veh.Handle);
-                        SetVehicleColours(veh.Handle, primaryColor, secondaryColor);
-                    }
-                    else if (sender == secondaryColorsMenu)
-                    {
-                        switch (itemIndex)
-                        {
-                            case 0:
-                            case 1:
-                                pearlColor = VehicleData.ClassicColors[newIndex].id;
-                                break;
-                            case 2:
-                            case 3:
-                                secondaryColor = VehicleData.ClassicColors[newIndex].id;
-                                break;
-                            case 4:
-                                secondaryColor = VehicleData.MatteColors[newIndex].id;
-                                break;
-                            case 5:
-                                secondaryColor = VehicleData.MetalColors[newIndex].id;
-                                break;
-                            case 6:
-                                secondaryColor = VehicleData.UtilColors[newIndex].id;
-                                break;
-                            case 7:
-                                secondaryColor = VehicleData.WornColors[newIndex].id;
-                                break;
-                        }
-
-                        ClearVehicleCustomSecondaryColour(veh.Handle);
-                        SetVehicleColours(veh.Handle, primaryColor, secondaryColor);
                     }
                     else if (sender == VehicleColorsMenu)
                     {
@@ -1632,19 +1630,34 @@ namespace vMenuClient.menus
                 var customColour = new MenuItem("Custom Colour") { Label = ">>>" };
                 var hexColour = new MenuItem("Hex Colour Code", "Type a hex colour code, like #FF8800, for custom paint.") { Label = "#" };
                 hexColourItems.Add(hexColour);
-                var pearlescentList = new MenuListItem("Pearlescent", classic, 0);
-                var classicList = new MenuListItem("Classic", classic, 0);
-                var metallicList = new MenuListItem("Metallic", classic, 0);
+                var pearlescentList = new MenuListItem("Pearlescent", classic, 0,
+                    "The pearl coat over Classic and Metallic paint, best seen at an angle in daylight. " +
+                    "Changing the paint colour keeps the pearlescent you pick here.");
+                var classicList = new MenuListItem("Classic", classic, 0,
+                    i == 0 ? "Gloss paint with no pearlescent, unless you picked your own." : null);
+                var metallicList = new MenuListItem("Metallic", classic, 0,
+                    i == 0 ? "Gloss paint with a matching pearlescent, unless you picked your own." : null);
                 var matteList = new MenuListItem("Matte", matte, 0);
                 var metalList = new MenuListItem("Metals", metals, 0);
                 var utilList = new MenuListItem("Util", util, 0);
                 var wornList = new MenuListItem("Worn", worn, 0);
+
+                var paintRows = i == 0 ? primaryPaintRows : secondaryPaintRows;
+                paintRows[pearlescentList] = PaintRow.Pearlescent;
+                paintRows[classicList] = PaintRow.Classic;
+                paintRows[metallicList] = PaintRow.Metallic;
+                paintRows[matteList] = PaintRow.Matte;
+                paintRows[metalList] = PaintRow.Metals;
+                paintRows[utilList] = PaintRow.Util;
+                paintRows[wornList] = PaintRow.Worn;
 
                 if (i == 0)
                 {
                     primaryColorsMenu.AddMenuItem(customColour);
                     primaryColorsMenu.AddMenuItem(classicList);
                     primaryColorsMenu.AddMenuItem(metallicList);
+                    // Here too, because players look for it with the paint (GTA's own paint shop has it there).
+                    primaryColorsMenu.AddMenuItem(pearlescentList);
                     primaryColorsMenu.AddMenuItem(matteList);
                     primaryColorsMenu.AddMenuItem(metalList);
                     primaryColorsMenu.AddMenuItem(utilList);
@@ -1653,10 +1666,10 @@ namespace vMenuClient.menus
                     if (GetSettingsBool(Setting.vmenu_using_chameleon_colours))
                     {
                         var chameleonList = new MenuListItem("Chameleon", chameleon, 0);
+                        paintRows[chameleonList] = PaintRow.Chameleon;
 
                         primaryColorsMenu.AddMenuItem(chameleonList);
                     }
-                    // Last: HandleListIndexChanges knows the lists by their position.
                     if (hexColoursAllowed)
                     {
                         primaryColorsMenu.AddMenuItem(hexColour);
@@ -1684,6 +1697,30 @@ namespace vMenuClient.menus
                     secondaryColorsMenu.OnItemSelect += HandleItemSelect;
                 }
             }
+
+            // Open on the vehicle's own colours (the rows used to start on Black, whatever the paint).
+            // Setting ListIndex doesn't fire OnListIndexChange, so nothing is repainted.
+            void ShowCurrentPaint(Dictionary<MenuListItem, PaintRow> paintRows, bool primary)
+            {
+                var veh = GetVehicle();
+                if (veh == null || !veh.Exists())
+                {
+                    return;
+                }
+
+                int primaryColor = 0, secondaryColor = 0, pearlColor = 0, wheelColor = 0;
+                GetVehicleColours(veh.Handle, ref primaryColor, ref secondaryColor);
+                GetVehicleExtraColours(veh.Handle, ref pearlColor, ref wheelColor);
+
+                foreach (var paintRow in paintRows)
+                {
+                    var colour = paintRow.Value == PaintRow.Pearlescent ? pearlColor : primary ? primaryColor : secondaryColor;
+                    paintRow.Key.ListIndex = PaintPearl.RowOf(paintIds[paintRow.Value], colour);
+                }
+            }
+
+            primaryColorsMenu.OnMenuOpen += (_) => ShowCurrentPaint(primaryPaintRows, true);
+            secondaryColorsMenu.OnMenuOpen += (_) => ShowCurrentPaint(secondaryPaintRows, false);
             #endregion
 
             #region Vehicle Doors Submenu Stuff

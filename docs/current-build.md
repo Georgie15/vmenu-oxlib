@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 25, 2026 — `build-2026-11-25-3`: the Mod Menu's upgrade lists leave out upgrades only GTA V Enhanced can fit, and the clothing lists in MP Ped Customization and Customize Ped step past pieces only GTA V Enhanced can wear (client DLL only, not checked in game). Before it: `build-2026-11-25-2`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. The first build (`build-2026-11-25`) failed in game: FiveM's Mono refused its copy method. That fix is not yet checked in game either. Before those: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
-| `build/vMenu/vMenuClient.net.dll` | `99fb5238313fb71f706843f28453a7971e0823a46cb0e4da7027ca26a04e81b4` |
+| Latest change | November 25, 2026 — `build-2026-11-25-4`: Pearlescent is in Primary Colors too, a picked pearlescent survives paint changes, and the colour rows open on the vehicle's own colours (client DLL only, not checked in game). Before it: `build-2026-11-25-3`: the Mod Menu's upgrade lists leave out upgrades only GTA V Enhanced can fit, and the clothing lists in MP Ped Customization and Customize Ped step past pieces only GTA V Enhanced can wear (client DLL only, not checked in game). Before it: `build-2026-11-25-2`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. The first build (`build-2026-11-25`) failed in game: FiveM's Mono refused its copy method. That fix is not yet checked in game either. Before those: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
+| `build/vMenu/vMenuClient.net.dll` | `0f512928075ca7ae30791f0d92349e9b8c5d8b8be56cbc3080b13cdcebb2bf12` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,59 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 25, 2026 — `build-2026-11-25-4`: pearlescent that stays (client DLL)
+
+**Status: on `main`, tagged `build-2026-11-25-4`; not checked in game.** Client
+DLL `0f512928075ca7ae30791f0d92349e9b8c5d8b8be56cbc3080b13cdcebb2bf12`. The
+server DLL, MenuAPI, the Lua, the config and the database are unchanged.
+
+Players reported that they couldn't add a pearlescent (Discord, "Cant Add
+Vehicle Pearlescents", 18 November 2026). Pearlescent worked, but the menu hid
+it in three ways: the row was only in Secondary Colors, every primary colour
+change reset it (Metallic set a matching pearlescent and anything else set
+Black), and every colour row opened on Black, whatever the vehicle had.
+
+- **Pearlescent in Primary Colors too,** right under Metallic, as in GTA's own
+  paint shop. Secondary Colors keeps its row. Both say the pearlescent shows on
+  Classic and Metallic paint and that changing the paint colour keeps it.
+- **A picked pearlescent stays.** After the player picks one on a vehicle,
+  primary colour changes keep it (`PaintPearl`, kept as
+  `VehicleOptions.KeptPearlescent`). Until then the old rule applies: Metallic
+  sets a matching pearlescent and other paint sets none. A saved vehicle whose
+  pearlescent differs from its primary colour (and isn't Black) counts as
+  picked when vMenu spawns it. Chameleon paint still sets none. The pick is
+  kept only while the vehicle still has it, so a preset colour combination,
+  or another vehicle that gets the same handle, goes back to the old rule.
+- **Rows open on the vehicle's colours.** Primary and Secondary Colors show the
+  paint on every row whose list has it (Classic and Metallic share one list)
+  and the pearlescent on Pearlescent. Vehicle Colors shows the wheel,
+  dashboard and interior colours. Setting a row doesn't repaint anything.
+- `HandleListIndexChanges` now knows each paint row by name (`PaintRow`)
+  instead of its position in the menu, which is what let the new row go in.
+  Classic and Metallic in Primary Colors got short descriptions.
+
+Reviewed with `tools/ilcompare` against `build-2026-11-25-3`: only
+`CreateMenu` and its colour handlers (the list handler, the new
+`ShowCurrentPaint`, the colour menus' open handlers, the colour-id lambdas),
+`VehicleOptions`' static constructor, `ApplyVehicleModsDelayed` and the new
+`PaintPearl` changed, plus the compiler renumbering local functions
+(`HandleItemSelect`, `ChangeVehiclePresetColor`, `CurrentCustomColourCode`).
+
+Tests: new `tests/vehicle-pearlescent` (the keep rules, a stale pick, saved
+vehicles, row lookup, and the wiring: the new row, rows by name, the open
+handlers). `tests/vehicle-colours-radio`'s comment follows the change. All tests
+in AGENTS.md pass.
+
+Deploy: hash the installed `vMenuClient.net.dll`. If it is `99fb5238…`
+(`build-2026-11-25-3`) or `82844471…` (`build-2026-11-25-2`), copy only
+`vMenuClient.net.dll` and `restart vMenu`. From an older build, deploy
+`build-2026-11-25-2` first (below), or its files together with this DLL.
+
+Not checked in game: the new row, that a pearlescent picked first survives a
+Metallic or Classic change, that the rows open on the right colours (including
+custom paint and the wheels' Default Alloy), and that opening the menus
+doesn't change the vehicle.
 
 ## November 25, 2026 — `build-2026-11-25-3`: leave out parts only GTA V Enhanced can use (client DLL)
 

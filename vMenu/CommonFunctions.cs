@@ -1476,6 +1476,12 @@ namespace vMenuClient
                 SetVehicleDashboardColour(vehicle.Handle, vehicleInfo.colors["dash"]);
 
                 SetVehicleExtraColours(vehicle.Handle, vehicleInfo.colors["pearlescent"], vehicleInfo.colors["wheels"]);
+                // A pearlescent the save came with stays when the paint is changed in Vehicle Colors.
+                if (vehicleInfo.colors.TryGetValue("primary", out var savedPrimary)
+                    && PaintPearl.IsOwnChoice(savedPrimary, vehicleInfo.colors["pearlescent"]))
+                {
+                    VehicleOptions.KeptPearlescent.Keep(vehicle.Handle, vehicleInfo.colors["pearlescent"]);
+                }
 
                 SetVehicleNumberPlateText(vehicle.Handle, vehicleInfo.plateText);
                 SetVehicleNumberPlateTextIndex(vehicle.Handle, vehicleInfo.plateStyle);
