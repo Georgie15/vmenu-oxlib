@@ -282,7 +282,9 @@ local payload = { v = 2, Model = 1885233650, Clothes = { ['11'] = { Item = 44, T
 c = newClient()
 c.generated = 42
 answer = json.decode(c.exports.shareOutfitCode(json.encode(payload)))
-check(c.waited > 0 and answer.ok == true and answer.id == 42 and c.clipboard == '42', 'a shared outfit gets its number, copied')
+-- vMenu copies the number itself, through psrp_notify's copy box (CopyToClipboard); a copy from
+-- here, with no click or key press of the player's behind it, is refused since FiveM's Nov 2026 NUI update
+check(c.waited > 0 and answer.ok == true and answer.id == 42 and c.clipboard == nil, 'a shared outfit gets its number; vMenu copies it')
 check(c.sent and c.sent.v == 2 and c.sent.Model == 1885233650 and c.sent.Clothes['11'].Item == 44, 'the server gets the code vMenu built')
 answer = json.decode(c.exports.shareOutfitCode(json.encode(payload)))
 check(answer.ok == false and answer.message:find('15 seconds', 1, true), 'one new code every 15 seconds')

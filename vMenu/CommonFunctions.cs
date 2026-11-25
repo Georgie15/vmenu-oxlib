@@ -33,9 +33,9 @@ namespace vMenuClient
         {
             return await Exports["vMenu"].coordsDialog();
         }
-        public void SetPlayerClipboard(string text)
+        public async Task<bool> SetPlayerClipboard(string text, string title)
         {
-            Exports["vMenu"].copyToClipboard(text);
+            return await Exports["vMenu"].copyToClipboard(text, title);
         }
         public void NotifyViaOxLib(IDictionary<string, object> data)
         {
@@ -1977,9 +1977,31 @@ namespace vMenuClient
         {
             return await External.GetCustomColourInput(type);
         }
-        public static void CopyToClipboard(string text)
+        /// <summary>
+        /// Copies text through psrp_notify's copy box (client/exports.lua copyToClipboard): FiveM's
+        /// NUI only writes to the clipboard during the player's own click or key press, so the
+        /// player presses Enter or Copy in the box. Waits until the box closes and returns true
+        /// when the text was copied. The menu's keys are paused meanwhile and for 0.3 s after, so
+        /// the Enter or Esc that closed the box doesn't also choose a row or go back.
+        /// </summary>
+        public static async Task<bool> CopyToClipboard(string text, string title = null)
         {
-            External.SetPlayerClipboard(text);
+            var buttonsBefore = MenuController.DisableMenuButtons;
+            MenuController.DisableMenuButtons = true;
+            try
+            {
+                return await External.SetPlayerClipboard(text, title);
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine($"[vMenu] copyToClipboard failed: {e.Message}");
+                return false;
+            }
+            finally
+            {
+                await BaseScript.Delay(300);
+                MenuController.DisableMenuButtons = buttonsBefore;
+            }
         }
         public static void SendNotification(string message, string ntype = "warning")
         {

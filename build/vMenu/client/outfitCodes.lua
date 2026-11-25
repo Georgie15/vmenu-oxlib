@@ -122,7 +122,8 @@ exports("requestOutfitCode", function(takenNamesJson)
     return json.encode({ ok = true, id = id, code = code, created = created, name = name, wear = input[3] == true })
 end)
 
----Share and Share What I'm Wearing, on a character's outfits page. Stores the code vMenu built and copies its number.
+---Share and Share What I'm Wearing, on a character's outfits page. Stores the code vMenu built and returns its
+---number; vMenu then copies it through psrp_notify's copy box (CopyToClipboard), with the menu paused.
 ---@param codeJson string the code vMenu built (ClothingSaves.BuildCode)
 ---@return string JSON { ok = true, id } or { ok = false, message }
 exports("shareOutfitCode", function(codeJson)
@@ -147,7 +148,6 @@ exports("shareOutfitCode", function(codeJson)
     end)
 
     print(format("Outfit code created: %s", id))
-    lib.setClipboard(tostring(id))
     return json.encode({ ok = true, id = id })
 end)
 

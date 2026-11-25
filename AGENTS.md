@@ -75,6 +75,7 @@ python tests/client-features/test_client_features.py
 dotnet run --project tests/model-shortlists
 dotnet run --project tests/clothing-toggles
 lua tests/share-codes/test_share_codes.lua
+lua tests/clipboard/test_clipboard.lua
 python tests/client-guards/test_client_guards.py
 dotnet run --project tests/vehicle-conveniences
 dotnet run --project tests/saved-outfits

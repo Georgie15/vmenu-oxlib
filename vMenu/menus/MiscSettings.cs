@@ -454,7 +454,7 @@ namespace vMenuClient.menus
                 }
             };
 
-            developerToolsMenu.OnItemSelect += (sender, item, index) =>
+            developerToolsMenu.OnItemSelect += async (sender, item, index) =>
             {
                 if (item == clearArea)
                 {
@@ -465,8 +465,11 @@ namespace vMenuClient.menus
                     var pos = Game.PlayerPed.Position;
                     var heading = Game.PlayerPed.Heading;
                     var text = $"{Math.Round(pos.X, 2)}, {Math.Round(pos.Y, 2)}, {Math.Round(pos.Z, 2)}, {Math.Round(heading, 2)}";
-                    CopyToClipboard(text);
-                    Notify.Info("Coordinates copied to clipboard.");
+                    // the copy box: Enter or Copy copies; "copied" only once it did
+                    if (await CopyToClipboard(text, "Copy Coordinates"))
+                    {
+                        Notify.Info("Coordinates copied to clipboard.");
+                    }
                 }
                 else if (item == copyVehicleHash)
                 {
@@ -479,8 +482,10 @@ namespace vMenuClient.menus
                     var veh = Game.PlayerPed.CurrentVehicle;
                     var model = veh.Model.Hash;
                     var text = $"{model}";
-                    CopyToClipboard(text);
-                    Notify.Info("Vehicle hash copied to clipboard.");
+                    if (await CopyToClipboard(text, "Copy Vehicle Hash"))
+                    {
+                        Notify.Info("Vehicle hash copied to clipboard.");
+                    }
 
                 }
                 ;

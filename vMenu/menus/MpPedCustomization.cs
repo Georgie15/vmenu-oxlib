@@ -3546,7 +3546,11 @@ namespace vMenuClient.menus
                     Notify.Error((string)reply["message"] ?? "The outfit code couldn't be made. Try again in a moment.");
                     return;
                 }
-                Notify.Success($"Outfit code #{(long?)reply["id"]} for {what} is copied. Anyone with a {Body(save.Model)} character can load it with Load Outfit Code, in their outfits at the top of Saved Characters.");
+                // the number goes on the clipboard through the copy box (Enter or Copy); the
+                // notification names it either way
+                var id = (long?)reply["id"];
+                var copied = await CopyToClipboard($"{id}", $"Outfit code #{id}");
+                Notify.Success($"Outfit code #{id} for {what} is {(copied ? "copied" : "ready")}. Anyone with a {Body(save.Model)} character can load it with Load Outfit Code, in their outfits at the top of Saved Characters.");
             }
 
             outfitsMenu.OnMenuOpen += (m) => Rebuild();

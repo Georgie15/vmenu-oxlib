@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 24, 2026 — `build-2026-11-24-3`: release P, second build: outfits inside Saved Characters (the played character's at the top, each character's on its page), with outfit codes loaded and shared there, and the server's reasons shown. Not checked in game. Before it: `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
-| `build/vMenu/vMenuClient.net.dll` | `a1219c9174911624ce8b3a8cb982981c74186e32fef5a99f21713685f3d22622` |
+| Latest change | November 25, 2026 — `build-2026-11-25`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. Not checked in game. Before it: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
+| `build/vMenu/vMenuClient.net.dll` | `22767c3fef42761bed843988bfa5e7236e92849524e12a7e793729d5acaab55d` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,61 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 25, 2026 — `build-2026-11-25`: copying through psrp_notify's copy box (client DLL, `client/exports.lua`, `client/outfitCodes.lua`)
+
+**Status: on `main`, tagged `build-2026-11-25`; not checked in game.** Client DLL
+`22767c3fef42761bed843988bfa5e7236e92849524e12a7e793729d5acaab55d`. The server
+DLL, MenuAPI, the server Lua and the database are unchanged.
+
+Since a FiveM update (about November 24), the game's browser writes to the
+clipboard only during the player's own click or key press. vMenu chooses rows
+with game keys, so `lib.setClipboard` from vMenu was refused without a word,
+while vMenu still said "copied". No setting brings the silent copy back. The
+owner confirmed in game that psrp_notify's copy box works (EasyAdmin's Copy
+Discord ID, PSRP-Development `69f7ec06`) and asked for the same in vMenu.
+
+- **`copyToClipboard(text, title)`** (`client/exports.lua`) opens psrp_notify's
+  copy box (`exports.psrp_notify:copy`). It shows the text selected, with a Copy
+  button: Enter, a click or Ctrl+C copies, and Esc closes. It waits until the box
+  closes and returns whether the text was copied. It yields first
+  (`Wait(0)`), so C# has something to await. Without psrp_notify, or with an
+  older one that has no `copy` export, it falls back to the old
+  `lib.setClipboard` or returns false.
+- **`CopyToClipboard(text, title)`** (C#, `CommonFunctions`) is now
+  `async Task<bool>`. It pauses the menu's keys (`MenuController.DisableMenuButtons`)
+  while the box is open and for 0.3 s after, so the Enter or Esc that closed the
+  box doesn't also choose a row or go back. MenuAPI reads disabled controls, so
+  psrp_notify's own key guard can't stop it.
+- **Copy Coordinates and Copy Vehicle Hash** (Misc Settings > Developer Tools)
+  say "copied" only when the box copied.
+- **Share (outfit codes):** `shareOutfitCode` no longer copies. The C# copies the
+  number through the box, then says "Outfit code #N … is copied" or "is ready"
+  (Esc), naming the number either way.
+
+Reviewed with `tools/ilcompare` against `build-2026-11-24-3`: only
+`ExternalFunctions.SetPlayerClipboard`, `CommonFunctions.CopyToClipboard`, the
+Developer Tools select handler (now async) and the outfits page's `Share` local
+function changed, plus the dynamic call-site cache.
+
+Tests: new `tests/clipboard` (the export yields, goes through the box with its
+title, returns false on Esc or an old psrp_notify, falls back without it), and
+`tests/share-codes` follows the move. All tests in AGENTS.md pass.
+
+Deploy: hash the installed `vMenuClient.net.dll`, then `restart vMenu` after
+copying:
+- From `build-2026-11-24-3` (`a1219c91…`, release P): `vMenuClient.net.dll`,
+  `client/exports.lua` and `client/outfitCodes.lua`.
+- From `build-2026-11-24` (`0572ace7…`, releases H to O): those three plus
+  release P's `client/vehicleCodes.lua`, `client/whatsNew.lua` and
+  `config/player-guide.json`. This also ships release P (outfits inside Saved
+  Characters).
+
+The DLL and `exports.lua` go together: the new DLL awaits the export, and the
+old export doesn't yield. psrp_notify 1.2.0 (the copy box) must be running.
+
+Not checked in game: Copy Coordinates, Copy Vehicle Hash and Share with Enter,
+a click and Esc, and that Esc doesn't also take the menu back.
 
 ## November 24, 2026 — `build-2026-11-24-3`: release P, second build: outfits inside Saved Characters (client DLL, `client/whatsNew.lua`, `config/player-guide.json`)
 

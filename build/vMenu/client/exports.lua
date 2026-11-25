@@ -73,12 +73,27 @@ exports("coordsDialog", function()
 	return format("%.3f,%.3f,%.3f", input[1], input[2], input[3])
 end)
 
+-- FiveM's NUI only writes to the clipboard during the player's own click or key press (its
+-- Nov 2026 update), and a menu row is chosen with game keys, so ox_lib's lib.setClipboard from
+-- here is refused without a word. psrp_notify's copy box shows the text with a Copy button
+-- (Enter or a click copies, Esc closes) and waits until it closes. Without psrp_notify the old
+-- silent copy is tried, which that update refuses.
 ---@class copyToClipboard
 ---@param text string
-exports("copyToClipboard", function(text)
-	print("Copied to clipboard: " .. text)
+---@param title? string the copy box's heading
+---@return boolean copied
+exports("copyToClipboard", function(text, title)
+	Wait(0) -- vMenu awaits this export, and only an export that yields gives it something to await
+	text = tostring(text or "")
+	print("vMenu clipboard: " .. text)
+	if GetResourceState("psrp_notify") == "started" then
+		local ok, copied = pcall(function()
+			return exports.psrp_notify:copy(text, type(title) == "string" and title or nil)
+		end)
+		return ok and copied == true
+	end
 	lib.setClipboard(text)
-	return ""
+	return true
 end)
 
 CreateThread(function()
