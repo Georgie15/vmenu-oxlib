@@ -8,8 +8,8 @@ build rules are in [AGENTS.md](../AGENTS.md).
 
 | | |
 | --- | --- |
-| Latest change | November 25, 2026 — `build-2026-11-25-2`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. The first build (`build-2026-11-25`) failed in game: FiveM's Mono refused its copy method. Fix not yet checked in game. Before it: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
-| `build/vMenu/vMenuClient.net.dll` | `82844471c3bc3750066466fac75a6a6887aff346d3304ae6f9e305824e955311` |
+| Latest change | November 25, 2026 — `build-2026-11-25-3`: the Mod Menu's upgrade lists leave out upgrades only GTA V Enhanced can fit, and the clothing lists in MP Ped Customization and Customize Ped step past pieces only GTA V Enhanced can wear (client DLL only, not checked in game). Before it: `build-2026-11-25-2`: copying works again through psrp_notify's copy box (Copy Coordinates, Copy Vehicle Hash, outfit code numbers), after FiveM's NUI update refused vMenu's copies. The first build (`build-2026-11-25`) failed in game: FiveM's Mono refused its copy method. That fix is not yet checked in game either. Before those: `build-2026-11-24-3` (release P, second build: outfits inside Saved Characters), `build-2026-11-24-2` (release P's first build) and `build-2026-11-24` (releases H to O, which the owner runs) |
+| `build/vMenu/vMenuClient.net.dll` | `99fb5238313fb71f706843f28453a7971e0823a46cb0e4da7027ca26a04e81b4` |
 | `build/vMenu/vMenuServer.net.dll` | `fd9433560d3e28fbf31c820eb8787bc6bc44179b5bf445c6dac682e7b8769a90` (built from this source) |
 | `build/vMenu/MenuAPI.dll` | `43442a16c92e22bbc37e9fe4db2470de2272bbd92ed760cc75b741888d05b722` |
 
@@ -20,6 +20,51 @@ the commit `build-YYYY-MM-DD`.
 
 This repository identifies the package. It does not establish which copy is
 installed on a server; hash the installed files before deploying.
+
+## November 25, 2026 — `build-2026-11-25-3`: leave out parts only GTA V Enhanced can use (client DLL)
+
+**Status: on `main`, tagged `build-2026-11-25-3`; not checked in game.** Client
+DLL `99fb5238313fb71f706843f28453a7971e0823a46cb0e4da7027ca26a04e81b4`. The
+server DLL, MenuAPI, the Lua, the config and the database are unchanged.
+
+FiveM Legacy on game build 2699 or newer (PSRP runs 3258) lists some vehicle
+upgrades and clothing pieces made for GTA V Enhanced (gen9), but the game
+refuses to fit them, so picking one did nothing. Upstream vMenu Enhanced fixed
+the same thing on 6 November 2026 (`28f9f7c8`, `a1edbbd8`, in enhanced-v1.0.22).
+This is PSRP's own version for this code; no upstream code was copied.
+
+- **Vehicle Options > Mod Menu:** every upgrade list (rims included) leaves out
+  the upgrades the game says are gen9 only (`IS_VEHICLE_MOD_GEN9_EXCLUSIVE`,
+  called by hash, because CitizenFX.Core.Client 1.0.10188 has no wrapper). The
+  `[n/total]` counts follow the shorter list. Each list keeps which upgrade
+  each row fits (`modListUpgrades`), so a row no longer means "upgrade number
+  row − 1". On a game build without the native the check turns itself off and
+  writes one line to F8.
+- **MP Ped Customization > Clothes** and **Player Appearance > Customize Ped:**
+  ← and → step past gen9-only pieces (`IsPedComponentVariationGen9Exclusive`).
+  The rows keep the game's drawable numbers, so "Drawable #N" still matches the
+  numbers in outfits and department presets. The skipped pieces still count in
+  "(of N)". Props have no gen9 check in the game, so they are unchanged. The
+  collection clothing menu already skipped these pieces.
+- New `vMenu/Gen9Skip.cs` (the list logic, no game calls) and
+  `vMenu/Gen9Parts.cs` (the two game checks).
+
+Reviewed with `tools/ilcompare` against `build-2026-11-25-2`: only the two new
+classes, `UpdateMods` and its list handler, the two clothing list handlers and
+their lambdas changed, plus the compiler renumbering two local functions in
+`VehicleOptions` (`|146_` → `|147_`).
+
+Tests: new `tests/gen9-parts` (the skip logic, wrapping both ways, all-gen9
+lists, and the wiring in the three menus). All tests in AGENTS.md pass.
+
+Deploy: hash the installed `vMenuClient.net.dll`. If it is `82844471…`
+(`build-2026-11-25-2`), copy only `vMenuClient.net.dll` and `restart vMenu`.
+From an older build, deploy `build-2026-11-25-2` first (below), or its files
+together with this DLL.
+
+Not checked in game: how many upgrades and pieces are hidden on 3258, that the
+lists still fit the right upgrade after a wheel type change, and that ← and →
+land on wearable clothing.
 
 ## November 25, 2026 — `build-2026-11-25-2`: copying through psrp_notify's copy box (client DLL, `client/exports.lua`, `client/outfitCodes.lua`)
 

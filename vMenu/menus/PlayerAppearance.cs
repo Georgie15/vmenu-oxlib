@@ -680,6 +680,17 @@ namespace vMenuClient.menus
                 if (drawablesMenuListItems.ContainsKey(item))
                 {
                     var drawableID = drawablesMenuListItems[item];
+
+                    // Step past pieces only GTA V Enhanced can wear. The rows keep the game's drawable numbers.
+                    var ped = Game.PlayerPed.Handle;
+                    var fittable = Gen9Skip.Step(oldListIndex, newListIndex, item.ItemsCount,
+                        drawable => Gen9Parts.IsClothing(ped, drawableID, drawable));
+                    if (fittable != newListIndex)
+                    {
+                        newListIndex = fittable;
+                        item.ListIndex = fittable;
+                    }
+
                     SetPedComponentVariation(Game.PlayerPed.Handle, drawableID, newListIndex, 0, 0);
                 }
                 else if (propsMenuListItems.ContainsKey(item))

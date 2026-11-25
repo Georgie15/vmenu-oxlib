@@ -35,6 +35,9 @@ namespace vMenuClient.menus
 
         public static Dictionary<uint, Dictionary<int, string>> VehicleExtras;
 
+        // For each upgrade list in the mod menu, the upgrade each row after Stock fits (UpdateMods).
+        private readonly Dictionary<MenuListItem, List<int>> modListUpgrades = new();
+
         // Public variables (getters only), return the private variables.
         // The vehicle "Toggle Vehicle Visibility" hid; made visible again when the player leaves it.
         internal static int HiddenVehicle { get; set; } = 0;
@@ -2402,6 +2405,8 @@ namespace vMenuClient.menus
 
             }
 
+            modListUpgrades.Clear();
+
             // Get the vehicle.
             var veh = GetVehicle();
 
@@ -2426,26 +2431,34 @@ namespace vMenuClient.menus
                     // Create a list to all available upgrades for this modtype.
                     var modlist = new List<string>();
 
+                    // The upgrades the game will fit. Ones made only for GTA V Enhanced are left out.
+                    var modHandle = veh.Handle;
+                    var modTypeId = (int)mod.ModType;
+                    var fittable = Gen9Skip.Kept(mod.ModCount, x => Gen9Parts.IsVehicleMod(modHandle, modTypeId, x));
+                    var optionCount = fittable.Count + 1;
+
                     // Get the current item index ({current}/{max upgrades})
-                    var currentItem = $"[1/{mod.ModCount + 1}]";
+                    var currentItem = $"[1/{optionCount}]";
 
                     // Add the stock value for this mod.
                     var name = $"Stock {typeName} {currentItem}";
                     modlist.Add(name);
 
                     // Loop through all available upgrades for this specific mod type.
-                    for (var x = 0; x < mod.ModCount; x++)
+                    for (var position = 0; position < fittable.Count; position++)
                     {
+                        var x = fittable[position];
+
                         // Create the item index.
-                        currentItem = $"[{2 + x}/{mod.ModCount + 1}]";
+                        currentItem = $"[{2 + position}/{optionCount}]";
 
                         // Create the name (again, converting to proper case), then add the name.
                         name = mod.GetLocalizedModName(x) != "" ? $"{ToProperString(mod.GetLocalizedModName(x))} {currentItem}" : $"{typeName} #{x} {currentItem}";
                         modlist.Add(name);
                     }
 
-                    // Create the MenuListItem for this mod type.
-                    var currIndex = GetVehicleMod(veh.Handle, (int)mod.ModType) + 1;
+                    // Create the MenuListItem for this mod type. Stock (or an upgrade not in the list) is the first row.
+                    var currIndex = fittable.IndexOf(GetVehicleMod(veh.Handle, modTypeId)) + 1;
                     var modTypeListItem = new MenuListItem(
                         typeName,
                         modlist,
@@ -2455,6 +2468,7 @@ namespace vMenuClient.menus
                     {
                         ItemData = (int)mod.ModType
                     };
+                    modListUpgrades[modTypeListItem] = fittable;
 
                     // Add the list item to the menu.
                     VehicleModMenu.AddMenuItem(modTypeListItem);
@@ -2666,7 +2680,12 @@ namespace vMenuClient.menus
                     // If the affected list is actually a "dynamically" generated list, continue. If it was one of the manual options, go to else.
                     if (item2.ItemData is int modType)
                     {
+                        // Row 0 is stock (-1); the other rows are the upgrades the list kept.
                         var selectedUpgrade = item2.ListIndex - 1;
+                        if (selectedUpgrade >= 0 && modListUpgrades.TryGetValue(item2, out var upgrades))
+                        {
+                            selectedUpgrade = selectedUpgrade < upgrades.Count ? upgrades[selectedUpgrade] : -1;
+                        }
                         var customWheels = GetVehicleModVariation(veh.Handle, 23);
 
                         SetVehicleMod(veh.Handle, modType, selectedUpgrade, customWheels);

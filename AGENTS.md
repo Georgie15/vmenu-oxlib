@@ -104,6 +104,7 @@ python tests/upstream-bug-fixes/test_upstream_bug_fixes.py
 python tests/psrp-skin/test_psrp_skin.py
 dotnet run --project tests/player-guide
 python tests/player-guide/test_player_guide.py
+dotnet run --project tests/gen9-parts
 ```
 
 They need Python, the .NET 9 SDK and Lua 5.4. None of them run FiveM, so

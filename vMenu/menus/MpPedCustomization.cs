@@ -1222,6 +1222,16 @@ namespace vMenuClient.menus
                     componentIndex += 1;
                 }
 
+                // Step past pieces only GTA V Enhanced can wear. The rows keep the game's drawable numbers.
+                var ped = Game.PlayerPed.Handle;
+                var fittable = Gen9Skip.Step(oldSelectionIndex, newSelectionIndex, listItem.ItemsCount,
+                    drawable => Gen9Parts.IsClothing(ped, componentIndex, drawable));
+                if (fittable != newSelectionIndex)
+                {
+                    newSelectionIndex = fittable;
+                    listItem.ListIndex = fittable;
+                }
+
                 var textureIndex = GetPedTextureVariation(Game.PlayerPed.Handle, componentIndex);
                 var newTextureIndex = 0;
                 SetPedComponentVariation(Game.PlayerPed.Handle, componentIndex, newSelectionIndex, newTextureIndex, 0);
